@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fixed DOCX handling for Word track-changes (`w:ins` / `w:del`) and run-split strings by flattening revisions and replacing at paragraph level in OOXML.
+- Added fictional track-changes regression fixture.
+- Declared `lxml` as a direct dependency.
+
 ## 0.1.0 - 2026-08-20
 
 - Initial public preview of `legal-redactor`.
