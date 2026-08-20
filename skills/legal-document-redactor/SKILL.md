@@ -29,9 +29,11 @@ Override structural defaults when needed:
 
 1. Work on **local copies**. Do not overwrite the only original.
 2. Output suffix **must** match input (`.docx`→`.docx`, `.pdf`→`.pdf`).
-3. v0.1 PDF support = **text-layer PDF only**. If there is no extractable text, stop and say OCR/scanned PDF is out of scope.
-4. Residual structural scan must **PASS** before delivery (unless the user explicitly accepts residual risk).
-5. Examples and tests in the repo are **fictional**. Do not commit real client ledgers.
+3. v0.3 PDF support:
+   - **Text-layer PDF**: `redact` as before.
+   - **Scanned / image-only PDF**: `ocr` then redact markdown for AI/text use; `redact-scan` for court visual black boxes. See [references/scanned-pdf.md](references/scanned-pdf.md).
+4. Residual structural scan must **PASS** before delivery of text outputs (unless the user explicitly accepts residual risk). Visual `redact-scan` requires **human page-flip** (OCR boxes can miss).
+5. Examples and tests in the repo are **fictional**. Do not commit real client ledgers or OCR dumps.
 6. Human review is required. A passing scan does not prove every natural-language identifier was caught.
 
 ## Workflow
@@ -142,9 +144,16 @@ legal-redactor redact contract.docx --mode production --keep-categories uscc -o 
 
 # residual verify must use the same keep/extra flags as redact
 legal-redactor verify out.docx --mode production --keep-categories uscc
+
+# scanned PDF → text (for AI / notes)
+legal-redactor ocr scan.pdf -o workdir/
+legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.json -o workdir/ai.md
+
+# scanned PDF → visual black boxes (court production)
+legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.2)
+## Limits (v0.3)
 
 - No scanned-PDF black boxes / OCR pipeline
 - DOCX run-level fancy formatting may collapse to first-run style when a paragraph is rewritten

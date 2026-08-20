@@ -18,7 +18,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="legal-redactor",
         description=(
             "Local-first dual-mode redaction for Chinese legal documents. "
-            "Modes: ai (aggressive, for online models) | production (selective, for court/opponent)."
+            "Modes: ai (aggressive, for online models) | production (selective, for court/opponent). "
+            "Scanned PDFs: use `ocr` then redact text, or `redact-scan` for visual black boxes."
         ),
     )
     p.add_argument("--version", action="version", version=f"legal-redactor {__version__}")
@@ -98,6 +99,43 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="CAT",
         help="Same meaning as in redact/scan",
     )
+
+    po = sub.add_parser(
+        "ocr",
+        help="OCR a scanned PDF to local markdown (requires Tesseract chi_sim)",
+    )
+    po.add_argument("input", type=Path, help="Scanned PDF")
+    po.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory for ocr.md / ocr.normalized.md / ocr_meta.json",
+    )
+    po.add_argument("--dpi", type=int, default=200)
+    po.add_argument("--lang", default="chi_sim+eng")
+    po.add_argument("--tesseract", type=Path, default=None, help="Path to tesseract.exe")
+    po.add_argument("--tessdata", type=Path, default=None, help="TESSDATA_PREFIX directory")
+
+    prs = sub.add_parser(
+        "redact-scan",
+        help="Black-box structural PII on a scanned PDF (court visual path; requires Tesseract)",
+    )
+    prs.add_argument("input", type=Path)
+    prs.add_argument("-o", "--output", type=Path, required=True, help="Output PDF path")
+    prs.add_argument(
+        "--mode",
+        choices=("ai", "production"),
+        default="production",
+        help="Category set (default production: strip contacts/accounts, keep parties visually)",
+    )
+    prs.add_argument("--dpi", type=int, default=200)
+    prs.add_argument("--lang", default="chi_sim+eng")
+    prs.add_argument("--work-dir", type=Path, default=None)
+    prs.add_argument("--keep-categories", action="append", default=[], metavar="CAT")
+    prs.add_argument("--extra-categories", action="append", default=[], metavar="CAT")
+    prs.add_argument("--tesseract", type=Path, default=None)
+    prs.add_argument("--tessdata", type=Path, default=None)
 
     return p
 
@@ -185,6 +223,50 @@ def main(argv: list[str] | None = None) -> int:
                 for h in report.hits:
                     print(f"  - {h['category']}: {h['text']}")
             return 0 if report.ok else 2
+
+        if args.command == "ocr":
+            from .ocr_engine import ocr_pdf
+
+            result = ocr_pdf(
+                args.input,
+                args.output_dir,
+                dpi=args.dpi,
+                lang=args.lang,
+                tesseract_cmd=args.tesseract,
+                tessdata_dir=args.tessdata,
+            )
+            print(f"pages:      {len(result.pages)}")
+            print(f"raw:        {result.raw_path}")
+            print(f"normalized: {result.normalized_path}")
+            print(f"meta:       {result.meta_path}")
+            print(f"chars:      {len(result.text_normalized)}")
+            print("next: legal-redactor redact <normalized.md> --mode production -o out.md")
+            return 0
+
+        if args.command == "redact-scan":
+            from .pipeline import _parse_category_list
+            from .scan_pdf import redact_scanned_pdf
+
+            result = redact_scanned_pdf(
+                args.input,
+                args.output,
+                mode=args.mode,
+                dpi=args.dpi,
+                lang=args.lang,
+                keep_categories=_parse_category_list(_split_cats(args.keep_categories)),
+                extra_categories=_parse_category_list(_split_cats(args.extra_categories)),
+                tesseract_cmd=args.tesseract,
+                tessdata_dir=args.tessdata,
+                work_dir=args.work_dir,
+            )
+            print(f"mode:    {result.mode}")
+            print(f"output:  {result.output_path}")
+            print(f"hits:    {len(result.hits)}")
+            print(f"bbox:    {result.hits_path}")
+            print(
+                "NOTE: best-effort OCR boxes. Human page-flip review required before court filing."
+            )
+            return 0
 
     except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(f"ERROR: {exc}", file=sys.stderr)

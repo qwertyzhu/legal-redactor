@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-20
+
+- Added `legal-redactor ocr` for local Tesseract OCR of scanned PDFs → `ocr.md` + CJK-normalized markdown.
+- Added `legal-redactor redact-scan` for production court path: black-box structural PII on image-only PDFs via OCR word boxes.
+- Documented scanned-PDF workflow under the skill package (`references/scanned-pdf.md`).
+- Clearer error when `redact` is pointed at a textless PDF (points to `ocr` / `redact-scan`).
+
 ## 0.2.0 - 2026-08-20
 
 - Added `--keep-categories` / `--extra-categories` on `redact`, `scan`, and `verify` so production filings can keep USCC (or other structural types) without failing residual scan.

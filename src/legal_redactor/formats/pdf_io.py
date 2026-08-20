@@ -36,8 +36,10 @@ def redact_pdf(
     try:
         if not _has_text_layer(doc):
             raise ValueError(
-                "PDF has no extractable text layer. "
-                "v0.1 supports text-layer PDFs only; OCR/scanned pages are out of scope."
+                "PDF has no extractable text layer (likely a scan). "
+                "Use: legal-redactor ocr INPUT.pdf -o workdir/ "
+                "then redact the normalized markdown; "
+                "or for court visual cover-up: legal-redactor redact-scan INPUT.pdf -o OUT.pdf"
             )
 
         for page in doc:

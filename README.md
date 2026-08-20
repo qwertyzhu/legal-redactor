@@ -57,10 +57,16 @@ legal-redactor redact contract.docx --mode production --entities entities.json -
 legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
 legal-redactor verify out.docx --mode production --keep-categories uscc
 
+# Scanned PDF (no text layer)
+legal-redactor ocr scan.pdf -o workdir/
+legal-redactor redact workdir/ocr.normalized.md --mode production -o workdir/out.md
+legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
+
 # Residual check
 legal-redactor verify contract.redacted-ai.docx --mode ai
 ```
 
+Scanned workflow: `skills/legal-document-redactor/references/scanned-pdf.md`.  
 Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  
 Optional structural draft: `python scripts/draft_entities.py INPUT.docx`.
 Each successful run also writes:
@@ -88,9 +94,10 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.2)
+## Limits (v0.3)
 
-- PDF: text layer only (no OCR / scanned black-box pipeline)
+- PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
+- `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - Natural-language names need `entities.json` (regex will not catch them reliably)
 - DOCX paragraph rewrite may simplify run-level formatting
 - Not legal advice; not a substitute for firm confidentiality procedure
