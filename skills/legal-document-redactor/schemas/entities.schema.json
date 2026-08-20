@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RedactionEntities",
+  "type": "object",
+  "required": ["entities"],
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["original", "category"],
+        "properties": {
+          "original": { "type": "string", "minLength": 1 },
+          "category": {
+            "type": "string",
+            "enum": [
+              "person",
+              "organization",
+              "address",
+              "work_title",
+              "amount",
+              "other",
+              "id_card",
+              "mobile",
+              "landline",
+              "email",
+              "bank_account",
+              "case_number",
+              "uscc"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": ["party", "third_party", "counsel", "other", "unknown", "structural"]
+          },
+          "replacement": { "type": "string" },
+          "notes": { "type": "string" },
+          "source": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,14 @@
+{
+  "evals": [
+    {
+      "id": "ai-docx-fiction",
+      "prompt": "Using legal-document-redactor in ai mode, redact examples/fictional sample contract DOCX with entities_ai.json. Residual scan must pass and party names must be gone.",
+      "expected": "same-format docx, ledger present, no raw mobile/id/case number"
+    },
+    {
+      "id": "production-keeps-parties",
+      "prompt": "Using production mode on the same fiction, keep 郝测一 and company names, strip phones and ID.",
+      "expected": "parties remain, structural contacts removed, residual pass"
+    }
+  ]
+}

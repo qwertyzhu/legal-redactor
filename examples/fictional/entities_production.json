@@ -1,0 +1,22 @@
+[
+  {
+    "original": "郝测一",
+    "category": "person",
+    "role": "party"
+  },
+  {
+    "original": "沈例二",
+    "category": "person",
+    "role": "party"
+  },
+  {
+    "original": "北测文化传播有限公司",
+    "category": "organization",
+    "role": "party"
+  },
+  {
+    "original": "南例网络科技有限公司",
+    "category": "organization",
+    "role": "party"
+  }
+]

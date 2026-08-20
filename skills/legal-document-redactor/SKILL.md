@@ -1,0 +1,129 @@
+---
+name: legal-document-redactor
+description: Redact Chinese legal documents (contracts, pleadings, client data) in dual modes—ai (aggressive desensitization before online AI upload) and production (selective redaction before court or opponent production)—returning the same file format (DOCX→DOCX, PDF→PDF, text→text) plus a local ledger and residual scan. Use whenever the user mentions 脱敏, 去标识, 匿名化, redact, anonymize, strip PII, 交给网上AI前处理, 出证前遮盖, or needs a privacy-safe copy of a legal file.
+---
+
+# Legal Document Redactor
+
+Produce a **same-format** redacted copy of a local legal document, with an auditable replacement ledger and a residual structural-PII scan.
+
+This skill drives the `legal-redactor` Python package. Keep judgment (what is a party name / work title) in the agent; keep replacement and verification deterministic in the CLI.
+
+## Choose a mode first
+
+| Mode | Use when | Keeps | Removes |
+|---|---|---|---|
+| `ai` | Upload to online AI, public fixtures, internal notes that must not identify the matter | Legal structure only | Names, orgs, case nos, IDs, phones, emails, accounts, USCC, addresses, work titles, exact amounts (via entities) |
+| `production` | Produce to court or opposing party | Party identity, case number, operative commercial terms | ID numbers, phones, emails, bank accounts, USCC, and any entity you mark `third_party` |
+
+**Never** use `ai` mode output as a court filing.  
+**Never** paste the ledger (original→replacement map) into an online model chat.
+
+## Non-negotiable safeguards
+
+1. Work on **local copies**. Do not overwrite the only original.
+2. Output suffix **must** match input (`.docx`→`.docx`, `.pdf`→`.pdf`).
+3. v0.1 PDF support = **text-layer PDF only**. If there is no extractable text, stop and say OCR/scanned PDF is out of scope.
+4. Residual structural scan must **PASS** before delivery (unless the user explicitly accepts residual risk).
+5. Examples and tests in the repo are **fictional**. Do not commit real client ledgers.
+6. Human review is required. A passing scan does not prove every natural-language identifier was caught.
+
+## Workflow
+
+### 1. Confirm mode and paths
+
+Ask if unclear:
+
+- destination: online AI vs court/opponent;
+- input path;
+- whether party names must remain (`production`) or go (`ai`).
+
+### 2. Extract and list entities (agent judgment)
+
+Read the document (or run a local text extract). Build `entities.json`:
+
+```json
+{
+  "entities": [
+    {"original": "郝测一", "category": "person", "role": "party"},
+    {"original": "北测文化传播有限公司", "category": "organization", "role": "party"},
+    {"original": "《星河测例》", "category": "work_title", "role": "other", "replacement": "某作品"},
+    {"original": "1280000", "category": "amount", "role": "other", "replacement": "X"}
+  ]
+}
+```
+
+Categories: `person` | `organization` | `address` | `work_title` | `amount` | `other`  
+Roles: `party` | `third_party` | `counsel` | `other`
+
+In `production` mode, `person` / `organization` / `address` with `role=party` and **no** `replacement` are **kept**.
+
+Structural items (ID / mobile / email / bank / USCC / case no.) are auto-detected; you do not need to list them unless you want custom replacements.
+
+See [references/methodology.md](references/methodology.md) and [schemas/entities.schema.json](schemas/entities.schema.json).
+
+### 3. Run deterministic redaction
+
+From any directory (package installed):
+
+```bash
+legal-redactor redact INPUT.docx --mode ai --entities entities.json -o OUTPUT.docx
+legal-redactor redact INPUT.pdf --mode production --entities entities.json -o OUTPUT.pdf
+```
+
+Or via the repo wrapper:
+
+```bash
+python skills/legal-document-redactor/scripts/redact_cli.py redact INPUT.docx --mode ai --entities entities.json -o OUTPUT.docx
+```
+
+Artifacts written next to the output (or `--work-dir`):
+
+- `*.ledger.json` — full mapping (**local only**)
+- `*.residual.json` — structural residual scan
+- `*.summary.md` — human table
+
+### 4. Verify
+
+```bash
+legal-redactor verify OUTPUT.docx --mode ai
+```
+
+Delivery checklist:
+
+- [ ] mode matches destination
+- [ ] same file format as input
+- [ ] residual scan PASS
+- [ ] spot-check party names (kept or removed as intended)
+- [ ] ledger not uploaded anywhere
+- [ ] user told: structural pass ≠ perfect NL anonymization
+
+### 5. Report to the user
+
+Return:
+
+1. output path  
+2. mode  
+3. counts replaced  
+4. residual status  
+5. anything you could not confidently classify (ask, do not guess)
+
+## CLI cheatsheet
+
+```bash
+# detect only
+legal-redactor scan contract.docx --mode ai --entities entities.json
+
+# redact
+legal-redactor redact contract.docx --mode ai --entities entities.json -o contract.redacted-ai.docx
+
+# keep an extra string unchanged
+legal-redactor redact contract.docx --mode production --preserve "北京互联网法院" -o out.docx
+```
+
+## Limits (v0.1)
+
+- No scanned-PDF black boxes / OCR pipeline
+- DOCX run-level fancy formatting may collapse to first-run style when a paragraph is rewritten
+- Natural-language names require agent/entities JSON; pure regex will miss them
+- Cross-file consistent aliases are per-run unless you reuse the same entities file
