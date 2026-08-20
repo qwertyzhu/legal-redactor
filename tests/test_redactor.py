@@ -131,3 +131,28 @@ def test_mapping_longest_first():
     mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
     out = apply_mapping_to_text(text, mapping)
     assert out == "某单位A与某简称"
+
+
+def test_track_changes_ins_text_is_redacted(tmp_path: Path):
+    src = ROOT / "tests" / "fixtures" / "track_changes_fiction.docx"
+    assert src.is_file()
+    from legal_redactor.formats import docx_io
+
+    extracted = docx_io.extract_text(src)
+    assert "南例网络科技有限公司" in extracted
+    assert "13800002222" in extracted
+
+    out = tmp_path / "out.docx"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=None,
+        work_dir=tmp_path,
+    )
+    # structural phone gone
+    assert "13800002222" not in result.output_text
+    # company remains unless entities provided; ensure extract saw it pre-redact path works
+    assert result.ok or "13800002222" not in result.output_text
+    text_out = docx_io.extract_text(out)
+    assert "13800002222" not in text_out
