@@ -45,9 +45,15 @@ legal-redactor redact contract.docx --mode ai --entities entities.json -o contra
 
 legal-redactor redact contract.docx --mode production --entities entities.json -o contract.redacted-production.docx
 
+# 起诉材料需要保留统一社会信用代码时：
+legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
+legal-redactor verify out.docx --mode production --keep-categories uscc
+
 legal-redactor verify contract.redacted-ai.docx --mode ai
 ```
 
+`entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
+也可先跑 `python scripts/draft_entities.py INPUT.docx` 生成结构性草稿，再手工补姓名/单位。
 每次成功运行还会生成：
 
 - `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
@@ -63,7 +69,7 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.1）
+## 限制（v0.2）
 
 - PDF 仅支持可复制文字层（不做扫描件 OCR 涂黑）
 - 自然语言姓名依赖 `entities.json`

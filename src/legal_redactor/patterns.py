@@ -145,11 +145,33 @@ DEFAULT_PLACEHOLDERS = {
 }
 
 
-def categories_for_mode(mode: str) -> set[str]:
-    """Which structural categories auto-redact in each mode."""
+STRUCTURAL_CATEGORIES = frozenset(
+    {
+        "id_card",
+        "mobile",
+        "landline",
+        "email",
+        "bank_account",
+        "case_number",
+        "uscc",
+    }
+)
+
+
+def categories_for_mode(
+    mode: str,
+    *,
+    keep_categories: set[str] | None = None,
+    extra_categories: set[str] | None = None,
+) -> set[str]:
+    """Which structural categories auto-redact in each mode.
+
+    keep_categories: remove from the mode default set (e.g. keep USCC on a filing).
+    extra_categories: add beyond the mode default (must be known structural types).
+    """
     mode = mode.lower().strip()
     if mode == "ai":
-        return {
+        cats = {
             "id_card",
             "mobile",
             "landline",
@@ -158,9 +180,9 @@ def categories_for_mode(mode: str) -> set[str]:
             "case_number",
             "uscc",
         }
-    if mode == "production":
+    elif mode == "production":
         # Keep case numbers and party identity by default; strip high-risk contact/account data.
-        return {
+        cats = {
             "id_card",
             "mobile",
             "landline",
@@ -168,7 +190,20 @@ def categories_for_mode(mode: str) -> set[str]:
             "bank_account",
             "uscc",
         }
-    raise ValueError(f"unknown mode: {mode!r}; expected 'ai' or 'production'")
+    else:
+        raise ValueError(f"unknown mode: {mode!r}; expected 'ai' or 'production'")
+
+    keep = {c.strip().lower() for c in (keep_categories or set()) if c and c.strip()}
+    extra = {c.strip().lower() for c in (extra_categories or set()) if c and c.strip()}
+    unknown = (keep | extra) - STRUCTURAL_CATEGORIES
+    if unknown:
+        raise ValueError(
+            f"unknown structural category/ies: {sorted(unknown)}; "
+            f"expected one of {sorted(STRUCTURAL_CATEGORIES)}"
+        )
+    cats |= extra
+    cats -= keep
+    return cats
 
 
 def iter_unique_texts(hits: Iterable[PatternHit]) -> list[str]:

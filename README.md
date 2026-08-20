@@ -53,10 +53,16 @@ legal-redactor redact contract.docx --mode ai --entities entities.json -o contra
 # Redact for court/opponent production
 legal-redactor redact contract.docx --mode production --entities entities.json -o contract.redacted-production.docx
 
+# Keep USCC on a filing that requires it
+legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
+legal-redactor verify out.docx --mode production --keep-categories uscc
+
 # Residual check
 legal-redactor verify contract.redacted-ai.docx --mode ai
 ```
 
+Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  
+Optional structural draft: `python scripts/draft_entities.py INPUT.docx`.
 Each successful run also writes:
 
 - `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
@@ -82,7 +88,7 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.1)
+## Limits (v0.2)
 
 - PDF: text layer only (no OCR / scanned black-box pipeline)
 - Natural-language names need `entities.json` (regex will not catch them reliably)

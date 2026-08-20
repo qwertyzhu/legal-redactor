@@ -16,6 +16,12 @@ This skill drives the `legal-redactor` Python package. Keep judgment (what is a 
 | `ai` | Upload to online AI, public fixtures, internal notes that must not identify the matter | Legal structure only | Names, orgs, case nos, IDs, phones, emails, accounts, USCC, addresses, work titles, exact amounts (via entities) |
 | `production` | Produce to court or opposing party | Party identity, case number, operative commercial terms | ID numbers, phones, emails, bank accounts, USCC, and any entity you mark `third_party` |
 
+Override structural defaults when needed:
+
+- `--keep-categories uscc` — keep unified social credit codes on a filing that requires them
+- `--keep-categories uscc,bank_account` — comma-separated or repeatable
+- `--extra-categories case_number` — strip case numbers even in `production`
+
 **Never** use `ai` mode output as a court filing.  
 **Never** paste the ledger (original→replacement map) into an online model chat.
 
@@ -60,7 +66,16 @@ In `production` mode, `person` / `organization` / `address` with `role=party` an
 
 Structural items (ID / mobile / email / bank / USCC / case no.) are auto-detected; you do not need to list them unless you want custom replacements.
 
+Starter template: [references/entities.template.json](references/entities.template.json).  
 See [references/methodology.md](references/methodology.md) and [schemas/entities.schema.json](schemas/entities.schema.json).
+
+Optional local draft of structural rows only:
+
+```bash
+python scripts/draft_entities.py INPUT.docx -o entities.draft.json
+```
+
+Then fill natural-language names yourself (the draft does not invent parties).
 
 ### 3. Run deterministic redaction
 
@@ -69,6 +84,8 @@ From any directory (package installed):
 ```bash
 legal-redactor redact INPUT.docx --mode ai --entities entities.json -o OUTPUT.docx
 legal-redactor redact INPUT.pdf --mode production --entities entities.json -o OUTPUT.pdf
+# court form needs USCC kept:
+legal-redactor redact INPUT.docx --mode production --entities entities.json --keep-categories uscc -o OUTPUT.docx
 ```
 
 Or via the repo wrapper:
@@ -119,9 +136,15 @@ legal-redactor redact contract.docx --mode ai --entities entities.json -o contra
 
 # keep an extra string unchanged
 legal-redactor redact contract.docx --mode production --preserve "北京互联网法院" -o out.docx
+
+# keep structural category (e.g. USCC) on production filings
+legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
+
+# residual verify must use the same keep/extra flags as redact
+legal-redactor verify out.docx --mode production --keep-categories uscc
 ```
 
-## Limits (v0.1)
+## Limits (v0.2)
 
 - No scanned-PDF black boxes / OCR pipeline
 - DOCX run-level fancy formatting may collapse to first-run style when a paragraph is rewritten

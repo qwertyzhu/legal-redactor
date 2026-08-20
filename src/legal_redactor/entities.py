@@ -94,10 +94,14 @@ def build_plan(
     mode: str,
     entities_file: Path | None = None,
     preserve: list[str] | None = None,
+    keep_categories: set[str] | None = None,
+    extra_categories: set[str] | None = None,
 ) -> RedactionPlan:
     """Merge structural detections with optional agent/manual entity list."""
     mode = mode.lower().strip()
-    cats = categories_for_mode(mode)
+    cats = categories_for_mode(
+        mode, keep_categories=keep_categories, extra_categories=extra_categories
+    )
     preserve_set = {p.strip() for p in (preserve or []) if p and p.strip()}
     plan = RedactionPlan(mode=mode)
 

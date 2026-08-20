@@ -25,8 +25,16 @@ class ResidualReport:
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def scan_residual(text: str, mode: str) -> ResidualReport:
-    cats = categories_for_mode(mode)
+def scan_residual(
+    text: str,
+    mode: str,
+    *,
+    keep_categories: set[str] | None = None,
+    extra_categories: set[str] | None = None,
+) -> ResidualReport:
+    cats = categories_for_mode(
+        mode, keep_categories=keep_categories, extra_categories=extra_categories
+    )
     hits = [h for h in detect_structural(text) if h.category in cats]
     # Also flag if original-looking placeholders failed and raw digits remain in ID shape etc.
     serializable = [

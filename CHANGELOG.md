@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-20
+
+- Added `--keep-categories` / `--extra-categories` on `redact`, `scan`, and `verify` so production filings can keep USCC (or other structural types) without failing residual scan.
+- Added fictional full-risk 委托维权服务协议 sample + entities (`examples/fictional/sample_weiquan_text.py`).
+- Added entities template under the skill package and `scripts/draft_entities.py` for structural drafts.
 - Fixed DOCX handling for Word track-changes (`w:ins` / `w:del`) and run-split strings by flattening revisions and replacing at paragraph level in OOXML.
 - Added fictional track-changes regression fixture.
 - Declared `lxml` as a direct dependency.

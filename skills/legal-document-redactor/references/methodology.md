@@ -31,10 +31,20 @@ Default remove:
 - resident ID numbers
 - personal mobiles / emails
 - bank account numbers
-- USCC when not required on that page (still auto-stripped in v0.1 structural set; override with `--preserve` if the filing needs it)
+- USCC when not required on that page (default stripped; keep with `--keep-categories uscc` when the form needs it, or `--preserve` for one exact string)
 - third-party natural persons unrelated to the dispute (mark `role=third_party` in entities)
 
 If a court form **requires** an ID number, do not use this tool to invent blanks—use the real filing package under firm procedure.
+
+### Structural category overrides
+
+| Flag | Effect |
+|---|---|
+| `--keep-categories CAT[,CAT…]` | Do not auto-redact these structural types; residual scan also ignores them |
+| `--extra-categories CAT[,CAT…]` | Auto-redact beyond mode default (e.g. strip `case_number` in production) |
+| `--preserve TEXT` | Leave one exact string unchanged (any category) |
+
+Known structural categories: `id_card`, `mobile`, `landline`, `email`, `bank_account`, `case_number`, `uscc`.
 
 ## Process split
 

@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .formats import docx_io, pdf_io, text_io
 from .pipeline import detect_only, redact_file
 from .verify import scan_residual
-from .formats import docx_io, pdf_io, text_io
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -44,6 +44,23 @@ def _build_parser() -> argparse.ArgumentParser:
             default=[],
             help="Exact string to leave unchanged (repeatable)",
         )
+        sp.add_argument(
+            "--keep-categories",
+            action="append",
+            default=[],
+            metavar="CAT",
+            help=(
+                "Structural categories to NOT auto-redact (repeatable or comma-separated). "
+                "Examples: uscc, bank_account, case_number, mobile, email, id_card, landline"
+            ),
+        )
+        sp.add_argument(
+            "--extra-categories",
+            action="append",
+            default=[],
+            metavar="CAT",
+            help="Extra structural categories to auto-redact beyond the mode default",
+        )
 
     pr = sub.add_parser("redact", help="Redact a document and write same-format output + ledger")
     add_common(pr)
@@ -67,6 +84,20 @@ def _build_parser() -> argparse.ArgumentParser:
     pv = sub.add_parser("verify", help="Residual-scan an already redacted file")
     pv.add_argument("input", type=Path)
     pv.add_argument("--mode", choices=("ai", "production"), required=True)
+    pv.add_argument(
+        "--keep-categories",
+        action="append",
+        default=[],
+        metavar="CAT",
+        help="Same meaning as in redact/scan — residual ignores these categories",
+    )
+    pv.add_argument(
+        "--extra-categories",
+        action="append",
+        default=[],
+        metavar="CAT",
+        help="Same meaning as in redact/scan",
+    )
 
     return p
 
@@ -78,6 +109,13 @@ def _extract_any(path: Path) -> str:
     if suffix == ".pdf":
         return pdf_io.extract_text(path)
     return text_io.extract_text(path)
+
+
+def _split_cats(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in values or []:
+        out.extend(part.strip() for part in str(raw).split(",") if part.strip())
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
                 entities_path=args.entities,
                 preserve=args.preserve,
                 work_dir=args.work_dir,
+                keep_categories=_split_cats(args.keep_categories),
+                extra_categories=_split_cats(args.extra_categories),
             )
             print(f"mode:        {result.mode}")
             print(f"output:      {result.output_path}")
@@ -110,11 +150,22 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "scan":
-            payload = detect_only(args.input, mode=args.mode, entities_path=args.entities)
+            payload = detect_only(
+                args.input,
+                mode=args.mode,
+                entities_path=args.entities,
+                preserve=args.preserve,
+                keep_categories=_split_cats(args.keep_categories),
+                extra_categories=_split_cats(args.extra_categories),
+            )
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
             else:
                 print(f"mode:     {payload['mode']}")
+                if payload.get("keep_categories"):
+                    print(f"keep:     {', '.join(payload['keep_categories'])}")
+                if payload.get("extra_categories"):
+                    print(f"extra:    {', '.join(payload['extra_categories'])}")
                 print(f"replace:  {payload['would_replace']} entities")
                 cur = payload["current_structural_hits"]
                 print(f"current:  {cur['summary']}")
@@ -123,8 +174,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "verify":
+            from .pipeline import _parse_category_list
+
             text = _extract_any(Path(args.input))
-            report = scan_residual(text, mode=args.mode)
+            keep = _parse_category_list(_split_cats(args.keep_categories))
+            extra = _parse_category_list(_split_cats(args.extra_categories))
+            report = scan_residual(text, mode=args.mode, keep_categories=keep, extra_categories=extra)
             print(report.summary)
             if report.hits:
                 for h in report.hits:

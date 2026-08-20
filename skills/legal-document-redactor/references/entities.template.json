@@ -1,0 +1,40 @@
+{
+  "_comment": "复制后改名 entities.json。删掉本注释字段。structural 类（身份证/手机/邮箱/账号/信用代码/案号）一般不用手写，CLI 会按 mode 自动检测。",
+  "entities": [
+    {
+      "original": "（自然人姓名）",
+      "category": "person",
+      "role": "party",
+      "notes": "production + role=party 且无 replacement → 保留；ai 模式会替换"
+    },
+    {
+      "original": "（单位全称）",
+      "category": "organization",
+      "role": "party"
+    },
+    {
+      "original": "（第三人/证人姓名）",
+      "category": "person",
+      "role": "third_party",
+      "replacement": "某第三人"
+    },
+    {
+      "original": "（住所地全文）",
+      "category": "address",
+      "role": "party"
+    },
+    {
+      "original": "《作品名》",
+      "category": "work_title",
+      "role": "other",
+      "replacement": "某作品"
+    },
+    {
+      "original": "1280000",
+      "category": "amount",
+      "role": "other",
+      "replacement": "X",
+      "notes": "仅 ai 模式或确实需要隐藏金额时填写"
+    }
+  ]
+}

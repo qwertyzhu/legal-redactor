@@ -1,0 +1,40 @@
+{
+  "entities": [
+    {
+      "original": "西测影业有限公司",
+      "category": "organization",
+      "role": "party"
+    },
+    {
+      "original": "东例律师事务所（普通合伙）",
+      "category": "organization",
+      "role": "party"
+    },
+    {
+      "original": "周测三",
+      "category": "person",
+      "role": "party"
+    },
+    {
+      "original": "钱测四",
+      "category": "person",
+      "role": "party"
+    },
+    {
+      "original": "郑测五",
+      "category": "person",
+      "role": "party"
+    },
+    {
+      "original": "《镜湖测案》",
+      "category": "work_title",
+      "role": "other",
+      "notes": "production 默认可保留作品名；若需对被告隐藏片单再给 replacement"
+    },
+    {
+      "original": "《江城样片》",
+      "category": "work_title",
+      "role": "other"
+    }
+  ]
+}

@@ -59,6 +59,16 @@ def default_output_path(input_path: Path, mode: str) -> Path:
     return input_path.with_name(f"{input_path.stem}.redacted-{mode}{input_path.suffix}")
 
 
+def _parse_category_list(values: list[str] | None) -> set[str]:
+    out: set[str] = set()
+    for raw in values or []:
+        for part in str(raw).split(","):
+            part = part.strip().lower()
+            if part:
+                out.add(part)
+    return out
+
+
 def redact_file(
     input_path: Path,
     mode: str,
@@ -66,6 +76,8 @@ def redact_file(
     entities_path: Path | None = None,
     preserve: list[str] | None = None,
     work_dir: Path | None = None,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -81,11 +93,31 @@ def redact_file(
     work_dir = Path(work_dir) if work_dir else output_path.parent
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    keep = (
+        set(keep_categories)
+        if isinstance(keep_categories, set)
+        else _parse_category_list(list(keep_categories) if keep_categories else None)
+    )
+    extra = (
+        set(extra_categories)
+        if isinstance(extra_categories, set)
+        else _parse_category_list(list(extra_categories) if extra_categories else None)
+    )
+
     source_text = _extract(input_path)
-    plan = build_plan(source_text, mode=mode, entities_file=entities_path, preserve=preserve)
+    plan = build_plan(
+        source_text,
+        mode=mode,
+        entities_file=entities_path,
+        preserve=preserve,
+        keep_categories=keep,
+        extra_categories=extra,
+    )
     mapping = plan.mapping()
     output_text = _apply(input_path, output_path, mapping)
-    residual = scan_residual(output_text, mode=mode)
+    residual = scan_residual(
+        output_text, mode=mode, keep_categories=keep, extra_categories=extra
+    )
 
     ledger_path = work_dir / f"{output_path.stem}.ledger.json"
     residual_path = work_dir / f"{output_path.stem}.residual.json"
@@ -95,7 +127,7 @@ def redact_file(
     # Side-car summary for humans
     summary_path = work_dir / f"{output_path.stem}.summary.md"
     summary_path.write_text(
-        _render_summary(input_path, output_path, plan, residual),
+        _render_summary(input_path, output_path, plan, residual, keep=keep, extra=extra),
         encoding="utf-8",
     )
 
@@ -116,6 +148,8 @@ def _render_summary(
     output_path: Path,
     plan: RedactionPlan,
     residual: ResidualReport,
+    keep: set[str] | None = None,
+    extra: set[str] | None = None,
 ) -> str:
     lines = [
         f"# Redaction summary",
@@ -125,12 +159,20 @@ def _render_summary(
         f"- output: `{output_path}`",
         f"- entities replaced: **{len(plan.entities)}**",
         f"- residual scan: **{'PASS' if residual.ok else 'FAIL'}**",
-        "",
-        "## Replacements",
-        "",
-        "| original | replacement | category | role | source |",
-        "|---|---|---|---|---|",
     ]
+    if keep:
+        lines.append(f"- keep_categories: `{', '.join(sorted(keep))}`")
+    if extra:
+        lines.append(f"- extra_categories: `{', '.join(sorted(extra))}`")
+    lines.extend(
+        [
+            "",
+            "## Replacements",
+            "",
+            "| original | replacement | category | role | source |",
+            "|---|---|---|---|---|",
+        ]
+    )
     for e in plan.entities:
         o = e.original.replace("|", "\\|")
         r = e.replacement.replace("|", "\\|")
@@ -154,12 +196,40 @@ def _render_summary(
     return "\n".join(lines)
 
 
-def detect_only(input_path: Path, mode: str, entities_path: Path | None = None) -> dict[str, Any]:
+def detect_only(
+    input_path: Path,
+    mode: str,
+    entities_path: Path | None = None,
+    preserve: list[str] | None = None,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
+) -> dict[str, Any]:
+    keep = (
+        set(keep_categories)
+        if isinstance(keep_categories, set)
+        else _parse_category_list(list(keep_categories) if keep_categories else None)
+    )
+    extra = (
+        set(extra_categories)
+        if isinstance(extra_categories, set)
+        else _parse_category_list(list(extra_categories) if extra_categories else None)
+    )
     text = _extract(Path(input_path))
-    plan = build_plan(text, mode=mode, entities_file=entities_path)
-    residual_if_unchanged = scan_residual(text, mode=mode)
+    plan = build_plan(
+        text,
+        mode=mode,
+        entities_file=entities_path,
+        preserve=preserve,
+        keep_categories=keep,
+        extra_categories=extra,
+    )
+    residual_if_unchanged = scan_residual(
+        text, mode=mode, keep_categories=keep, extra_categories=extra
+    )
     return {
         "mode": mode,
+        "keep_categories": sorted(keep),
+        "extra_categories": sorted(extra),
         "plan": plan.to_dict(),
         "would_replace": len(plan.entities),
         "current_structural_hits": residual_if_unchanged.to_dict(),

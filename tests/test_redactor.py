@@ -156,3 +156,96 @@ def test_track_changes_ins_text_is_redacted(tmp_path: Path):
     assert result.ok or "13800002222" not in result.output_text
     text_out = docx_io.extract_text(out)
     assert "13800002222" not in text_out
+
+
+def _load_weiquan() -> str:
+    spec_w = importlib.util.spec_from_file_location(
+        "sample_weiquan_text", FIXTURES / "sample_weiquan_text.py"
+    )
+    mod_w = importlib.util.module_from_spec(spec_w)
+    assert spec_w.loader is not None
+    spec_w.loader.exec_module(mod_w)
+    return mod_w.FICTIONAL_WEIQUAN
+
+
+def test_weiquan_ai_mode_strips_contacts_and_parties():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="ai",
+        entities_file=FIXTURES / "entities_weiquan_ai.json",
+    )
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "西测影业有限公司" not in text
+    assert "钱测四" not in text
+    assert "13700003333" not in text
+    assert "500101199203033456" not in text
+    assert "6222021234567890123" not in text
+    assert "91110108MA0123456X" not in text
+    assert "《镜湖测案》" not in text
+    assert "（2025）浙0192民初5678号" not in text
+    report = scan_residual(text, "ai")
+    assert report.ok, report.summary
+
+
+def test_weiquan_production_keeps_parties_strips_high_risk():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="production",
+        entities_file=FIXTURES / "entities_weiquan_production.json",
+    )
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "西测影业有限公司" in text
+    assert "东例律师事务所（普通合伙）" in text
+    assert "钱测四" in text
+    assert "13700003333" not in text
+    assert "500101199203033456" not in text
+    assert "6222021234567890123" not in text
+    assert "91110108MA0123456X" not in text
+    # case number kept by default in production
+    assert "（2025）浙0192民初5678号" in text
+    report = scan_residual(text, "production")
+    assert report.ok, report.summary
+
+
+def test_keep_categories_uscc_on_production():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="production",
+        entities_file=FIXTURES / "entities_weiquan_production.json",
+        keep_categories={"uscc"},
+    )
+    originals = {e.original for e in plan.entities}
+    assert "91110108MA0123456X" not in originals
+    assert "31310000MA0198765X" not in originals
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "91110108MA0123456X" in text
+    assert "13700003333" not in text
+    report = scan_residual(text, "production", keep_categories={"uscc"})
+    assert report.ok, report.summary
+
+
+def test_keep_categories_unknown_raises():
+    with pytest.raises(ValueError, match="unknown structural"):
+        build_plan(SAMPLE, mode="ai", keep_categories={"passport"})
+
+
+def test_pipeline_keep_categories_roundtrip(tmp_path: Path):
+    sample = _load_weiquan()
+    src = tmp_path / "weiquan.md"
+    src.write_text(sample, encoding="utf-8")
+    out = tmp_path / "weiquan.redacted-production.md"
+    result = redact_file(
+        src,
+        mode="production",
+        output_path=out,
+        entities_path=FIXTURES / "entities_weiquan_production.json",
+        work_dir=tmp_path,
+        keep_categories=["uscc"],
+    )
+    assert result.ok, result.residual.summary
+    body = out.read_text(encoding="utf-8")
+    assert "91110108MA0123456X" in body
+    assert "13700003333" not in body
