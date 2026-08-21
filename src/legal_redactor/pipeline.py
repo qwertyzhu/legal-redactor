@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from .entities import RedactionPlan, build_plan
+from .entities import RedactionPlan, build_plan, load_entities_file
 from .formats import docx_io, pdf_io, text_io
+from .suspects import Suspect, detect_suspects
 from .verify import ResidualReport, scan_residual
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
@@ -25,6 +26,8 @@ class RedactResult:
     ledger_path: Path
     residual_path: Path
     output_text: str
+    suspects: list[Suspect]
+    suspects_path: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -142,14 +145,47 @@ def redact_file(
         output_text, mode=mode, keep_categories=keep, extra_categories=extra
     )
 
+    known = {e.original for e in plan.entities}
+    known |= {p.strip() for p in (preserve or []) if p and p.strip()}
+    # Also treat entities file originals as known even if production kept parties
+    for raw in load_entities_file(entities_path):
+        original = str(raw.get("original") or raw.get("text") or "").strip()
+        if original:
+            known.add(original)
+    suspects = detect_suspects(source_text, known=known)
+
     ledger_path = work_dir / f"{output_path.stem}.ledger.json"
     residual_path = work_dir / f"{output_path.stem}.residual.json"
+    suspects_path = work_dir / f"{output_path.stem}.suspects.json"
     plan.dump(ledger_path)
     residual.dump(residual_path)
+    suspects_path.write_text(
+        json.dumps(
+            {
+                "mode": mode,
+                "count": len(suspects),
+                "warning": (
+                    "Hints only. Not auto-redacted. Confirm role/replacement in entities.json."
+                ),
+                "suspects": [s.to_dict() for s in suspects],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     summary_path = work_dir / f"{output_path.stem}.summary.md"
     summary_path.write_text(
-        _render_summary(input_path, output_path, plan, residual, keep=keep, extra=extra),
+        _render_summary(
+            input_path,
+            output_path,
+            plan,
+            residual,
+            keep=keep,
+            extra=extra,
+            suspects=suspects,
+        ),
         encoding="utf-8",
     )
 
@@ -162,6 +198,8 @@ def redact_file(
         ledger_path=ledger_path,
         residual_path=residual_path,
         output_text=output_text,
+        suspects=suspects,
+        suspects_path=suspects_path,
     )
 
 
@@ -235,6 +273,7 @@ def _render_summary(
     residual: ResidualReport,
     keep: set[str] | None = None,
     extra: set[str] | None = None,
+    suspects: list[Suspect] | None = None,
 ) -> str:
     lines = [
         f"# Redaction summary",
@@ -244,6 +283,7 @@ def _render_summary(
         f"- output: `{output_path}`",
         f"- entities replaced: **{len(plan.entities)}**",
         f"- residual scan: **{'PASS' if residual.ok else 'FAIL'}**",
+        f"- NL suspects (not auto-redacted): **{len(suspects or [])}**",
     ]
     if keep:
         lines.append(f"- keep_categories: `{', '.join(sorted(keep))}`")
@@ -268,12 +308,28 @@ def _render_summary(
         for h in residual.hits:
             lines.append(f"- `{h['category']}`: `{h['text']}`")
         lines.append("")
+    if suspects:
+        lines.extend(
+            [
+                "## Suspect natural-language entities",
+                "",
+                "Hints only — **not** replaced. Confirm in `entities.json` before relying on AI-mode anonymity.",
+                "",
+                "| text | category | role_hint | reason |",
+                "|---|---|---|---|",
+            ]
+        )
+        for s in suspects:
+            t = s.text.replace("|", "\\|")
+            lines.append(f"| `{t}` | {s.category} | {s.role_hint} | {s.reason} |")
+        lines.append("")
     lines.extend(
         [
             "## Notes",
             "",
             "- Keep the ledger file local. Do not commit it or paste it into online AI chats.",
             "- Structural PASS does not prove every natural-language name was caught.",
+            "- Suspect list is heuristic; false positives/negatives are expected.",
             "- Human review is required before court filing or opponent production.",
             "",
         ]
@@ -302,6 +358,13 @@ def detect_only(
     residual_if_unchanged = scan_residual(
         text, mode=mode, keep_categories=keep, extra_categories=extra
     )
+    known = {e.original for e in plan.entities}
+    known |= {p.strip() for p in (preserve or []) if p and p.strip()}
+    for raw in load_entities_file(entities_path):
+        original = str(raw.get("original") or raw.get("text") or "").strip()
+        if original:
+            known.add(original)
+    suspects = detect_suspects(text, known=known)
     return {
         "mode": mode,
         "keep_categories": sorted(keep),
@@ -309,4 +372,6 @@ def detect_only(
         "plan": plan.to_dict(),
         "would_replace": len(plan.entities),
         "current_structural_hits": residual_if_unchanged.to_dict(),
+        "suspects": [s.to_dict() for s in suspects],
+        "suspect_count": len(suspects),
     }

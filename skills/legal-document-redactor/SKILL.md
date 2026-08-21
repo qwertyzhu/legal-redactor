@@ -71,14 +71,16 @@ Structural items (ID / mobile / email / bank / USCC / case no.) are auto-detecte
 Starter template: [references/entities.template.json](references/entities.template.json).  
 See [references/methodology.md](references/methodology.md) and [schemas/entities.schema.json](schemas/entities.schema.json).
 
-Optional local draft of structural rows only:
+Optional local draft of structural rows + NL suspect hints:
 
 ```bash
 legal-redactor draft-entities INPUT.docx -o entities.draft.json
-# or: python scripts/draft_entities.py INPUT.docx -o entities.draft.json
+# structural only: add --no-suspects
 ```
 
-Then fill natural-language names yourself (the draft does not invent parties).
+Suspect rows use `source=suspect-hint` and **no replacement**. Confirm `role` / `replacement` before AI-mode use. The tool never invents party names as final aliases without your confirmation.
+
+Then fill or confirm natural-language names yourself.
 
 ### 3. Run deterministic redaction
 
@@ -101,6 +103,7 @@ Artifacts written next to the output (or `--work-dir`):
 
 - `*.ledger.json` — full mapping (**local only**)
 - `*.residual.json` — structural residual scan
+- `*.suspects.json` — NL entity hints (**not auto-redacted**)
 - `*.summary.md` — human table
 
 ### 4. Verify
@@ -160,10 +163,10 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.4)
+## Limits (v0.5)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - DOCX: single-run formatting preserved when possible; cross-run entities collapse the paragraph
-- Natural-language names require agent/entities JSON; pure regex will miss them
+- Natural-language names require confirmed entities JSON; suspects are review hints only
 - Cross-file consistent aliases are per-run unless you reuse the same entities file

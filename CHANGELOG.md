@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-08-21
+
+Reviewability release: surface likely natural-language entities without guessing replacements.
+
+- Added heuristic **suspect** detection (role-anchored persons, org suffixes, 《work titles》).
+- `scan` prints suspect hints; `redact` writes `*.suspects.json` + summary section.
+- `draft-entities` includes suspect rows (`source=suspect-hint`) by default; `--no-suspects` to disable.
+- Suspects are **never auto-redacted** — agent/human must confirm role and optional replacement.
+- False positives/negatives expected; blocklists cover common court labels and short bank labels.
+
 ## 0.4.0 - 2026-08-21
 
 Usability release for real multi-file workflows. Redaction modes and structural

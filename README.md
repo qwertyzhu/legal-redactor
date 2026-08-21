@@ -68,20 +68,28 @@ legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-productio
 # Residual check
 legal-redactor verify contract.redacted-ai.docx --mode ai
 
-# Draft entities skeleton (structural only — fill names yourself)
+# Draft entities skeleton (structural + NL suspect hints)
 legal-redactor draft-entities contract.docx -o entities.draft.json
 
 # Batch a folder of documents
 legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
 ```
 
+Each successful `redact` also writes:
+
+- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
+- `*.residual.json` — structural residual report
+- `*.suspects.json` — natural-language entity **hints** (not auto-redacted)
+- `*.summary.md` — human-readable table
+
 Scanned workflow: `skills/legal-document-redactor/references/scanned-pdf.md`.  
 Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  
-Optional structural draft: `legal-redactor draft-entities INPUT.docx` (or `python scripts/draft_entities.py`).
+Optional structural + suspect draft: `legal-redactor draft-entities INPUT.docx`.
 Each successful run also writes:
 
 - `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
 - `*.residual.json` — structural residual report
+- `*.suspects.json` — NL suspect hints (not auto-redacted)
 - `*.summary.md` — human-readable table
 
 ## Repository demo (fictional only)
@@ -103,11 +111,11 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.4)
+## Limits (v0.5)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
-- Natural-language names need `entities.json` (regex will not catch them reliably)
+- Natural-language names need confirmed `entities.json`; suspects are hints only
 - DOCX: single-run formatting is preserved when possible; cross-run entities still collapse the paragraph
 - Batch redact is flat output names (recursive mode disambiguates colliding basenames)
 - Not legal advice; not a substitute for firm confidentiality procedure

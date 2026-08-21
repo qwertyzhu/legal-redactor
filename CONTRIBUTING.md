@@ -32,8 +32,8 @@ python scripts/pack_skill.py --output-dir dist
 2. Push to `main`, then tag:
 
 ```console
-git tag -a v0.4.0 -m "legal-redactor v0.4.0"
-git push origin v0.4.0
+git tag -a v0.5.0 -m "legal-redactor v0.5.0"
+git push origin v0.5.0
 ```
 
 3. The Release workflow packs `legal-document-redactor.skill`, writes `SHA256SUMS.txt`, and publishes a GitHub Release.

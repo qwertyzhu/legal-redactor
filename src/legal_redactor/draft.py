@@ -1,4 +1,4 @@
-"""Draft starter entities.json from structural hits (no name invention)."""
+"""Draft starter entities.json from structural hits + NL suspect hints."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 
 from .formats import docx_io, pdf_io, text_io
 from .patterns import detect_structural
+from .suspects import detect_suspects, suspects_to_entity_rows
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
 
@@ -24,8 +25,13 @@ def extract_text(path: Path) -> str:
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
 
 
-def draft_entities_payload(path: Path, *, text: str | None = None) -> dict[str, Any]:
-    """Build a reviewable entities draft. Does not invent natural-language names."""
+def draft_entities_payload(
+    path: Path,
+    *,
+    text: str | None = None,
+    include_suspects: bool = True,
+) -> dict[str, Any]:
+    """Build a reviewable entities draft. Does not invent replacements for names."""
     path = Path(path)
     body = text if text is not None else extract_text(path)
     hits = detect_structural(body)
@@ -35,7 +41,7 @@ def draft_entities_payload(path: Path, *, text: str | None = None) -> dict[str, 
             "original": "（在此填写当事人/单位/地址/作品名）",
             "category": "organization",
             "role": "party",
-            "notes": "Agent judgment — replace this placeholder row",
+            "notes": "Agent judgment — replace or delete this placeholder row",
         }
     ]
     for hit in hits:
@@ -54,18 +60,40 @@ def draft_entities_payload(path: Path, *, text: str | None = None) -> dict[str, 
                 ),
             }
         )
+
+    suspect_rows: list[dict[str, Any]] = []
+    if include_suspects:
+        suspects = detect_suspects(body, known=seen)
+        suspect_rows = suspects_to_entity_rows(suspects)
+        for row in suspect_rows:
+            original = row["original"]
+            if original in seen:
+                continue
+            seen.add(original)
+            entities.append(row)
+
     return {
         "entities": entities,
         "_meta": {
             "source": str(path),
-            "structural_unique": len(seen),
-            "warning": "Review before use. Natural-language names are NOT auto-filled.",
+            "structural_unique": sum(1 for e in entities if e.get("source") == "structural-draft"),
+            "suspect_unique": len(suspect_rows),
+            "warning": (
+                "Review before use. Suspect rows are hints only — not auto-redacted "
+                "until you confirm role/replacement. Natural-language names are never invented."
+            ),
         },
     }
 
 
-def write_entities_draft(path: Path, output: Path, *, text: str | None = None) -> dict[str, Any]:
-    payload = draft_entities_payload(path, text=text)
+def write_entities_draft(
+    path: Path,
+    output: Path,
+    *,
+    text: str | None = None,
+    include_suspects: bool = True,
+) -> dict[str, Any]:
+    payload = draft_entities_payload(path, text=text, include_suspects=include_suspects)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

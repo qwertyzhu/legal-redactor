@@ -59,7 +59,7 @@ legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-productio
 
 legal-redactor verify contract.redacted-ai.docx --mode ai
 
-# 生成 entities 草稿（只含结构性字段，姓名需人工/Agent 补）
+# 生成 entities 草稿（结构性字段 + 疑似姓名/单位/作品提示）
 legal-redactor draft-entities contract.docx -o entities.draft.json
 
 # 批量脱敏整个目录
@@ -68,11 +68,12 @@ legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters
 
 扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
 `entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
-也可先跑 `legal-redactor draft-entities INPUT.docx`（或 `python scripts/draft_entities.py`）生成结构性草稿，再手工补姓名/单位。
+也可先跑 `legal-redactor draft-entities INPUT.docx` 生成结构性草稿 + 疑似实体提示，再人工确认角色与替身。
 每次成功运行还会生成：
 
 - `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
 - `*.residual.json` — 结构性残留报告
+- `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
 - `*.summary.md` — 可读对照表
 
 ## 仓库虚构演示
@@ -84,11 +85,11 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.4）
+## 限制（v0.5）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
-- 自然语言姓名依赖 `entities.json`
+- 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
 - DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
 - 不是法律意见，不能替代律所保密流程

@@ -320,3 +320,74 @@ def test_docx_preserves_bold_run_when_secret_in_single_run(tmp_path: Path):
     # bold run should still exist and hold the placeholder, not be emptied by collapse
     assert bold_runs, "expected a bold run to survive single-run redaction"
     assert any("手机" in t or "[" in t for t in bold_runs)
+
+
+def test_suspects_find_orgs_persons_works_without_auto_redact():
+    from legal_redactor.suspects import detect_suspects
+
+    text = SAMPLE
+    suspects = detect_suspects(text)
+    texts = {s.text for s in suspects}
+    assert "北测文化传播有限公司" in texts
+    assert "南例网络科技有限公司" in texts
+    assert "郝测一" in texts
+    assert "沈例二" in texts
+    assert "《星河测例》" in texts
+    # courts in blocklist / weak labels should not dominate
+    assert "北京互联网法院" not in texts
+
+
+def test_suspects_excluded_when_known():
+    from legal_redactor.suspects import detect_suspects
+
+    suspects = detect_suspects(
+        SAMPLE,
+        known={"北测文化传播有限公司", "郝测一", "《星河测例》", "南例网络科技有限公司", "沈例二"},
+    )
+    assert suspects == []
+
+
+def test_scan_reports_suspects(tmp_path: Path):
+    from legal_redactor.cli import main
+
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    # capture via detect_only
+    from legal_redactor.pipeline import detect_only
+
+    payload = detect_only(src, mode="ai", entities_path=FIXTURES / "entities_ai.json")
+    # entities_ai already lists parties — suspects should shrink
+    knownish = {e["original"] for e in payload["plan"]["entities"]}
+    for s in payload["suspects"]:
+        assert s["text"] not in knownish
+
+
+def test_draft_entities_includes_suspect_rows(tmp_path: Path):
+    from legal_redactor.draft import draft_entities_payload
+
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    payload = draft_entities_payload(src, include_suspects=True)
+    assert payload["_meta"]["suspect_unique"] >= 3
+    sources = {e.get("source") for e in payload["entities"]}
+    assert "suspect-hint" in sources
+    # without auto replacement field
+    for e in payload["entities"]:
+        if e.get("source") == "suspect-hint":
+            assert not e.get("replacement")
+
+
+def test_redact_writes_suspects_sidecar(tmp_path: Path):
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    out = tmp_path / "c.redacted-production.md"
+    # production without entities — parties stay; suspects should still list them
+    result = redact_file(src, mode="production", output_path=out, work_dir=tmp_path)
+    assert result.ok
+    assert result.suspects_path is not None and result.suspects_path.is_file()
+    data = json.loads(result.suspects_path.read_text(encoding="utf-8"))
+    texts = {s["text"] for s in data["suspects"]}
+    assert "北测文化传播有限公司" in texts
+    assert "郝测一" in texts
+    # structural redaction still happened
+    assert "13900001111" not in out.read_text(encoding="utf-8")

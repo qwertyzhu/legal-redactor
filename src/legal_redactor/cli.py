@@ -122,7 +122,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     pd = sub.add_parser(
         "draft-entities",
-        help="Draft entities.json skeleton from structural hits (does not invent names)",
+        help="Draft entities.json skeleton from structural hits + NL suspect hints",
     )
     pd.add_argument("input", type=Path, help="Input .docx / .pdf / .txt / .md")
     pd.add_argument(
@@ -131,6 +131,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("entities.draft.json"),
         help="Output JSON path (default: entities.draft.json)",
+    )
+    pd.add_argument(
+        "--no-suspects",
+        action="store_true",
+        help="Only dump structural hits (skip person/org/work-title heuristics)",
     )
 
     po = sub.add_parser(
@@ -250,8 +255,16 @@ def _cmd_redact(args: argparse.Namespace) -> int:
     print(f"output:      {result.output_path}")
     print(f"ledger:      {result.ledger_path}")
     print(f"residual:    {result.residual_path}")
+    if result.suspects_path:
+        print(f"suspects:    {result.suspects_path} ({len(result.suspects)})")
     print(f"replaced:    {len(result.plan.entities)}")
     print(f"scan:        {result.residual.summary}")
+    if result.suspects:
+        print("suspect NL entities (NOT auto-redacted):")
+        for s in result.suspects[:20]:
+            print(f"  - [{s.category}/{s.role_hint}] {s.text} ({s.reason})")
+        if len(result.suspects) > 20:
+            print(f"  … {len(result.suspects) - 20} more in suspects file")
     if not result.ok and not args.allow_residual:
         print(
             "ERROR: residual structural PII remains. "
@@ -295,6 +308,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"current:  {cur['summary']}")
                 for e in payload["plan"]["entities"]:
                     print(f"  - [{e['category']}/{e['role']}] {e['original']} -> {e['replacement']}")
+                suspects = payload.get("suspects") or []
+                print(f"suspects: {len(suspects)} (hints only, not auto-redacted)")
+                for s in suspects[:30]:
+                    print(
+                        f"  ? [{s['category']}/{s.get('role_hint', 'unknown')}] "
+                        f"{s['text']} ({s.get('reason', '')})"
+                    )
+                if len(suspects) > 30:
+                    print(f"  … {len(suspects) - 30} more")
             return 0
 
         if args.command == "verify":
@@ -313,13 +335,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "draft-entities":
             from .draft import write_entities_draft
 
-            payload = write_entities_draft(args.input, args.output)
-            structural = payload.get("_meta", {}).get("structural_unique", 0)
+            payload = write_entities_draft(
+                args.input,
+                args.output,
+                include_suspects=not args.no_suspects,
+            )
+            meta = payload.get("_meta") or {}
             print(
                 f"wrote {args.output} "
-                f"({len(payload.get('entities', []))} rows, {structural} structural)"
+                f"({len(payload.get('entities', []))} rows, "
+                f"{meta.get('structural_unique', 0)} structural, "
+                f"{meta.get('suspect_unique', 0)} suspects)"
             )
-            print("NOTE: fill natural-language names before ai-mode redaction.")
+            print(
+                "NOTE: suspect rows are hints only. Confirm role/replacement; "
+                "nothing is auto-redacted until listed in entities for the chosen mode."
+            )
             return 0
 
         if args.command == "ocr":
