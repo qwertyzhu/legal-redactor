@@ -1,0 +1,10 @@
+{
+  "name": "legal-redactor",
+  "version": "0.3.1",
+  "description": "Privacy-first dual-mode redaction for Chinese legal documents (AI upload vs court/opponent production)",
+  "author": {
+    "name": "qwertyzhu"
+  },
+  "skills": "./skills",
+  "license": "Apache-2.0"
+}

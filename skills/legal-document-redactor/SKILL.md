@@ -153,9 +153,10 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.3)
+## Limits (v0.3+)
 
-- No scanned-PDF black boxes / OCR pipeline
+- PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
+- `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - DOCX run-level fancy formatting may collapse to first-run style when a paragraph is rewritten
 - Natural-language names require agent/entities JSON; pure regex will miss them
 - Cross-file consistent aliases are per-run unless you reuse the same entities file

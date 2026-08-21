@@ -29,9 +29,12 @@ cd legal-redactor
 python -m pip install -e ".[dev]"
 ```
 
+Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
+
 ### Claude Code / Codex skill
 
-Copy or junction `skills/legal-document-redactor` into `~/.claude/skills/` (or `~/.agents/skills/`).
+Copy or junction `skills/legal-document-redactor` into `~/.claude/skills/` (or `~/.agents/skills/`).  
+Release assets also include a packed `legal-document-redactor.skill` plus `SHA256SUMS.txt`.
 
 Codex:
 
@@ -94,7 +97,7 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.3)
+## Limits (v0.3+)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**

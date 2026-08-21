@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-21
+
+Patch release: ships the post-0.3.0 distribution and CI hardening already intended for users.
+No change to redaction modes, structural detectors, or OCR behavior.
+
+- Expanded CI to Python 3.10–3.12 on Ubuntu, Windows, and macOS.
+- Added a reproducible `.skill` packer (`scripts/pack_skill.py`), `SHA256SUMS.txt`, and tag-triggered GitHub Releases.
+- Aligned software versions across `pyproject.toml`, package `__version__`, and `.codex-plugin/plugin.json`.
+- Generalized public-tree safety scan beyond filename denylist (emails, mobiles, IDs, case numbers, home paths).
+- Corrected skill package limits text for v0.3 OCR / `redact-scan` support.
+- Documented release steps in CONTRIBUTING.
+
 ## 0.3.0 - 2026-08-20
 
 - Added `legal-redactor ocr` for local Tesseract OCR of scanned PDFs → `ocr.md` + CJK-normalized markdown.

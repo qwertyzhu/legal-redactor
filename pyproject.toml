@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "legal-redactor"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first dual-mode redaction for Chinese legal documents (AI upload vs court/opponent production)"
 readme = "README.md"
 requires-python = ">=3.10"

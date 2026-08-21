@@ -32,9 +32,12 @@ cd legal-redactor
 python -m pip install -e ".[dev]"
 ```
 
+也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
+
 ### Claude Code / Codex Skill
 
-把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。
+把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。  
+Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。
 
 ## 快速使用
 
@@ -75,7 +78,7 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.3）
+## 限制（v0.3+）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
