@@ -249,3 +249,74 @@ def test_pipeline_keep_categories_roundtrip(tmp_path: Path):
     body = out.read_text(encoding="utf-8")
     assert "91110108MA0123456X" in body
     assert "13700003333" not in body
+
+
+def test_batch_redact_directory(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    src_dir.mkdir()
+    (src_dir / "a.md").write_text("联系电话 13900001111\n", encoding="utf-8")
+    (src_dir / "b.md").write_text("备用号 13800002222\n", encoding="utf-8")
+    (src_dir / "notes.txt").write_text("ignore-me-not-supported-no wait txt is supported 13700003333\n", encoding="utf-8")
+    (src_dir / "skip.bin").write_bytes(b"\x00\x01")
+
+    batch = redact_tree(src_dir, mode="production", output_dir=out_dir, work_dir=out_dir)
+    assert len(batch.results) == 3
+    assert batch.ok
+    assert not (out_dir / "skip.bin").exists()
+    bodies = {r.output_path.name: r.output_path.read_text(encoding="utf-8") for r in batch.results}
+    assert "13900001111" not in bodies["a.redacted-production.md"]
+    assert "13800002222" not in bodies["b.redacted-production.md"]
+    assert "13700003333" not in bodies["notes.redacted-production.txt"]
+
+
+def test_draft_entities_command(tmp_path: Path):
+    from legal_redactor.cli import main
+    from legal_redactor.draft import draft_entities_payload
+
+    src = tmp_path / "x.md"
+    src.write_text("手机 13900001111 案号（2024）京0491民初1234号\n", encoding="utf-8")
+    out = tmp_path / "entities.draft.json"
+    assert main(["draft-entities", str(src), "-o", str(out)]) == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["_meta"]["structural_unique"] >= 2
+    originals = {e["original"] for e in payload["entities"]}
+    assert "13900001111" in originals
+    # does not invent party names
+    rebuilt = draft_entities_payload(src)
+    assert any("填写当事人" in e["original"] for e in rebuilt["entities"])
+
+
+def test_docx_preserves_bold_run_when_secret_in_single_run(tmp_path: Path):
+    import zipfile
+    from lxml import etree
+
+    from legal_redactor.formats import docx_io
+
+    src = tmp_path / "mixed.docx"
+    out = tmp_path / "mixed.out.docx"
+    docx_io.create_mixed_run_docx(
+        src,
+        plain_prefix="甲方联系方式：",
+        bold_secret="13900001111",
+        plain_suffix="（仅限通知）",
+    )
+    result = redact_file(src, mode="production", output_path=out, work_dir=tmp_path)
+    assert result.ok
+    assert "13900001111" not in result.output_text
+
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    bold_runs = []
+    for r in root.iter(f"{W}r"):
+        rpr = r.find(f"{W}rPr")
+        is_bold = rpr is not None and rpr.find(f"{W}b") is not None
+        texts = "".join((t.text or "") for t in r.findall(f"{W}t"))
+        if is_bold and texts.strip():
+            bold_runs.append(texts)
+    # bold run should still exist and hold the placeholder, not be emptied by collapse
+    assert bold_runs, "expected a bold run to survive single-run redaction"
+    assert any("手机" in t or "[" in t for t in bold_runs)

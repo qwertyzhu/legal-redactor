@@ -2,12 +2,11 @@
 
 Handles track-changes (w:ins / w:del) and run-split entity strings by:
 1. accepting insertions and dropping deletions;
-2. applying replacements at paragraph granularity.
+2. applying replacements at run granularity when possible, else paragraph level.
 """
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from pathlib import Path
@@ -38,14 +37,12 @@ def _local(tag: str) -> str:
 
 def _flatten_revisions(root: etree._Element) -> None:
     """Accept insertions and discard deletions so visible text is complete."""
-    # Drop deletions first
     for el in list(root.iter()):
         if _local(el.tag) == "del":
             parent = el.getparent()
             if parent is not None:
                 parent.remove(el)
 
-    # Unwrap insertions (and moveFrom/moveTo content kept as visible)
     changed = True
     while changed:
         changed = False
@@ -77,26 +74,54 @@ def _paragraph_text(p: etree._Element) -> str:
     return "".join(parts)
 
 
+def _preserve_space(t: etree._Element, text: str) -> None:
+    if text[:1].isspace() or text[-1:].isspace():
+        t.set(f"{{{XML_NS}}}space", "preserve")
+
+
 def _set_paragraph_text(p: etree._Element, new_text: str) -> None:
+    """Collapse paragraph visible text into the first w:t, keeping its run props."""
     t_nodes = [n for n in p.iter() if _local(n.tag) == "t"]
     if not t_nodes:
-        # Build a minimal run
         r = etree.SubElement(p, f"{W}r")
         t = etree.SubElement(r, f"{W}t")
         t.text = new_text
-        if new_text[:1].isspace() or new_text[-1:].isspace():
-            t.set(f"{{{XML_NS}}}space", "preserve")
+        _preserve_space(t, new_text)
         return
 
     first = t_nodes[0]
     first.text = new_text
-    if new_text[:1].isspace() or new_text[-1:].isspace():
-        first.set(f"{{{XML_NS}}}space", "preserve")
-    else:
-        # keep existing xml:space if any
-        pass
+    _preserve_space(first, new_text)
     for t in t_nodes[1:]:
         t.text = ""
+
+
+def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
+    """Apply mapping; prefer per-run edits so mid-paragraph formatting survives."""
+    original = _paragraph_text(p)
+    if not original:
+        return original
+    updated = apply_mapping_to_text(original, mapping)
+    if updated == original:
+        return original
+
+    t_nodes = [n for n in p.iter() if _local(n.tag) == "t"]
+    if t_nodes:
+        for t in t_nodes:
+            old = t.text or ""
+            new = apply_mapping_to_text(old, mapping)
+            if new != old:
+                t.text = new
+                _preserve_space(t, new)
+        after = _paragraph_text(p)
+        if after == updated:
+            return updated
+        # Entity spanned runs (or per-run order differed) — safe collapse.
+        _set_paragraph_text(p, updated)
+        return updated
+
+    _set_paragraph_text(p, updated)
+    return updated
 
 
 def _process_xml_bytes(data: bytes, mapping: list[tuple[str, str]] | None) -> tuple[bytes, str]:
@@ -113,12 +138,8 @@ def _process_xml_bytes(data: bytes, mapping: list[tuple[str, str]] | None) -> tu
         if mapping is None:
             texts.append(original)
             continue
-        updated = apply_mapping_to_text(original, mapping)
-        texts.append(updated)
-        if updated != original:
-            _set_paragraph_text(p, updated)
+        texts.append(_redact_paragraph(p, mapping))
 
-    # Serialize with XML declaration
     out = etree.tostring(
         root,
         xml_declaration=True,
@@ -132,7 +153,6 @@ def extract_text(path: Path) -> str:
     chunks: list[str] = []
     with zipfile.ZipFile(path, "r") as zin:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
-        # document first, then others stable order
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
             _, text = _process_xml_bytes(zin.read(name), mapping=None)
@@ -184,4 +204,16 @@ def create_sample_docx(path: Path, text: str) -> None:
     doc = Document()
     for block in text.split("\n"):
         doc.add_paragraph(block)
+    doc.save(str(path))
+
+
+def create_mixed_run_docx(path: Path, *, plain_prefix: str, bold_secret: str, plain_suffix: str) -> None:
+    """Fixture helper: one paragraph with a bold middle run (formatting preservation tests)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run(plain_prefix)
+    bold = p.add_run(bold_secret)
+    bold.bold = True
+    p.add_run(plain_suffix)
     doc.save(str(path))

@@ -58,11 +58,17 @@ legal-redactor redact workdir/ocr.normalized.md --mode production -o workdir/out
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 
 legal-redactor verify contract.redacted-ai.docx --mode ai
+
+# 生成 entities 草稿（只含结构性字段，姓名需人工/Agent 补）
+legal-redactor draft-entities contract.docx -o entities.draft.json
+
+# 批量脱敏整个目录
+legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
 ```
 
 扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
 `entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
-也可先跑 `python scripts/draft_entities.py INPUT.docx` 生成结构性草稿，再手工补姓名/单位。
+也可先跑 `legal-redactor draft-entities INPUT.docx`（或 `python scripts/draft_entities.py`）生成结构性草稿，再手工补姓名/单位。
 每次成功运行还会生成：
 
 - `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
@@ -78,12 +84,13 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.3+）
+## 限制（v0.4）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
 - 自然语言姓名依赖 `entities.json`
-- DOCX 段落重写可能简化 run 级格式
+- DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
+- 批量输出为扁平文件名（递归时自动消歧）
 - 不是法律意见，不能替代律所保密流程
 
 ## 安全

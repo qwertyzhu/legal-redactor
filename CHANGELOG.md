@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-08-21
+
+Usability release for real multi-file workflows. Redaction modes and structural
+detectors are unchanged.
+
+- Batch `legal-redactor redact DIR -o OUTDIR --mode …` over supported files (optional `--recursive`).
+- New `legal-redactor draft-entities` subcommand (scripts/draft_entities.py is now a thin wrapper).
+- DOCX: prefer per-run replacements so single-run bold/italic survives; cross-run entities still fall back to paragraph collapse.
+- Regression tests for batch redaction, draft-entities, and mixed-run DOCX formatting.
+
 ## 0.3.1 - 2026-08-21
 
 Patch release: ships the post-0.3.0 distribution and CI hardening already intended for users.

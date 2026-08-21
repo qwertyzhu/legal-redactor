@@ -74,7 +74,8 @@ See [references/methodology.md](references/methodology.md) and [schemas/entities
 Optional local draft of structural rows only:
 
 ```bash
-python scripts/draft_entities.py INPUT.docx -o entities.draft.json
+legal-redactor draft-entities INPUT.docx -o entities.draft.json
+# or: python scripts/draft_entities.py INPUT.docx -o entities.draft.json
 ```
 
 Then fill natural-language names yourself (the draft does not invent parties).
@@ -145,6 +146,12 @@ legal-redactor redact contract.docx --mode production --keep-categories uscc -o 
 # residual verify must use the same keep/extra flags as redact
 legal-redactor verify out.docx --mode production --keep-categories uscc
 
+# batch a folder
+legal-redactor redact ./inbox/ --mode ai --entities entities.json -o ./outbox/
+
+# draft entities skeleton
+legal-redactor draft-entities contract.docx -o entities.draft.json
+
 # scanned PDF → text (for AI / notes)
 legal-redactor ocr scan.pdf -o workdir/
 legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.json -o workdir/ai.md
@@ -153,10 +160,10 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.3+)
+## Limits (v0.4)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
-- DOCX run-level fancy formatting may collapse to first-run style when a paragraph is rewritten
+- DOCX: single-run formatting preserved when possible; cross-run entities collapse the paragraph
 - Natural-language names require agent/entities JSON; pure regex will miss them
 - Cross-file consistent aliases are per-run unless you reuse the same entities file
