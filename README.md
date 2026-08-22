@@ -71,12 +71,16 @@ legal-redactor verify contract.redacted-ai.docx --mode ai
 # Draft entities skeleton (structural + NL suspect hints)
 legal-redactor draft-entities contract.docx -o entities.draft.json
 
-# Batch a folder of documents
-legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
+# Batch a folder of documents (two-pass: unify aliases then redact)
+legal-redactor redact ./matters/ --mode ai --unify -o ./matters-redacted/
 
-# Unify aliases across a matter folder (before or after batch)
+# Or unify manually, then reuse the file
 legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
-legal-redactor unify ./matters-redacted/ -o ./check/ --from-ledgers
+legal-redactor redact ./matters/ --mode ai --entities ./matter-unified/entities.consistent.json -o ./matters-redacted/
+
+# Directory scan / residual verify
+legal-redactor scan ./matters/ --mode ai
+legal-redactor verify ./matters-redacted/ --mode ai
 ```
 
 Each successful `redact` also writes:
@@ -117,14 +121,15 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.6)
+## Limits (v0.7)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - Natural-language names need confirmed `entities.json`; suspects are hints only
-- Cross-file stable aliases require `unify` or reusing `entities.consistent.json`
+- Multi-doc AI upload: prefer `redact DIR --unify` so aliases stay stable
 - DOCX: single-run formatting is preserved when possible; cross-run entities still collapse the paragraph
 - Batch redact is flat output names (recursive mode disambiguates colliding basenames)
+- Directory `verify` will scan all supported suffixes present (including `.json` sidecars if mixed in)
 - Not legal advice; not a substitute for firm confidentiality procedure
 
 ## Security

@@ -227,8 +227,13 @@ def redact_tree(
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
     recursive: bool = False,
+    unify_first: bool = False,
 ) -> BatchRedactResult:
-    """Redact every supported file under input_dir into output_dir (flat names)."""
+    """Redact every supported file under input_dir into output_dir (flat names).
+
+    unify_first: scan the folder first, write entities.consistent.json, and use it
+    as the entities file for every document so aliases stay stable across the batch.
+    """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     if output_dir.resolve() == input_dir.resolve():
@@ -236,6 +241,22 @@ def redact_tree(
     output_dir.mkdir(parents=True, exist_ok=True)
     work_root = Path(work_dir) if work_dir else output_dir
     work_root.mkdir(parents=True, exist_ok=True)
+
+    effective_entities = entities_path
+    pre_entities_path: Path | None = None
+    if unify_first:
+        from .consistency import unify_directory
+
+        pre = unify_directory(
+            input_dir,
+            work_root,
+            mode=mode,
+            entities_path=entities_path,
+            recursive=recursive,
+            include_suspects=True,
+        )
+        pre_entities_path = pre.entities_path
+        effective_entities = pre.entities_path
 
     results: list[RedactResult] = []
     skipped: list[tuple[Path, str]] = []
@@ -255,7 +276,7 @@ def redact_tree(
                 input_path=src,
                 mode=mode,
                 output_path=out,
-                entities_path=entities_path,
+                entities_path=effective_entities,
                 preserve=preserve,
                 work_dir=work_root,
                 keep_categories=keep_categories,
@@ -266,13 +287,14 @@ def redact_tree(
             skipped.append((src, str(exc)))
 
     consistency_path = None
-    entities_consistent_path = None
+    entities_consistent_path = pre_entities_path
     if results:
         from .consistency import unify_from_ledgers
 
         report = unify_from_ledgers(work_root, work_root, mode=mode)
         consistency_path = report.report_path
-        entities_consistent_path = report.entities_path
+        # Prefer post-ledger path; keep pre-unify path if post missing
+        entities_consistent_path = report.entities_path or pre_entities_path
 
     return BatchRedactResult(
         mode=mode,
@@ -281,6 +303,70 @@ def redact_tree(
         consistency_path=consistency_path,
         entities_consistent_path=entities_consistent_path,
     )
+
+
+def verify_tree(
+    input_dir: Path,
+    mode: str,
+    *,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
+    recursive: bool = False,
+) -> dict[str, Any]:
+    """Residual-scan every supported file under a directory."""
+    keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
+    rows: list[dict[str, Any]] = []
+    for path in iter_batch_inputs(input_dir, recursive=recursive):
+        text = _extract(path)
+        report = scan_residual(text, mode=mode, keep_categories=keep, extra_categories=extra)
+        rows.append(
+            {
+                "path": str(path),
+                "name": path.name,
+                "ok": report.ok,
+                "summary": report.summary,
+                "hits": report.hits,
+            }
+        )
+    failed = [r for r in rows if not r["ok"]]
+    return {
+        "mode": mode,
+        "files": len(rows),
+        "failed": len(failed),
+        "ok": len(failed) == 0,
+        "results": rows,
+    }
+
+
+def scan_tree(
+    input_dir: Path,
+    mode: str,
+    *,
+    entities_path: Path | None = None,
+    preserve: list[str] | None = None,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
+    recursive: bool = False,
+) -> dict[str, Any]:
+    """detect_only for every supported file under a directory."""
+    rows = []
+    for path in iter_batch_inputs(input_dir, recursive=recursive):
+        payload = detect_only(
+            path,
+            mode=mode,
+            entities_path=entities_path,
+            preserve=preserve,
+            keep_categories=keep_categories,
+            extra_categories=extra_categories,
+        )
+        payload["path"] = str(path)
+        payload["name"] = path.name
+        rows.append(payload)
+    return {
+        "mode": mode,
+        "files": len(rows),
+        "results": rows,
+    }
 
 
 def _render_summary(

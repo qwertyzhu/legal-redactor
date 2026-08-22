@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .formats import docx_io, pdf_io, text_io
-from .pipeline import detect_only, redact_file, redact_tree
+from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_tree
 from .verify import scan_residual
 
 
@@ -93,6 +93,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When input is a directory, include supported files in subfolders",
     )
     pr.add_argument(
+        "--unify",
+        action="store_true",
+        help=(
+            "Batch only: unify entities across the folder first, then redact every file "
+            "with entities.consistent.json so aliases stay stable"
+        ),
+    )
+    pr.add_argument(
         "--allow-residual",
         action="store_true",
         help="Exit 0 even if residual scan finds remaining structural PII",
@@ -101,8 +109,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser("scan", help="Detect structural PII / build plan without writing redacted file")
     add_common(ps)
     ps.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    ps.add_argument(
+        "--recursive",
+        action="store_true",
+        help="When input is a directory, include supported files in subfolders",
+    )
 
-    pv = sub.add_parser("verify", help="Residual-scan an already redacted file")
+    pv = sub.add_parser("verify", help="Residual-scan an already redacted file or directory")
     pv.add_argument("input", type=Path)
     pv.add_argument("--mode", choices=("ai", "production"), required=True)
     pv.add_argument(
@@ -119,6 +132,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="CAT",
         help="Same meaning as in redact/scan",
     )
+    pv.add_argument(
+        "--recursive",
+        action="store_true",
+        help="When input is a directory, include supported files in subfolders",
+    )
+    pv.add_argument("--json", action="store_true", help="Print machine-readable JSON (directory mode)")
 
     pd = sub.add_parser(
         "draft-entities",
@@ -250,10 +269,13 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             keep_categories=_split_cats(args.keep_categories),
             extra_categories=_split_cats(args.extra_categories),
             recursive=args.recursive,
+            unify_first=bool(getattr(args, "unify", False)),
         )
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
+        if getattr(args, "unify", False):
+            print("pass:     unify-first + redact")
         if batch.entities_consistent_path:
             print(f"unified:  {batch.entities_consistent_path}")
         if batch.consistency_path:
@@ -324,9 +346,29 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_redact(args)
 
         if args.command == "scan":
-            if Path(args.input).is_dir():
-                print("ERROR: scan expects a single file (not a directory)", file=sys.stderr)
-                return 1
+            src = Path(args.input)
+            if src.is_dir():
+                payload = scan_tree(
+                    src,
+                    mode=args.mode,
+                    entities_path=args.entities,
+                    preserve=args.preserve,
+                    keep_categories=_split_cats(args.keep_categories),
+                    extra_categories=_split_cats(args.extra_categories),
+                    recursive=args.recursive,
+                )
+                if args.json:
+                    print(json.dumps(payload, ensure_ascii=False, indent=2))
+                else:
+                    print(f"mode:  {payload['mode']}")
+                    print(f"files: {payload['files']}")
+                    for row in payload["results"]:
+                        print(
+                            f"  - {row['name']}: replace={row['would_replace']} "
+                            f"suspects={row.get('suspect_count', 0)} "
+                            f"{row['current_structural_hits']['summary']}"
+                        )
+                return 0
             payload = detect_only(
                 args.input,
                 mode=args.mode,
@@ -362,9 +404,31 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "verify":
             from .pipeline import _parse_category_list
 
-            text = _extract_any(Path(args.input))
+            src = Path(args.input)
             keep = _parse_category_list(_split_cats(args.keep_categories))
             extra = _parse_category_list(_split_cats(args.extra_categories))
+            if src.is_dir():
+                payload = verify_tree(
+                    src,
+                    mode=args.mode,
+                    keep_categories=keep,
+                    extra_categories=extra,
+                    recursive=args.recursive,
+                )
+                if args.json:
+                    print(json.dumps(payload, ensure_ascii=False, indent=2))
+                else:
+                    print(f"mode:   {payload['mode']}")
+                    print(f"files:  {payload['files']}")
+                    print(f"failed: {payload['failed']}")
+                    for row in payload["results"]:
+                        status = "PASS" if row["ok"] else "FAIL"
+                        print(f"  [{status}] {row['name']}: {row['summary']}")
+                        for h in row.get("hits") or []:
+                            print(f"    - {h['category']}: {h['text']}")
+                return 0 if payload["ok"] else 2
+
+            text = _extract_any(src)
             report = scan_residual(text, mode=args.mode, keep_categories=keep, extra_categories=extra)
             print(report.summary)
             if report.hits:

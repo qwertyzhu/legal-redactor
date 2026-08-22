@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-08-22
+
+Batch two-pass workflow and directory operators.
+
+- `legal-redactor redact DIR --unify` unifies entities first, then redacts every file with `entities.consistent.json`.
+- `scan` and `verify` accept directories (optional `--recursive`, `--json`).
+- Suspect heuristics add label-anchored **addresses** (`住所地`/`住址`/`地址`…).
+- Tests cover unify-first batch stability, directory verify/scan, and address suspects.
+
 ## 0.6.0 - 2026-08-22
 
 Cross-file consistency for multi-document matters.

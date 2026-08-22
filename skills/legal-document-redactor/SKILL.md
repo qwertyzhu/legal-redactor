@@ -149,12 +149,16 @@ legal-redactor redact contract.docx --mode production --keep-categories uscc -o 
 # residual verify must use the same keep/extra flags as redact
 legal-redactor verify out.docx --mode production --keep-categories uscc
 
-# batch a folder
-legal-redactor redact ./inbox/ --mode ai --entities entities.json -o ./outbox/
+# batch a folder (recommended two-pass)
+legal-redactor redact ./inbox/ --mode ai --unify -o ./outbox/
 
-# unify cross-file aliases (recommended before multi-doc AI upload)
+# unify manually then redact
 legal-redactor unify ./inbox/ -o ./unified/ --mode ai
 legal-redactor redact ./inbox/ --mode ai --entities ./unified/entities.consistent.json -o ./outbox/
+
+# directory scan / verify
+legal-redactor scan ./inbox/ --mode ai
+legal-redactor verify ./outbox/ --mode ai
 
 # draft entities skeleton
 legal-redactor draft-entities contract.docx -o entities.draft.json
@@ -167,11 +171,11 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.6)
+## Limits (v0.7)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - DOCX: single-run formatting preserved when possible; cross-run entities collapse the paragraph
-- Natural-language names require confirmed entities JSON; suspects are review hints only
-- Multi-doc matters: run `unify` (or reuse batch `entities.consistent.json`) so aliases stay stable
-- Cross-file consistent aliases are per-run unless you reuse the same entities file
+- Natural-language names require confirmed entities JSON; suspects are review hints only (now includes addresses)
+- Multi-doc matters: prefer `redact DIR --unify` so aliases stay stable
+- Directory `verify` checks every supported suffix in the folder — keep ledgers out of the verify target dir

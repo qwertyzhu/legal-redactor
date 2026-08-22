@@ -62,12 +62,16 @@ legal-redactor verify contract.redacted-ai.docx --mode ai
 # 生成 entities 草稿（结构性字段 + 疑似姓名/单位/作品提示）
 legal-redactor draft-entities contract.docx -o entities.draft.json
 
-# 批量脱敏整个目录
-legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
+# 批量脱敏（推荐两阶段：先统一替身再脱敏）
+legal-redactor redact ./matters/ --mode ai --unify -o ./matters-redacted/
 
-# 跨文件统一替身（批量前/后）
+# 或手动 unify 后再脱敏
 legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
-legal-redactor unify ./matters-redacted/ -o ./check/ --from-ledgers
+legal-redactor redact ./matters/ --mode ai --entities ./matter-unified/entities.consistent.json -o ./matters-redacted/
+
+# 目录扫描 / 残留校验
+legal-redactor scan ./matters/ --mode ai
+legal-redactor verify ./matters-redacted/ --mode ai
 ```
 
 扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
@@ -91,14 +95,15 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.6）
+## 限制（v0.7）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
 - 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
-- 跨文件稳定替身请用 `unify` 或复用 `entities.consistent.json`
+- 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
 - DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
+- 目录 `verify` 会检查目录内所有支持后缀（勿把 ledger.json 和正文混在同一校验目录）
 - 不是法律意见，不能替代律所保密流程
 
 ## 安全

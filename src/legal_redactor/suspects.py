@@ -40,6 +40,17 @@ _PERSON = re.compile(
 # Work titles in 《》 — high-value matter keys in copyright practice.
 _WORK = re.compile(r"《([^》\n]{1,40})》")
 
+# Address-like: label + PRC admin unit chain ending in 号/室/层 etc.
+_ADDRESS_LABEL = r"(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地)"
+_ADDRESS = re.compile(
+    rf"(?:{_ADDRESS_LABEL})[：:\s]*"
+    rf"("
+    rf"[一-鿿0-9A-Za-z（）()·\- ]{{6,80}}?"
+    rf"(?:号|室|层|幢|栋|弄|巷|街|路|道|村|组|区|县|市|省|镇|乡)"
+    rf"[一-鿿0-9A-Za-z（）()·\- ]{{0,30}}"
+    rf")"
+)
+
 _ORG_BLOCKLIST = frozenset(
     {
         "人民法院",
@@ -93,7 +104,7 @@ _WORK_BLOCKLIST = frozenset(
 @dataclass(frozen=True)
 class Suspect:
     text: str
-    category: str  # person | organization | work_title
+    category: str  # person | organization | work_title | address
     reason: str
     start: int
     end: int
@@ -194,6 +205,24 @@ def detect_suspects(
                 start=m.start(),
                 end=m.end(),
                 role_hint="other",
+            )
+        )
+
+    for m in _ADDRESS.finditer(text):
+        val = m.group(1).strip().rstrip("，,。；;、")
+        if len(val) < 6 or val in skip:
+            continue
+        # Skip pure court venue phrases
+        if "法院" in val and len(val) < 12:
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="address",
+                reason="address_label",
+                start=m.start(1),
+                end=m.start(1) + len(val),
+                role_hint="party",
             )
         )
 

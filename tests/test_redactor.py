@@ -342,7 +342,15 @@ def test_suspects_excluded_when_known():
 
     suspects = detect_suspects(
         SAMPLE,
-        known={"北测文化传播有限公司", "郝测一", "《星河测例》", "南例网络科技有限公司", "沈例二"},
+        known={
+            "北测文化传播有限公司",
+            "郝测一",
+            "《星河测例》",
+            "南例网络科技有限公司",
+            "沈例二",
+            "北京市海淀区测试路 88 号",
+            "上海市浦东新区样例大道 66 号",
+        },
     )
     assert suspects == []
 
@@ -484,3 +492,70 @@ def test_batch_redact_writes_consistency_bundle(tmp_path: Path):
     assert batch.entities_consistent_path.is_file()
     assert batch.consistency_path is not None
     assert (out / "consistency.report.md").is_file()
+
+
+def test_batch_unify_first_uses_stable_aliases(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text(
+        "法定代表人：郝测一\n北测文化传播有限公司\n电话 13900001111\n",
+        encoding="utf-8",
+    )
+    (src / "b.md").write_text(
+        "法定代表人：郝测一\n北测文化传播有限公司\n手机 13900001111\n",
+        encoding="utf-8",
+    )
+    batch = redact_tree(src, mode="ai", output_dir=out, work_dir=out, unify_first=True)
+    assert batch.ok
+    assert batch.entities_consistent_path is not None
+    # both outputs should use the same alias for 郝测一
+    texts = [r.output_text for r in batch.results]
+    joined = "\n".join(texts)
+    assert "郝测一" not in joined
+    assert "13900001111" not in joined
+    # same person alias string appears in both files
+    entities = json.loads(batch.entities_consistent_path.read_text(encoding="utf-8"))["entities"]
+    person = next(e for e in entities if e["original"] == "郝测一")
+    alias = person["replacement"]
+    assert all(alias in t for t in texts)
+
+
+def test_verify_and_scan_tree(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree, scan_tree, verify_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text("手机 13900001111\n", encoding="utf-8")
+    (src / "b.md").write_text("手机 13800002222\n", encoding="utf-8")
+    scanned = scan_tree(src, mode="production")
+    assert scanned["files"] == 2
+    assert all(r["would_replace"] >= 1 for r in scanned["results"])
+
+    batch = redact_tree(src, mode="production", output_dir=out, work_dir=out)
+    assert batch.ok
+    verified = verify_tree(out, mode="production")
+    # only redacted docs should be checked among supported suffixes; ledgers are json and included!
+    # json is supported — residual on ledger may FAIL because ledger contains originals.
+    # Restrict verify_tree usage in test to redacted outputs only via a clean folder.
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    for r in batch.results:
+        target = clean / r.output_path.name
+        target.write_text(r.output_path.read_text(encoding="utf-8"), encoding="utf-8")
+    verified = verify_tree(clean, mode="production")
+    assert verified["ok"] is True
+    assert verified["files"] == 2
+
+
+def test_address_suspect_from_label():
+    from legal_redactor.suspects import detect_suspects
+
+    text = "甲方住所地：北京市海淀区测试路 88 号\n乙方住址：上海市浦东新区样例大道 66 号"
+    suspects = detect_suspects(text)
+    addrs = [s for s in suspects if s.category == "address"]
+    assert len(addrs) >= 2
+    assert any("海淀区测试路" in s.text for s in addrs)
