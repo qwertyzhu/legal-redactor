@@ -138,6 +138,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Only dump structural hits (skip person/org/work-title heuristics)",
     )
 
+    pu = sub.add_parser(
+        "unify",
+        help="Build cross-file entities.consistent.json + consistency report for a directory",
+    )
+    pu.add_argument("input", type=Path, help="Source document directory, or directory of *.ledger.json")
+    pu.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory for entities.consistent.json and consistency.report.*",
+    )
+    pu.add_argument(
+        "--mode",
+        choices=("ai", "production"),
+        default="ai",
+        help="Affects whether party rows get replacements (default ai)",
+    )
+    pu.add_argument(
+        "--entities",
+        type=Path,
+        default=None,
+        help="Optional seed entities.json merged into the unified set",
+    )
+    pu.add_argument(
+        "--from-ledgers",
+        action="store_true",
+        help="Treat input as a folder of *.ledger.json instead of source documents",
+    )
+    pu.add_argument("--recursive", action="store_true", help="Recurse into subfolders (source mode)")
+    pu.add_argument(
+        "--no-suspects",
+        action="store_true",
+        help="Do not include NL suspect hints when scanning sources",
+    )
+
     po = sub.add_parser(
         "ocr",
         help="OCR a scanned PDF to local markdown (requires Tesseract chi_sim)",
@@ -218,6 +254,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
+        if batch.entities_consistent_path:
+            print(f"unified:  {batch.entities_consistent_path}")
+        if batch.consistency_path:
+            print(f"consistency: {batch.consistency_path}")
         for result in batch.results:
             status = "PASS" if result.ok else "FAIL"
             print(
@@ -351,6 +391,38 @@ def main(argv: list[str] | None = None) -> int:
                 "NOTE: suspect rows are hints only. Confirm role/replacement; "
                 "nothing is auto-redacted until listed in entities for the chosen mode."
             )
+            return 0
+
+        if args.command == "unify":
+            from .consistency import unify_directory, unify_from_ledgers
+
+            if args.from_ledgers:
+                report = unify_from_ledgers(args.input, args.output_dir, mode=args.mode)
+            else:
+                if not Path(args.input).is_dir():
+                    print("ERROR: unify expects a directory of source documents", file=sys.stderr)
+                    return 1
+                report = unify_directory(
+                    args.input,
+                    args.output_dir,
+                    mode=args.mode,
+                    entities_path=args.entities,
+                    recursive=args.recursive,
+                    include_suspects=not args.no_suspects,
+                )
+            print(f"files:      {report.files_scanned}")
+            print(f"entities:   {report.entity_count}")
+            print(f"conflicts:  {report.conflict_count}")
+            print(f"unified:    {report.entities_path}")
+            print(f"report:     {report.report_path}")
+            if report.conflicts:
+                print("CONFLICTS (same original → different replacements):", file=sys.stderr)
+                for c in report.conflicts:
+                    print(
+                        f"  - {c.original}: {', '.join(c.replacements)}",
+                        file=sys.stderr,
+                    )
+                return 2
             return 0
 
         if args.command == "ocr":

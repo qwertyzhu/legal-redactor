@@ -39,6 +39,8 @@ class BatchRedactResult:
     mode: str
     results: list[RedactResult]
     skipped: list[tuple[Path, str]]
+    consistency_path: Path | None = None
+    entities_consistent_path: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -263,7 +265,22 @@ def redact_tree(
         except Exception as exc:  # noqa: BLE001 - batch continues
             skipped.append((src, str(exc)))
 
-    return BatchRedactResult(mode=mode, results=results, skipped=skipped)
+    consistency_path = None
+    entities_consistent_path = None
+    if results:
+        from .consistency import unify_from_ledgers
+
+        report = unify_from_ledgers(work_root, work_root, mode=mode)
+        consistency_path = report.report_path
+        entities_consistent_path = report.entities_path
+
+    return BatchRedactResult(
+        mode=mode,
+        results=results,
+        skipped=skipped,
+        consistency_path=consistency_path,
+        entities_consistent_path=entities_consistent_path,
+    )
 
 
 def _render_summary(

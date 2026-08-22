@@ -64,6 +64,10 @@ legal-redactor draft-entities contract.docx -o entities.draft.json
 
 # 批量脱敏整个目录
 legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
+
+# 跨文件统一替身（批量前/后）
+legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
+legal-redactor unify ./matters-redacted/ -o ./check/ --from-ledgers
 ```
 
 扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
@@ -76,6 +80,8 @@ legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters
 - `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
 - `*.summary.md` — 可读对照表
 
+批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。
+
 ## 仓库虚构演示
 
 ```console
@@ -85,11 +91,12 @@ pytest
 
 演示材料完全虚构。
 
-## 限制（v0.5）
+## 限制（v0.6）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
 - 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
+- 跨文件稳定替身请用 `unify` 或复用 `entities.consistent.json`
 - DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
 - 不是法律意见，不能替代律所保密流程

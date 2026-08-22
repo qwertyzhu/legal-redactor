@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-08-22
+
+Cross-file consistency for multi-document matters.
+
+- Added `legal-redactor unify DIR -o OUTDIR` to build `entities.consistent.json` with stable aliases across a folder.
+- Detects replacement conflicts (same original → different replacements) from source scans or `*.ledger.json`.
+- Batch `redact DIR` now writes `entities.consistent.json`, `consistency.report.json`, and `consistency.report.md`.
+- Production mode unified rows may omit replacements for party person/org/address (intentional keep).
+
 ## 0.5.0 - 2026-08-21
 
 Reviewability release: surface likely natural-language entities without guessing replacements.

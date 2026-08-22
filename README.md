@@ -73,6 +73,10 @@ legal-redactor draft-entities contract.docx -o entities.draft.json
 
 # Batch a folder of documents
 legal-redactor redact ./matters/ --mode ai --entities entities.json -o ./matters-redacted/
+
+# Unify aliases across a matter folder (before or after batch)
+legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
+legal-redactor unify ./matters-redacted/ -o ./check/ --from-ledgers
 ```
 
 Each successful `redact` also writes:
@@ -91,6 +95,8 @@ Each successful run also writes:
 - `*.residual.json` — structural residual report
 - `*.suspects.json` — NL suspect hints (not auto-redacted)
 - `*.summary.md` — human-readable table
+
+Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir.
 
 ## Repository demo (fictional only)
 
@@ -111,11 +117,12 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.5)
+## Limits (v0.6)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
 - Natural-language names need confirmed `entities.json`; suspects are hints only
+- Cross-file stable aliases require `unify` or reusing `entities.consistent.json`
 - DOCX: single-run formatting is preserved when possible; cross-run entities still collapse the paragraph
 - Batch redact is flat output names (recursive mode disambiguates colliding basenames)
 - Not legal advice; not a substitute for firm confidentiality procedure

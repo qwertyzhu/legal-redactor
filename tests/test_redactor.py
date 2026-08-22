@@ -391,3 +391,96 @@ def test_redact_writes_suspects_sidecar(tmp_path: Path):
     assert "郝测一" in texts
     # structural redaction still happened
     assert "13900001111" not in out.read_text(encoding="utf-8")
+
+
+def test_unify_directory_stable_aliases(tmp_path: Path):
+    from legal_redactor.consistency import unify_directory
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text(
+        "甲方法定代表人：郝测一\n联系电话：13900001111\n北测文化传播有限公司\n",
+        encoding="utf-8",
+    )
+    (src / "b.md").write_text(
+        "法定代表人：郝测一\n手机 13900001111\n北测文化传播有限公司与南例网络科技有限公司\n",
+        encoding="utf-8",
+    )
+    report = unify_directory(src, out, mode="ai")
+    assert report.files_scanned == 2
+    assert report.conflict_count == 0
+    assert report.entities_path is not None and report.entities_path.is_file()
+    payload = json.loads(report.entities_path.read_text(encoding="utf-8"))
+    by_original = {e["original"]: e for e in payload["entities"]}
+    assert "郝测一" in by_original
+    assert "13900001111" in by_original
+    assert "北测文化传播有限公司" in by_original
+    # same original appears in both files → single replacement
+    assert set(by_original["郝测一"].get("files", payload["_meta"]["per_entity_files"]["郝测一"])) >= {
+        "a.md",
+        "b.md",
+    }
+
+
+def test_unify_detects_replacement_conflicts(tmp_path: Path):
+    from legal_redactor.consistency import unify_from_ledgers
+
+    ledgers = tmp_path / "ledgers"
+    ledgers.mkdir()
+    (ledgers / "a.ledger.json").write_text(
+        json.dumps(
+            {
+                "mode": "ai",
+                "entities": [
+                    {
+                        "original": "郝测一",
+                        "category": "person",
+                        "role": "party",
+                        "replacement": "某甲",
+                        "source": "agent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (ledgers / "b.ledger.json").write_text(
+        json.dumps(
+            {
+                "mode": "ai",
+                "entities": [
+                    {
+                        "original": "郝测一",
+                        "category": "person",
+                        "role": "party",
+                        "replacement": "某乙",
+                        "source": "agent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    report = unify_from_ledgers(ledgers, tmp_path / "out", mode="ai")
+    assert report.conflict_count == 1
+    assert report.conflicts[0].original == "郝测一"
+    assert set(report.conflicts[0].replacements) == {"某甲", "某乙"}
+
+
+def test_batch_redact_writes_consistency_bundle(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text("联系电话 13900001111 郝测一\n法定代表人：郝测一\n", encoding="utf-8")
+    (src / "b.md").write_text("手机 13900001111\n", encoding="utf-8")
+    batch = redact_tree(src, mode="ai", output_dir=out, work_dir=out)
+    assert batch.ok
+    assert batch.entities_consistent_path is not None
+    assert batch.entities_consistent_path.is_file()
+    assert batch.consistency_path is not None
+    assert (out / "consistency.report.md").is_file()
