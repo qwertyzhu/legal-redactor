@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-Landing-page and installability (no change to redaction modes or detectors).
+Landing-page and installability.
 
 - Bilingual README: 60-second clone/install/demo, fictional `ai` vs `production` before/after (party name + mobile), single sidecar-file list.
 - Package `keywords` and `project.urls`.
 - Pytest drives the shipped CLI (`python -m legal_redactor`) on the fictional contract in both modes.
+- Windows/cp1252: CLI reconfigures stdout/stderr to UTF-8 (`errors=replace`) at process start so printing CJK suspect hints after a successful `redact` no longer exits 1.
 
 ## 0.7.0 - 2026-08-22
 

@@ -13,6 +13,23 @@ from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_t
 from .verify import scan_residual
 
 
+def _configure_stdio() -> None:
+    """Keep CJK CLI output from crashing Windows consoles (cp1252 / charmap).
+
+    A successful `redact` still prints suspect hints. On GitHub Actions
+    windows-latest that encode step used to UnicodeEncodeError and exit 1
+    after the files were already written.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, AttributeError):
+            continue
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="legal-redactor",
@@ -338,6 +355,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdio()
     parser = _build_parser()
     args = parser.parse_args(argv)
 

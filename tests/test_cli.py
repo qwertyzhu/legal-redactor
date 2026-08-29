@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -34,7 +35,14 @@ CASE_NO = "（2024）京0491民初1234号"
 ID_NO = "110101199001011234"
 
 
-def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run_cli(
+    *args: str,
+    cwd: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, "-m", "legal_redactor", *args],
         capture_output=True,
@@ -42,6 +50,7 @@ def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess
         encoding="utf-8",
         errors="replace",
         cwd=cwd or ROOT,
+        env=env,
         check=False,
     )
 
@@ -123,6 +132,40 @@ def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path)
         residual = json.loads(residual_path.read_text(encoding="utf-8"))
         assert residual["ok"] is True, residual
         assert residual["mode"] == mode
+
+
+def test_shipped_cli_production_redact_survives_cp1252_stdio(tmp_path: Path) -> None:
+    """Windows consoles (and PYTHONIOENCODING=cp1252) must not turn a
+    successful production redact into exit 1 when printing CJK suspects.
+    """
+    src = tmp_path / "sample_contract.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    out = tmp_path / "sample_contract.redacted-production.md"
+    proc = _run_cli(
+        "redact",
+        str(src),
+        "--mode",
+        "production",
+        "--entities",
+        str(FIXTURES / "entities_production.json"),
+        "-o",
+        str(out),
+        "--work-dir",
+        str(tmp_path / "work"),
+        cwd=tmp_path,
+        extra_env={"PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+    )
+    assert proc.returncode == 0, proc.stderr + "\n" + proc.stdout
+    assert "charmap" not in proc.stderr
+    text = out.read_text(encoding="utf-8")
+    assert PARTY in text
+    assert CASE_NO in text
+    assert MOBILE not in text
+    assert ID_NO not in text
+    residual = json.loads(
+        (tmp_path / "work" / f"{out.stem}.residual.json").read_text(encoding="utf-8")
+    )
+    assert residual["ok"] is True, residual
 
 
 def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
