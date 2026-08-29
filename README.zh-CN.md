@@ -76,10 +76,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI（或指定 tag）：
+只要 CLI，装 GitHub Release 的 wheel：
 
 ```console
-python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git@v0.8.0
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.8.0/legal_redactor-0.8.0-py3-none-any.whl
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
