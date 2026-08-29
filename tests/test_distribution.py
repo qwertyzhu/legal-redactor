@@ -78,3 +78,29 @@ def test_changelog_section_matches_version() -> None:
         _pyproject_version(),
     )
     assert body.startswith(f"## {_pyproject_version()}")
+
+
+def test_english_readme_does_not_repeat_sidecar_list() -> None:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    block = (
+        "- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)\n"
+        "- `*.residual.json` — structural residual report\n"
+        "- `*.suspects.json` — natural-language entity **hints** (not auto-redacted)\n"
+        "- `*.summary.md` — human-readable table\n"
+    )
+    assert text.count(block) == 1
+    # residual/suspects/summary belong only to that list, not a second copy
+    assert text.count("`*.residual.json`") == 1
+    assert text.count("`*.suspects.json`") == 1
+    assert text.count("`*.summary.md`") == 1
+
+
+def test_readmes_show_dual_mode_demo_and_before_after() -> None:
+    for name in ("README.md", "README.zh-CN.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "`ai`" in text
+        assert "`production`" in text
+        assert "郝测一" in text
+        assert "13900001111" in text
+        assert "scripts/run_demo.py" in text
+        assert "legal-redactor" in text

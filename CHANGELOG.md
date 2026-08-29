@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Landing-page and installability (no change to redaction modes or detectors).
+
+- Bilingual README: 60-second clone/install/demo, fictional `ai` vs `production` before/after (party name + mobile), single sidecar-file list.
+- Package `keywords` and `project.urls`.
+- Pytest drives the shipped CLI (`python -m legal_redactor`) on the fictional contract in both modes.
+
 ## 0.7.0 - 2026-08-22
 
 Batch two-pass workflow and directory operators.

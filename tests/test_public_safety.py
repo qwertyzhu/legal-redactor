@@ -67,6 +67,18 @@ _EMAIL_ALLOW = {
     "example@example.com",
     "user@example.com",
     "name@example.com",
+    "haoceyi@example-fictional.test",
+    "shenlieer@example-fictional.test",
+}
+
+# In-repo fictional sample tokens. README before/after may show these;
+# they are the same values as examples/fictional, not live client data.
+_FICTIONAL_DEMO_TOKENS = {
+    "13900001111",
+    "13800002222",
+    "110101199001011234",
+    "（2024）京0491民初1234号",
+    "(2024)京0491民初1234号",
 }
 _PATH_ALLOW_FRAGMENTS = (
     "C:\\Users\\<you>",
@@ -138,20 +150,28 @@ def test_public_tree_has_no_live_structural_pii():
             offenders.append(f"{rel}: email {val}")
 
         for match in _MOBILE.finditer(text):
+            val = match.group(0)
+            if val in _FICTIONAL_DEMO_TOKENS:
+                continue
             # Skip pattern definitions and documentation masks like 1[3-9]
             window = text[max(0, match.start() - 30) : match.end() + 30]
             if "1[3-9]" in window or r"\d{9}" in window:
                 continue
-            offenders.append(f"{rel}: mobile {match.group(0)}")
+            offenders.append(f"{rel}: mobile {val}")
 
         for match in _ID18.finditer(text):
+            val = match.group(0)
+            if val in _FICTIONAL_DEMO_TOKENS:
+                continue
             window = text[max(0, match.start() - 40) : match.end() + 40]
             if r"\d{5}" in window or "19|20" in window:
                 continue
-            offenders.append(f"{rel}: id_card {match.group(0)}")
+            offenders.append(f"{rel}: id_card {val}")
 
         for match in _CASE_NO.finditer(text):
             val = match.group(0)
+            if val in _FICTIONAL_DEMO_TOKENS:
+                continue
             # Allow documentation masks with XX placeholders
             if "XX" in val or "20XX" in val:
                 continue

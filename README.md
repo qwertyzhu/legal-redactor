@@ -21,12 +21,54 @@ Built for lawyers who need (1) a privacy-safe copy before pasting into online AI
 
 Agent (or you) supplies person/org/work-title entities. The CLI applies replacements deterministically and residual-scans structural PII.
 
-## Install
+## 60-second start
 
 ```console
 git clone https://github.com/qwertyzhu/legal-redactor.git
 cd legal-redactor
 python -m pip install -e ".[dev]"
+legal-redactor --version
+python scripts/run_demo.py --clean
+```
+
+`run_demo.py` redacts the in-repo fictional contract in **both** modes and writes same-format `md` / `docx` / `pdf` under `demo-output/`. It must print that every residual scan passed. Re-run with `--clean` any time; the result is deterministic.
+
+## Fictional before / after
+
+The sample party is **郝测一** and the sample mobile is **13900001111** (fully fictional).
+
+| Field | Original | `ai` | `production` |
+|---|---|---|---|
+| Party name | 郝测一 | removed (alias `某甲`) | **kept** |
+| Mobile | 13900001111 | removed | removed |
+| Case number | （2024）京0491民初1234号 | removed | **kept** |
+
+```text
+# original (excerpt)
+法定代表人：郝测一
+联系电话：13900001111
+关联案号示例：（2024）京0491民初1234号
+
+# after --mode ai
+法定代表人：某甲
+联系电话：[手机号]
+关联案号示例：（20XX）XX民初XX号
+
+# after --mode production
+法定代表人：郝测一
+联系电话：[手机号]
+关联案号示例：（2024）京0491民初1234号
+```
+
+Never use `ai` output as a court filing. Never upload `*.ledger.json`.
+
+## Install
+
+From a clone (documented path; PyPI is not the source of truth yet):
+
+```console
+python -m pip install -e ".[dev]"
+legal-redactor --help    # lists redact / scan / verify
 ```
 
 Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
@@ -44,7 +86,7 @@ Install skill from qwertyzhu/legal-redactor:
 - skills/legal-document-redactor
 ```
 
-## Quick start
+## CLI
 
 ```console
 # Scan only
@@ -90,23 +132,17 @@ Each successful `redact` also writes:
 - `*.suspects.json` — natural-language entity **hints** (not auto-redacted)
 - `*.summary.md` — human-readable table
 
+Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir.
+
 Scanned workflow: `skills/legal-document-redactor/references/scanned-pdf.md`.  
 Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  
 Optional structural + suspect draft: `legal-redactor draft-entities INPUT.docx`.
-Each successful run also writes:
 
-- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
-- `*.residual.json` — structural residual report
-- `*.suspects.json` — NL suspect hints (not auto-redacted)
-- `*.summary.md` — human-readable table
-
-Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir.
-
-## Repository demo (fictional only)
+## Tests
 
 ```console
+python -m pytest
 python scripts/run_demo.py --clean
-pytest
 ```
 
 Demo inputs are completely fictional. Any resemblance to real parties is coincidental.

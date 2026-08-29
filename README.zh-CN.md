@@ -24,12 +24,54 @@
 
 姓名、单位、作品名等由 Agent（或你）写入 `entities.json`；CLI 做确定性替换与结构性残留扫描。
 
-## 安装
+## 60 秒上手
 
 ```console
 git clone https://github.com/qwertyzhu/legal-redactor.git
 cd legal-redactor
 python -m pip install -e ".[dev]"
+legal-redactor --version
+python scripts/run_demo.py --clean
+```
+
+`run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
+
+## 虚构样例：脱敏前后
+
+样例当事人是 **郝测一**，样例手机是 **13900001111**（完全虚构）。
+
+| 字段 | 原文 | `ai` | `production` |
+|---|---|---|---|
+| 当事人姓名 | 郝测一 | 去掉（替身 `某甲`） | **保留** |
+| 手机 | 13900001111 | 去掉 | 去掉 |
+| 案号 | （2024）京0491民初1234号 | 去掉 | **保留** |
+
+```text
+# 原文（节选）
+法定代表人：郝测一
+联系电话：13900001111
+关联案号示例：（2024）京0491民初1234号
+
+# --mode ai 之后
+法定代表人：某甲
+联系电话：[手机号]
+关联案号示例：（20XX）XX民初XX号
+
+# --mode production 之后
+法定代表人：郝测一
+联系电话：[手机号]
+关联案号示例：（2024）京0491民初1234号
+```
+
+`ai` 产物不得当作起诉材料。`*.ledger.json` 禁止上传。
+
+## 安装
+
+以 clone 后的可编辑安装为准（当前不以 PyPI 为发布源）：
+
+```console
+python -m pip install -e ".[dev]"
+legal-redactor --help    # 列出 redact / scan / verify
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
@@ -39,7 +81,7 @@ python -m pip install -e ".[dev]"
 把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。  
 Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。
 
-## 快速使用
+## 命令行
 
 ```console
 legal-redactor scan contract.docx --mode ai
@@ -74,9 +116,6 @@ legal-redactor scan ./matters/ --mode ai
 legal-redactor verify ./matters-redacted/ --mode ai
 ```
 
-扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
-`entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
-也可先跑 `legal-redactor draft-entities INPUT.docx` 生成结构性草稿 + 疑似实体提示，再人工确认角色与替身。
 每次成功运行还会生成：
 
 - `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
@@ -86,11 +125,15 @@ legal-redactor verify ./matters-redacted/ --mode ai
 
 批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。
 
-## 仓库虚构演示
+扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
+`entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
+也可先跑 `legal-redactor draft-entities INPUT.docx` 生成结构性草稿 + 疑似实体提示，再人工确认角色与替身。
+
+## 测试
 
 ```console
+python -m pytest
 python scripts/run_demo.py --clean
-pytest
 ```
 
 演示材料完全虚构。
