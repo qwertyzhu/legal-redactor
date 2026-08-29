@@ -27,6 +27,13 @@ def _pyproject_version() -> str:
     return match.group(1)
 
 
+def test_pyproject_has_no_license_classifier() -> None:
+    # PEP 639: license = "Apache-2.0" plus a License :: classifier breaks
+    # recent setuptools (CI pip install -e ".[dev]").
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "License ::" not in text
+
+
 def test_versions_aligned() -> None:
     version = _pyproject_version()
     assert pack_skill.project_version(ROOT) == version
