@@ -44,6 +44,8 @@ The sample party is **郝测一** and the sample mobile is **13900001111** (full
 | Mobile | 13900001111 | removed | removed |
 | Case number | （2024）京0491民初1234号 | removed | **kept** |
 
+![Fictional contract: original vs ai vs production (top of first PDF page)](docs/images/dual-mode-preview.png)
+
 ```text
 # original (excerpt)
 法定代表人：郝测一
@@ -65,11 +67,17 @@ Never use `ai` output as a court filing. Never upload `*.ledger.json`.
 
 ## Install
 
-From a clone (documented path; PyPI is not the source of truth yet):
+From a clone (documented path; PyPI is not published yet):
 
 ```console
 python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
+```
+
+CLI-only from git:
+
+```console
+python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git
 ```
 
 Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题 / Security
+    url: https://github.com/qwertyzhu/legal-redactor/blob/main/SECURITY.md
+    about: 不要在 Issue 里贴真实卷宗、ledger 或客户身份。

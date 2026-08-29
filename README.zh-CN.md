@@ -46,6 +46,8 @@ python scripts/run_demo.py --clean
 | 手机 | 13900001111 | 去掉 | 去掉 |
 | 案号 | （2024）京0491民初1234号 | 去掉 | **保留** |
 
+![虚构合同 PDF 首页上部：原文 / ai / production](docs/images/dual-mode-preview.png)
+
 ```text
 # 原文（节选）
 法定代表人：郝测一
@@ -67,11 +69,17 @@ python scripts/run_demo.py --clean
 
 ## 安装
 
-以 clone 后的可编辑安装为准（当前不以 PyPI 为发布源）：
+以 clone 后的可编辑安装为准（当前尚未发布到 PyPI）：
 
 ```console
 python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
+```
+
+只要 CLI：
+
+```console
+python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。

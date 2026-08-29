@@ -29,7 +29,7 @@ Override structural defaults when needed:
 
 1. Work on **local copies**. Do not overwrite the only original.
 2. Output suffix **must** match input (`.docx`→`.docx`, `.pdf`→`.pdf`).
-3. v0.3 PDF support:
+3. PDF support:
    - **Text-layer PDF**: `redact` as before.
    - **Scanned / image-only PDF**: `ocr` then redact markdown for AI/text use; `redact-scan` for court visual black boxes. See [references/scanned-pdf.md](references/scanned-pdf.md).
 4. Residual structural scan must **PASS** before delivery of text outputs (unless the user explicitly accepts residual risk). Visual `redact-scan` requires **human page-flip** (OCR boxes can miss).

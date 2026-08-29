@@ -105,3 +105,4 @@ def test_readmes_show_dual_mode_demo_and_before_after() -> None:
         assert "13900001111" in text
         assert "scripts/run_demo.py" in text
         assert "legal-redactor" in text
+        assert "docs/images/dual-mode-preview.png" in text

@@ -58,7 +58,9 @@ def _run_cli(
 def test_cli_version_matches_package() -> None:
     proc = _run_cli("--version")
     assert proc.returncode == 0, proc.stderr
-    assert f"legal-redactor {__version__}" in (proc.stdout + proc.stderr)
+    blob = proc.stdout + proc.stderr
+    assert f"legal-redactor {__version__}" in blob
+    assert "deprecated" not in blob.lower()
 
 
 def test_cli_help_lists_redact_scan_verify() -> None:

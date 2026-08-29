@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf as fitz
 
 DEFAULT_TESSERACT_CANDIDATES = (
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",

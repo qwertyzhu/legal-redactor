@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import pytest
 
 from legal_redactor.ocr_engine import collapse_cjk_spaces, find_tesseract, pdf_has_text_layer

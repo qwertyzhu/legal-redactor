@@ -38,3 +38,20 @@ git push origin v0.7.0
 
 3. The Release workflow packs `legal-document-redactor.skill`, writes `SHA256SUMS.txt`, and publishes a GitHub Release.
 4. Do not rewrite published tags.
+
+### PyPI (optional)
+
+The package name `legal-redactor` is not published yet. When ready:
+
+1. Create a PyPI project and add this GitHub repo as a **trusted publisher**
+   (environment name `pypi`, workflow `.github/workflows/pypi.yml`).
+2. Actions → PyPI → Run workflow, type `publish`.
+
+Until then the documented install is still a clone plus `pip install -e ".[dev]"`,
+or `pip install git+https://github.com/qwertyzhu/legal-redactor.git`.
+
+Refresh the README preview after demo-text changes:
+
+```console
+python scripts/render_demo_preview.py
+```

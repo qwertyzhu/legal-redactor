@@ -34,9 +34,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="legal-redactor",
         description=(
+            "中国法律文书本地双模式脱敏：ai=给在线模型去标识；production=交法院/对方前只去证件号手机邮箱。 "
             "Local-first dual-mode redaction for Chinese legal documents. "
-            "Modes: ai (aggressive, for online models) | production (selective, for court/opponent). "
-            "Scanned PDFs: use `ocr` then redact text, or `redact-scan` for visual black boxes. "
+            "Scanned PDFs: `ocr` then redact text, or `redact-scan` for visual black boxes. "
             "Pass a directory to `redact` for batch processing."
         ),
     )

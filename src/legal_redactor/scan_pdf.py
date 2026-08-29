@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf as fitz
 
 from .ocr_engine import find_tesseract, find_tessdata
 from .patterns import categories_for_mode

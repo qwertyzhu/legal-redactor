@@ -1,0 +1,30 @@
+name: Bug
+description: 功能问题（只用虚构样例）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **禁止**粘贴真实合同、起诉状、ledger.json、身份证号或客户姓名。
+        请用 `examples/fictional/` 或自行编造的样例复现。
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤 / Reproduction
+      description: 命令、模式（ai / production）、输入后缀。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望 / Expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      placeholder: "legal-redactor 0.7.0"
+    validations:
+      required: true
