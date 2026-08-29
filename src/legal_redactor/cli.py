@@ -34,10 +34,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="legal-redactor",
         description=(
-            "中国法律文书本地双模式脱敏：ai=给在线模型去标识；production=交法院/对方前只去证件号手机邮箱。 "
-            "Local-first dual-mode redaction for Chinese legal documents. "
-            "Scanned PDFs: `ocr` then redact text, or `redact-scan` for visual black boxes. "
-            "Pass a directory to `redact` for batch processing."
+            "中国法律文书本地双模式脱敏："
+            "ai=给在线模型去标识；production=交法院/对方前只去证件号、手机、邮箱。"
+            "扫描件 PDF：先 `ocr` 再脱敏文本，或用 `redact-scan` 做视觉涂黑。"
+            "`redact` 可传入目录做批量处理。"
         ),
     )
     p.add_argument("--version", action="version", version=f"legal-redactor {__version__}")
@@ -47,26 +47,26 @@ def _build_parser() -> argparse.ArgumentParser:
         sp.add_argument(
             "input",
             type=Path,
-            help="Input file, or directory for batch redact",
+            help="输入文件，或批量脱敏时的目录",
         )
         if require_mode:
             sp.add_argument(
                 "--mode",
                 choices=("ai", "production"),
                 required=True,
-                help="ai=full desensitization; production=keep parties, strip high-risk contact/account data",
+                help="ai=全面去标识；production=保留当事人，去掉证件号/手机/邮箱等",
             )
         sp.add_argument(
             "--entities",
             type=Path,
             default=None,
-            help="Optional JSON list of entities (names, orgs, addresses, work titles)",
+            help="可选的实体 JSON（姓名、单位、地址、作品名）",
         )
         sp.add_argument(
             "--preserve",
             action="append",
             default=[],
-            help="Exact string to leave unchanged (repeatable)",
+            help="保持原文不变的字符串（可重复）",
         )
         sp.add_argument(
             "--keep-categories",
@@ -74,8 +74,8 @@ def _build_parser() -> argparse.ArgumentParser:
             default=[],
             metavar="CAT",
             help=(
-                "Structural categories to NOT auto-redact (repeatable or comma-separated). "
-                "Examples: uscc, bank_account, case_number, mobile, email, id_card, landline"
+                "不自动脱敏的结构类别（可重复或逗号分隔）。"
+                "例如：uscc, bank_account, case_number, mobile, email, id_card, landline"
             ),
         )
         sp.add_argument(
@@ -83,12 +83,12 @@ def _build_parser() -> argparse.ArgumentParser:
             action="append",
             default=[],
             metavar="CAT",
-            help="Extra structural categories to auto-redact beyond the mode default",
+            help="在模式默认之外额外自动脱敏的结构类别",
         )
 
     pr = sub.add_parser(
         "redact",
-        help="Redact a document (or directory of documents) and write same-format output + ledger",
+        help="脱敏一份文书（或整个目录），写出同格式产物和 ledger",
     )
     add_common(pr)
     pr.add_argument(
@@ -96,148 +96,147 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         default=None,
-        help="Output file path, or output directory when input is a directory",
+        help="输出文件路径；输入为目录时为输出目录",
     )
     pr.add_argument(
         "--work-dir",
         type=Path,
         default=None,
-        help="Directory for ledger/residual/summary (default: output parent)",
+        help="ledger / 残留报告 / 摘要的目录（默认：输出文件所在目录）",
     )
     pr.add_argument(
         "--recursive",
         action="store_true",
-        help="When input is a directory, include supported files in subfolders",
+        help="输入为目录时，包含子目录中的支持文件",
     )
     pr.add_argument(
         "--unify",
         action="store_true",
         help=(
-            "Batch only: unify entities across the folder first, then redact every file "
-            "with entities.consistent.json so aliases stay stable"
+            "仅批量：先统一目录内实体，再用 entities.consistent.json 脱敏，保证替身稳定"
         ),
     )
     pr.add_argument(
         "--allow-residual",
         action="store_true",
-        help="Exit 0 even if residual scan finds remaining structural PII",
+        help="即使残留扫描仍发现结构性个人信息，也以退出码 0 结束",
     )
 
-    ps = sub.add_parser("scan", help="Detect structural PII / build plan without writing redacted file")
+    ps = sub.add_parser("scan", help="只检测结构性个人信息 / 生成计划，不写出脱敏文件")
     add_common(ps)
-    ps.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    ps.add_argument("--json", action="store_true", help="打印机器可读 JSON")
     ps.add_argument(
         "--recursive",
         action="store_true",
-        help="When input is a directory, include supported files in subfolders",
+        help="输入为目录时，包含子目录中的支持文件",
     )
 
-    pv = sub.add_parser("verify", help="Residual-scan an already redacted file or directory")
-    pv.add_argument("input", type=Path)
+    pv = sub.add_parser("verify", help="对已脱敏文件或目录做残留扫描")
+    pv.add_argument("input", type=Path, help="已脱敏文件或目录")
     pv.add_argument("--mode", choices=("ai", "production"), required=True)
     pv.add_argument(
         "--keep-categories",
         action="append",
         default=[],
         metavar="CAT",
-        help="Same meaning as in redact/scan — residual ignores these categories",
+        help="含义与 redact/scan 相同：残留扫描忽略这些类别",
     )
     pv.add_argument(
         "--extra-categories",
         action="append",
         default=[],
         metavar="CAT",
-        help="Same meaning as in redact/scan",
+        help="含义与 redact/scan 相同",
     )
     pv.add_argument(
         "--recursive",
         action="store_true",
-        help="When input is a directory, include supported files in subfolders",
+        help="输入为目录时，包含子目录中的支持文件",
     )
-    pv.add_argument("--json", action="store_true", help="Print machine-readable JSON (directory mode)")
+    pv.add_argument("--json", action="store_true", help="打印机器可读 JSON（目录模式）")
 
     pd = sub.add_parser(
         "draft-entities",
-        help="Draft entities.json skeleton from structural hits + NL suspect hints",
+        help="根据结构性命中和自然语言疑似提示，起草 entities.json 骨架",
     )
-    pd.add_argument("input", type=Path, help="Input .docx / .pdf / .txt / .md")
+    pd.add_argument("input", type=Path, help="输入 .docx / .pdf / .txt / .md")
     pd.add_argument(
         "-o",
         "--output",
         type=Path,
         default=Path("entities.draft.json"),
-        help="Output JSON path (default: entities.draft.json)",
+        help="输出 JSON 路径（默认：entities.draft.json）",
     )
     pd.add_argument(
         "--no-suspects",
         action="store_true",
-        help="Only dump structural hits (skip person/org/work-title heuristics)",
+        help="只导出结构性命中（跳过姓名/单位/作品名启发式）",
     )
 
     pu = sub.add_parser(
         "unify",
-        help="Build cross-file entities.consistent.json + consistency report for a directory",
+        help="为目录生成跨文件 entities.consistent.json 与一致性报告",
     )
-    pu.add_argument("input", type=Path, help="Source document directory, or directory of *.ledger.json")
+    pu.add_argument("input", type=Path, help="源文书目录，或 *.ledger.json 所在目录")
     pu.add_argument(
         "-o",
         "--output-dir",
         type=Path,
         required=True,
-        help="Directory for entities.consistent.json and consistency.report.*",
+        help="entities.consistent.json 与 consistency.report.* 的输出目录",
     )
     pu.add_argument(
         "--mode",
         choices=("ai", "production"),
         default="ai",
-        help="Affects whether party rows get replacements (default ai)",
+        help="影响当事人行是否写入替身（默认 ai）",
     )
     pu.add_argument(
         "--entities",
         type=Path,
         default=None,
-        help="Optional seed entities.json merged into the unified set",
+        help="可选的种子 entities.json，会并入统一集合",
     )
     pu.add_argument(
         "--from-ledgers",
         action="store_true",
-        help="Treat input as a folder of *.ledger.json instead of source documents",
+        help="把输入当作 *.ledger.json 目录，而不是源文书目录",
     )
-    pu.add_argument("--recursive", action="store_true", help="Recurse into subfolders (source mode)")
+    pu.add_argument("--recursive", action="store_true", help="递归子目录（源文书模式）")
     pu.add_argument(
         "--no-suspects",
         action="store_true",
-        help="Do not include NL suspect hints when scanning sources",
+        help="扫描源文书时不纳入自然语言疑似提示",
     )
 
     po = sub.add_parser(
         "ocr",
-        help="OCR a scanned PDF to local markdown (requires Tesseract chi_sim)",
+        help="把扫描件 PDF OCR 成本地 Markdown（需 Tesseract chi_sim）",
     )
-    po.add_argument("input", type=Path, help="Scanned PDF")
+    po.add_argument("input", type=Path, help="扫描件 PDF")
     po.add_argument(
         "-o",
         "--output-dir",
         type=Path,
         required=True,
-        help="Directory for ocr.md / ocr.normalized.md / ocr_meta.json",
+        help="ocr.md / ocr.normalized.md / ocr_meta.json 的输出目录",
     )
     po.add_argument("--dpi", type=int, default=200)
     po.add_argument("--lang", default="chi_sim+eng")
-    po.add_argument("--tesseract", type=Path, default=None, help="Path to tesseract.exe")
-    po.add_argument("--tessdata", type=Path, default=None, help="TESSDATA_PREFIX directory")
+    po.add_argument("--tesseract", type=Path, default=None, help="tesseract.exe 路径")
+    po.add_argument("--tessdata", type=Path, default=None, help="TESSDATA_PREFIX 目录")
 
     prs = sub.add_parser(
         "redact-scan",
-        help="Black-box structural PII on a scanned PDF (court visual path; requires Tesseract)",
+        help="对扫描件 PDF 做结构性个人信息涂黑（交法院视觉路径；需 Tesseract）",
     )
-    prs.add_argument("input", type=Path)
-    prs.add_argument("-o", "--output", type=Path, required=True, help="Output PDF path")
+    prs.add_argument("input", type=Path, help="扫描件 PDF")
+    prs.add_argument("-o", "--output", type=Path, required=True, help="输出 PDF 路径")
     prs.add_argument(
         "--mode",
         choices=("ai", "production"),
         default="production",
-        help="Category set (default production: strip contacts/accounts, keep parties visually)",
+        help="类别集合（默认 production：去掉联系方式/账号，视觉上保留当事人）",
     )
     prs.add_argument("--dpi", type=int, default=200)
     prs.add_argument("--lang", default="chi_sim+eng")

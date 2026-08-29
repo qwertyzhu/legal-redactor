@@ -1,4 +1,4 @@
 interface:
-  display_name: "Legal Document Redactor"
-  short_description: "Dual-mode redaction for Chinese legal docs (AI vs court/opponent)"
-  default_prompt: "Redact this legal document. Confirm mode ai or production, keep same file format, write a local ledger, and residual-scan before delivery."
+  display_name: "法律文书脱敏"
+  short_description: "中国法律文书双模式脱敏（ai 给模型 / production 交法院）"
+  default_prompt: "请脱敏这份法律文书。先确认模式 ai 或 production，保持原文件格式，写本地 ledger，交付前做残留扫描。"

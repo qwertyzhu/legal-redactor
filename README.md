@@ -1,28 +1,30 @@
-[English](README.md) | [简体中文](README.zh-CN.md)
+[简体中文](README.md) | [English](README.en.md)
 
 # legal-redactor
 
 [![CI](https://github.com/qwertyzhu/legal-redactor/actions/workflows/ci.yml/badge.svg)](https://github.com/qwertyzhu/legal-redactor/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
+[![许可证](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
 
 **中国法律文书本地脱敏：给 AI 之前去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
-**Local-first dual-mode redaction for Chinese legal documents.**  
-Same format out as in: DOCX→DOCX, PDF→PDF (text-layer), text→text.  
-Built for lawyers who need (1) a privacy-safe copy before pasting into online AI, and (2) a selective production copy before court or opponent disclosure.
+输入什么格式，就返回什么格式：DOCX→DOCX，PDF→PDF（文字层），文本→文本。  
+两个刚需：
 
-> Early preview. Does not replace lawyer judgment. A passing residual scan is not proof of perfect anonymization.
+1. **给在线 AI 之前**——激进脱敏，降低事项可反查性；  
+2. **交法院 / 给被告之前**——保留主体与案号，去掉证件号、手机、邮箱、账号等高敏项。
 
-## Two modes
+> 早期预览。不替代律师判断。残留扫描通过 ≠ 自然语言标识已全部清除。
 
-| Mode | Destination | Default behavior |
+## 双模式
+
+| 模式 | 去向 | 默认行为 |
 |---|---|---|
-| `ai` | Online models, shareable notes, public fixtures | Aggressive: names, orgs, case numbers, IDs, phones, emails, accounts, USCC + agent-listed entities |
-| `production` | Court / opposing party | Keep parties & case numbers; strip IDs, phones, emails, bank accounts, USCC; optional third-party entities |
+| `ai` | 在线模型、可外传笔记、公开样例 | 激进：姓名/单位/案号/证件/手机/邮箱/账号/信用代码 + entities 清单 |
+| `production` | 法院 / 对方当事人 | 保留当事人与案号；去掉证件号、手机、邮箱、银行账号、信用代码；可标记第三人 |
 
-Agent (or you) supplies person/org/work-title entities. The CLI applies replacements deterministically and residual-scans structural PII.
+姓名、单位、作品名等由 Agent（或你）写入 `entities.json`；CLI 做确定性替换与结构性残留扫描。
 
-## 60-second start
+## 60 秒上手
 
 ```console
 git clone https://github.com/qwertyzhu/legal-redactor.git
@@ -32,155 +34,133 @@ legal-redactor --version
 python scripts/run_demo.py --clean
 ```
 
-`run_demo.py` redacts the in-repo fictional contract in **both** modes and writes same-format `md` / `docx` / `pdf` under `demo-output/`. It must print that every residual scan passed. Re-run with `--clean` any time; the result is deterministic.
+`run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
 
-## Fictional before / after
+## 虚构样例：脱敏前后
 
-The sample party is **郝测一** and the sample mobile is **13900001111** (fully fictional).
+样例当事人是 **郝测一**，样例手机是 **13900001111**（完全虚构）。
 
-| Field | Original | `ai` | `production` |
+| 字段 | 原文 | `ai` | `production` |
 |---|---|---|---|
-| Party name | 郝测一 | removed (alias `某甲`) | **kept** |
-| Mobile | 13900001111 | removed | removed |
-| Case number | （2024）京0491民初1234号 | removed | **kept** |
+| 当事人姓名 | 郝测一 | 去掉（替身 `某甲`） | **保留** |
+| 手机 | 13900001111 | 去掉 | 去掉 |
+| 案号 | （2024）京0491民初1234号 | 去掉 | **保留** |
 
-![Fictional contract: original vs ai vs production (top of first PDF page)](docs/images/dual-mode-preview.png)
+![虚构合同 PDF 首页上部：原文 / ai / production](docs/images/dual-mode-preview.png)
 
 ```text
-# original (excerpt)
+# 原文（节选）
 法定代表人：郝测一
 联系电话：13900001111
 关联案号示例：（2024）京0491民初1234号
 
-# after --mode ai
+# --mode ai 之后
 法定代表人：某甲
 联系电话：[手机号]
 关联案号示例：（20XX）XX民初XX号
 
-# after --mode production
+# --mode production 之后
 法定代表人：郝测一
 联系电话：[手机号]
 关联案号示例：（2024）京0491民初1234号
 ```
 
-Never use `ai` output as a court filing. Never upload `*.ledger.json`.
+`ai` 产物不得当作起诉材料。`*.ledger.json` 禁止上传。
 
-## Install
+## 安装
 
-From a clone (documented path; PyPI is not published yet):
+以 clone 后的可编辑安装为准（当前尚未发布到 PyPI）：
 
 ```console
 python -m pip install -e ".[dev]"
-legal-redactor --help    # lists redact / scan / verify
+legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-CLI-only from the GitHub Release wheel:
+只要 CLI，装 GitHub Release 的 wheel：
 
 ```console
 python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.8.0/legal_redactor-0.8.0-py3-none-any.whl
 ```
 
-Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
+也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
 
-### Claude Code / Codex skill
+### Claude Code / Codex Skill
 
-Copy or junction `skills/legal-document-redactor` into `~/.claude/skills/` (or `~/.agents/skills/`).  
-Release assets also include a packed `legal-document-redactor.skill` plus `SHA256SUMS.txt`.
+把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。  
+Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。
 
-Codex:
-
-```text
-$skill-installer
-Install skill from qwertyzhu/legal-redactor:
-- skills/legal-document-redactor
-```
-
-## CLI
+## 命令行
 
 ```console
-# Scan only
 legal-redactor scan contract.docx --mode ai
 
-# Redact for online AI (entities JSON optional but recommended for names)
 legal-redactor redact contract.docx --mode ai --entities entities.json -o contract.redacted-ai.docx
 
-# Redact for court/opponent production
 legal-redactor redact contract.docx --mode production --entities entities.json -o contract.redacted-production.docx
 
-# Keep USCC on a filing that requires it
+# 起诉材料需要保留统一社会信用代码时：
 legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
 legal-redactor verify out.docx --mode production --keep-categories uscc
 
-# Scanned PDF (no text layer)
+# 扫描件 PDF（无文字层）
 legal-redactor ocr scan.pdf -o workdir/
 legal-redactor redact workdir/ocr.normalized.md --mode production -o workdir/out.md
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 
-# Residual check
 legal-redactor verify contract.redacted-ai.docx --mode ai
 
-# Draft entities skeleton (structural + NL suspect hints)
+# 生成 entities 草稿（结构性字段 + 疑似姓名/单位/作品提示）
 legal-redactor draft-entities contract.docx -o entities.draft.json
 
-# Batch a folder of documents (two-pass: unify aliases then redact)
+# 批量脱敏（推荐两阶段：先统一替身再脱敏）
 legal-redactor redact ./matters/ --mode ai --unify -o ./matters-redacted/
 
-# Or unify manually, then reuse the file
+# 或手动 unify 后再脱敏
 legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
 legal-redactor redact ./matters/ --mode ai --entities ./matter-unified/entities.consistent.json -o ./matters-redacted/
 
-# Directory scan / residual verify
+# 目录扫描 / 残留校验
 legal-redactor scan ./matters/ --mode ai
 legal-redactor verify ./matters-redacted/ --mode ai
 ```
 
-Each successful `redact` also writes:
+每次成功运行还会生成：
 
-- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
-- `*.residual.json` — structural residual report
-- `*.suspects.json` — natural-language entity **hints** (not auto-redacted)
-- `*.summary.md` — human-readable table
+- `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
+- `*.residual.json` — 结构性残留报告
+- `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
+- `*.summary.md` — 可读对照表
 
-Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir.
+批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。
 
-Scanned workflow: `skills/legal-document-redactor/references/scanned-pdf.md`.  
-Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  
-Optional structural + suspect draft: `legal-redactor draft-entities INPUT.docx`.
+扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
+`entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
+也可先跑 `legal-redactor draft-entities INPUT.docx` 生成结构性草稿 + 疑似实体提示，再人工确认角色与替身。
 
-## Tests
+## 测试
 
 ```console
 python -m pytest
 python scripts/run_demo.py --clean
 ```
 
-Demo inputs are completely fictional. Any resemblance to real parties is coincidental.
+演示材料完全虚构。
 
-## Architecture
+## 限制（v0.8）
 
-```text
-Document → extract text → merge structural detectors + entities.json
-        → longest-first replace → write same format
-        → residual structural scan → human review
-```
+- PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
+- `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
+- 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
+- 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
+- DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
+- 批量输出为扁平文件名（递归时自动消歧）
+- 目录 `verify` 会检查目录内所有支持后缀（勿把 ledger.json 和正文混在同一校验目录）
+- 不是法律意见，不能替代律所保密流程
 
-Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
+## 安全
 
-## Limits (v0.8)
+不要在公开 Issue 里贴真实卷宗或 ledger。见 [SECURITY.md](SECURITY.md)。
 
-- PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
-- `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
-- Natural-language names need confirmed `entities.json`; suspects are hints only
-- Multi-doc AI upload: prefer `redact DIR --unify` so aliases stay stable
-- DOCX: single-run formatting is preserved when possible; cross-run entities still collapse the paragraph
-- Batch redact is flat output names (recursive mode disambiguates colliding basenames)
-- Directory `verify` will scan all supported suffixes present (including `.json` sidecars if mixed in)
-- Not legal advice; not a substitute for firm confidentiality procedure
+## 许可证
 
-## Security
-
-Do not open issues with real client files, ledgers, or live matter identifiers. See [SECURITY.md](SECURITY.md).
-
-## License
-
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0。见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。

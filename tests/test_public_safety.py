@@ -129,6 +129,7 @@ def test_skill_md_exists():
     text = skill.read_text(encoding="utf-8")
     assert "name: legal-document-redactor" in text
     assert "ai" in text and "production" in text
+    assert "脱敏" in text
 
 
 def test_public_tree_has_no_live_structural_pii():

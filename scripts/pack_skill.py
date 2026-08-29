@@ -19,10 +19,10 @@ SKIP_SUFFIXES = {".pyc", ".pyo"}
 ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 UNIX_FILE_ATTR = 0o644 << 16
 SAFETY_BOUNDARIES = (
-    "- Local-first processing; no hosted document upload is required.",
-    "- Ledger files (*.ledger.json) are deanonymization keys — keep local only.",
-    "- Residual structural PASS is not proof of perfect natural-language anonymization.",
-    "- All public fixtures are fictional. Outputs require human legal review.",
+    "- 本地处理；不要求把文书上传到托管服务。",
+    "- ledger 文件（*.ledger.json）是去标识密钥，仅限本地保存。",
+    "- 结构性残留扫描 PASS 不等于自然语言标识已全部清除。",
+    "- 公开样例均为虚构。产出须经律师复核。",
 )
 
 
@@ -172,7 +172,7 @@ def write_release_notes(root: Path, output_dir: Path, version: str) -> Path:
     notes = (
         "legal-redactor {version}\n\n"
         "{body}\n\n"
-        "## Safety boundaries\n\n"
+        "## 安全边界\n\n"
         "{safety}\n"
     ).format(
         version=version,

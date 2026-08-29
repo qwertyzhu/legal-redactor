@@ -70,6 +70,7 @@ def test_cli_help_lists_redact_scan_verify() -> None:
     assert "redact" in help_text
     assert "scan" in help_text
     assert "verify" in help_text
+    assert "脱敏" in help_text or "证件号" in help_text
 
 
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:

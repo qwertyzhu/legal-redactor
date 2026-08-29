@@ -71,7 +71,8 @@ def test_pack_skill_builds_reproducible_archive(tmp_path: Path) -> None:
     notes = (first / "RELEASE_NOTES.md").read_text(encoding="utf-8")
     assert notes.startswith(f"legal-redactor {_pyproject_version()}")
     assert f"## {_pyproject_version()}" in notes
-    assert "Ledger files" in notes
+    assert "*.ledger.json" in notes
+    assert "本地" in notes
 
 
 def test_pack_skill_rejects_version_mismatch(tmp_path: Path) -> None:
@@ -87,29 +88,60 @@ def test_changelog_section_matches_version() -> None:
     assert body.startswith(f"## {_pyproject_version()}")
 
 
-def test_english_readme_does_not_repeat_sidecar_list() -> None:
+def test_default_readme_is_chinese() -> None:
+    default = (ROOT / "README.md").read_text(encoding="utf-8")
+    english = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    stub = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    assert "## 双模式" in default
+    assert "证件号" in default
+    assert "给 AI" in default
+    assert "## Two modes" in english
+    assert "## 双模式" not in english
+    assert "## Two modes" not in default
+    assert "README.md" in stub
+    assert "README.en.md" in stub
+
+
+def test_default_readme_does_not_repeat_sidecar_list() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    block = (
-        "- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)\n"
-        "- `*.residual.json` — structural residual report\n"
-        "- `*.suspects.json` — natural-language entity **hints** (not auto-redacted)\n"
-        "- `*.summary.md` — human-readable table\n"
-    )
-    assert text.count(block) == 1
-    # residual/suspects/summary belong only to that list, not a second copy
+    assert "`*.ledger.json`" in text
     assert text.count("`*.residual.json`") == 1
     assert text.count("`*.suspects.json`") == 1
     assert text.count("`*.summary.md`") == 1
 
 
 def test_readmes_show_dual_mode_demo_and_before_after() -> None:
-    for name in ("README.md", "README.zh-CN.md"):
+    for name in ("README.md", "README.en.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "`ai`" in text
         assert "`production`" in text
-        assert "给 AI" in text
         assert "郝测一" in text
         assert "13900001111" in text
         assert "scripts/run_demo.py" in text
         assert "legal-redactor" in text
         assert "docs/images/dual-mode-preview.png" in text
+    zh = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "给 AI" in zh
+    assert "证件号" in zh
+
+
+def test_community_files_are_chinese_first() -> None:
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "贡献" in contributing
+    assert "虚构" in contributing
+    assert "禁止" in security or "不要" in security
+    assert "卷宗" in security or "合同" in security
+    current = pack_skill.changelog_section(changelog, _pyproject_version())
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in current)
+
+
+def test_skill_entry_is_chinese() -> None:
+    skill = (ROOT / "skills" / "legal-document-redactor" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert "name: legal-document-redactor" in skill
+    assert "脱敏" in skill
+    assert "证件号" in skill or "去标识" in skill
+    assert "`ai`" in skill and "`production`" in skill

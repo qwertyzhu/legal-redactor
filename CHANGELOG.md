@@ -2,17 +2,19 @@
 
 ## Unreleased
 
+- 默认 README、社区文件、CLI `--help` 与 Skill 入口改为简体中文优先；英文旁路为 `README.en.md`。
+
 ## 0.8.0 - 2026-08-29
 
-Usability release: Windows CLI, readable PDF placeholders, star-ready landing.
+可用性发布：Windows CLI、可读的 PDF 占位符、面向中文用户的落地页。
 
-- Windows/cp1252: CLI reconfigures stdout/stderr to UTF-8 (`errors=replace`) at process start so printing CJK suspect hints after a successful `redact` no longer exits 1.
-- PDF `redact` paints CJK replacements (`某甲`, `[手机号]`) with PyMuPDF `china-s` instead of Helvetica `???`.
-- CLI imports `pymupdf` (not deprecated `fitz`); `--version` is clean on PyMuPDF 1.28+.
-- Bilingual README: 60-second demo, fictional `ai` vs `production` before/after, dual-mode preview image.
-- GitHub About is Chinese-first. Issue templates warn against pasting live matters.
-- GitHub Release now attaches wheel + sdist alongside the `.skill` archive.
-- Pytest drives the shipped CLI on the fictional contract in both modes, including cp1252 stdio.
+- Windows/cp1252：进程启动时把 stdout/stderr 重配为 UTF-8（`errors=replace`），`redact` 成功后打印中文疑似提示不再以退出码 1 结束。
+- PDF `redact` 用 PyMuPDF `china-s` 绘制中文替身（`某甲`、`[手机号]`），不再出现 Helvetica `???`。
+- CLI 导入 `pymupdf`（不再用已弃用的 `fitz`）；PyMuPDF 1.28+ 上 `--version` 干净。
+- 双语 README：60 秒演示、虚构 `ai` / `production` 前后对照、双模式预览图。
+- GitHub About 中文优先。Issue 模板禁止粘贴真实卷宗。
+- GitHub Release 除 `.skill` 外附带 wheel 与 sdist。
+- Pytest 对虚构合同走真实 CLI 双模式，含 cp1252 stdio。
 
 ## 0.7.0 - 2026-08-22
 

@@ -1,7 +1,7 @@
 {
   "name": "legal-redactor",
   "version": "0.8.0",
-  "description": "Privacy-first dual-mode redaction for Chinese legal documents (AI upload vs court/opponent production)",
+  "description": "中国法律文书双模式脱敏：给 AI 前去标识，交法院/对方前只去证件号手机邮箱。Privacy-first dual-mode redaction (ai vs production)",
   "author": {
     "name": "qwertyzhu"
   },

@@ -1,17 +1,17 @@
-# Contributing
+# 贡献指南
 
-Thanks for helping improve local-first legal redaction tooling.
+欢迎改进这套本地优先的法律文书脱敏工具。英文见 [CONTRIBUTING.en.md](CONTRIBUTING.en.md)。
 
-## Rules
+## 规则
 
-1. **Fictional data only** in tests, examples, demos, and screenshots.
-2. Do not commit `*.ledger.json`, client paths, or live matter files.
-3. Keep the agent/CLI split: judgment in docs/skill; deterministic replace/verify in Python.
-4. New structural detectors need tests and a clear false-positive note.
-5. PDF work must not silently claim support for scanned pages.
-6. Keep software versions aligned: `pyproject.toml`, `src/legal_redactor/__init__.py`, `.codex-plugin/plugin.json`.
+1. 测试、样例、演示和截图里**只用虚构数据**。
+2. 不要提交 `*.ledger.json`、客户路径或在办卷宗。
+3. 保持 Agent / CLI 分工：判断写在文档和 skill 里；确定性替换与校验写在 Python 里。
+4. 新增结构性检测器必须带测试，并写明误报边界。
+5. PDF 路径不得在未支持扫描件时静默声称已支持。
+6. 软件版本必须对齐：`pyproject.toml`、`src/legal_redactor/__init__.py`、`.codex-plugin/plugin.json`。
 
-## Dev setup
+## 开发环境
 
 ```console
 python -m pip install -e ".[dev]"
@@ -20,37 +20,37 @@ python scripts/run_demo.py --clean
 python scripts/pack_skill.py --output-dir dist
 ```
 
-## Pull requests
+## Pull request
 
-- Small, reviewable diffs
-- Update README / CHANGELOG when behavior changes
-- CI must pass on Ubuntu, Windows, and macOS across Python 3.10–3.12
+- 改动小、可审
+- 行为变化时更新 README / CHANGELOG
+- CI 须在 Ubuntu、Windows、macOS 的 Python 3.10–3.12 上通过
 
-## Releasing
+## 发布
 
-1. Bump the three version fields together and add a CHANGELOG section.
-2. Push to `main`, then tag:
+1. 三个版本号一起升，并在 CHANGELOG 增加对应章节。
+2. 推送到 `main`，再打标签：
 
 ```console
 git tag -a v0.8.0 -m "legal-redactor v0.8.0"
 git push origin v0.8.0
 ```
 
-3. The Release workflow packs `legal-document-redactor.skill`, writes `SHA256SUMS.txt`, builds wheel/sdist, and publishes a GitHub Release.
-4. Do not rewrite published tags.
+3. Release 工作流会打包 `legal-document-redactor.skill`、写 `SHA256SUMS.txt`、构建 wheel/sdist，并发布 GitHub Release。
+4. 不要改写已发布的标签。
 
-### PyPI (optional)
+### PyPI（可选）
 
-The package name `legal-redactor` is not published yet. When ready:
+包名 `legal-redactor` 尚未发布到 PyPI。准备发布时：
 
-1. Create a PyPI project and add this GitHub repo as a **trusted publisher**
-   (environment name `pypi`, workflow `.github/workflows/pypi.yml`).
-2. Actions → PyPI → Run workflow, type `publish`.
+1. 创建 PyPI 项目，并把本 GitHub 仓库加为 **trusted publisher**
+   （environment 名 `pypi`，工作流 `.github/workflows/pypi.yml`）。
+2. Actions → PyPI → Run workflow，输入 `publish`。
 
-Until then the documented install is still a clone plus `pip install -e ".[dev]"`,
-or `pip install git+https://github.com/qwertyzhu/legal-redactor.git`.
+在此之前，文档中的安装方式仍是 clone 后 `pip install -e ".[dev]"`，
+或 `pip install git+https://github.com/qwertyzhu/legal-redactor.git`。
 
-Refresh the README preview after demo-text changes:
+演示文案改动后刷新 README 预览图：
 
 ```console
 python scripts/render_demo_preview.py
