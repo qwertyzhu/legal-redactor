@@ -8,6 +8,7 @@ Landing-page and installability.
 - Package `keywords` and `project.urls`.
 - Pytest drives the shipped CLI (`python -m legal_redactor`) on the fictional contract in both modes.
 - Windows/cp1252: CLI reconfigures stdout/stderr to UTF-8 (`errors=replace`) at process start so printing CJK suspect hints after a successful `redact` no longer exits 1.
+- GitHub About / package description: Chinese-first one-liner (AI upload vs court/opponent production).
 
 ## 0.7.0 - 2026-08-22
 

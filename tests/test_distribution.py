@@ -100,6 +100,7 @@ def test_readmes_show_dual_mode_demo_and_before_after() -> None:
         text = (ROOT / name).read_text(encoding="utf-8")
         assert "`ai`" in text
         assert "`production`" in text
+        assert "给 AI" in text
         assert "郝测一" in text
         assert "13900001111" in text
         assert "scripts/run_demo.py" in text

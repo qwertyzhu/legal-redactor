@@ -6,7 +6,7 @@
 [![许可证](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
 
-**面向中国法律文书的本地优先、双模式脱敏工具。**  
+**中国法律文书本地脱敏：给 AI 之前去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
 输入什么格式，就返回什么格式：DOCX→DOCX，PDF→PDF（文字层），文本→文本。  
 两个刚需：
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "legal-redactor"
 version = "0.7.0"
-description = "Local-first dual-mode redaction for Chinese legal documents (AI upload vs court/opponent production)"
+description = "中国法律文书双模式脱敏：给 AI 前去标识，交法院/对方前只去证件号手机邮箱。本地运行，原格式返回。Local-first dual-mode redaction (ai vs production)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
