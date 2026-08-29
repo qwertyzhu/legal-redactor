@@ -25,6 +25,6 @@ body:
     id: version
     attributes:
       label: 版本
-      placeholder: "legal-redactor 0.7.0"
+      placeholder: "legal-redactor 0.8.0"
     validations:
       required: true

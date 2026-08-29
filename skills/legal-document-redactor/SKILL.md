@@ -171,7 +171,7 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
 ```
 
-## Limits (v0.7)
+## Limits (v0.8)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**

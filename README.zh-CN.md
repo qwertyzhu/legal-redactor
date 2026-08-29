@@ -76,10 +76,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI：
+只要 CLI（或指定 tag）：
 
 ```console
-python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git
+python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git@v0.8.0
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
@@ -146,7 +146,7 @@ python scripts/run_demo.py --clean
 
 演示材料完全虚构。
 
-## 限制（v0.7）
+## 限制（v0.8）
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**

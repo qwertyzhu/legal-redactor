@@ -2,16 +2,17 @@
 
 ## Unreleased
 
-Landing-page and installability.
+## 0.8.0 - 2026-08-29
 
-- Bilingual README: 60-second clone/install/demo, fictional `ai` vs `production` before/after (party name + mobile), single sidecar-file list.
-- Package `keywords` and `project.urls`.
-- Pytest drives the shipped CLI (`python -m legal_redactor`) on the fictional contract in both modes.
+Usability release: Windows CLI, readable PDF placeholders, star-ready landing.
+
 - Windows/cp1252: CLI reconfigures stdout/stderr to UTF-8 (`errors=replace`) at process start so printing CJK suspect hints after a successful `redact` no longer exits 1.
-- GitHub About / package description: Chinese-first one-liner (AI upload vs court/opponent production).
-- CLI imports `pymupdf` (not deprecated `fitz`), so `--version` no longer prints a deprecation warning on PyMuPDF 1.28+.
-- README dual-mode preview PNG rendered from the fictional contract PDFs; issue templates warn against pasting live matters.
-- PyPI trusted-publisher workflow is dispatch-only until a publisher is linked; `pip install git+https://...` documented.
+- PDF `redact` paints CJK replacements (`某甲`, `[手机号]`) with PyMuPDF `china-s` instead of Helvetica `???`.
+- CLI imports `pymupdf` (not deprecated `fitz`); `--version` is clean on PyMuPDF 1.28+.
+- Bilingual README: 60-second demo, fictional `ai` vs `production` before/after, dual-mode preview image.
+- GitHub About is Chinese-first. Issue templates warn against pasting live matters.
+- GitHub Release now attaches wheel + sdist alongside the `.skill` archive.
+- Pytest drives the shipped CLI on the fictional contract in both modes, including cp1252 stdio.
 
 ## 0.7.0 - 2026-08-22
 

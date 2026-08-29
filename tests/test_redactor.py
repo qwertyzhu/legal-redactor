@@ -115,6 +115,11 @@ def test_pdf_roundtrip(tmp_path: Path):
     )
     assert out.is_file()
     assert "13900001111" not in result.output_text
+    # CJK replacements must be readable, not Helvetica '???'
+    text = pdf_io.extract_text(out)
+    assert "郝测一" not in text
+    assert "某甲" in text
+    assert "手机号" in text
 
 
 def test_output_suffix_must_match(tmp_path: Path):

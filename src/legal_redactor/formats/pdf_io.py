@@ -27,6 +27,13 @@ def _has_text_layer(doc: fitz.Document) -> bool:
     return False
 
 
+def _redaction_fontname(text: str) -> str:
+    """Helvetica cannot paint CJK placeholders like [手机号] / 某甲."""
+    if any(ord(ch) > 127 for ch in text):
+        return "china-s"
+    return "helv"
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -55,6 +62,7 @@ def redact_pdf(
                         fill=(1, 1, 1),
                         text_color=(0, 0, 0),
                         fontsize=9,
+                        fontname=_redaction_fontname(replacement),
                     )
                     found_any = True
             if found_any:

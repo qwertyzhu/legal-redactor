@@ -74,10 +74,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
 ```
 
-CLI-only from git:
+CLI-only from git (or a tagged release):
 
 ```console
-python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git
+python -m pip install git+https://github.com/qwertyzhu/legal-redactor.git@v0.8.0
 ```
 
 Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
@@ -166,7 +166,7 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.7)
+## Limits (v0.8)
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
