@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+import pymupdf as fitz
+
 from legal_redactor.entities import apply_mapping_to_text, build_plan
 from legal_redactor.formats import docx_io, pdf_io
 from legal_redactor.patterns import detect_structural
@@ -105,6 +107,7 @@ def test_pdf_roundtrip(tmp_path: Path):
     extracted = pdf_io.extract_text(src)
     if "13900001111" not in extracted:
         pytest.skip("pdf text layer missing expected digits (font issue)")
+    has_cjk_source = "郝测一" in extracted
     out = tmp_path / "out.pdf"
     result = redact_file(
         src,
@@ -115,8 +118,41 @@ def test_pdf_roundtrip(tmp_path: Path):
     )
     assert out.is_file()
     assert "13900001111" not in result.output_text
-    # CJK replacements must be readable, not Helvetica '???'
+    # Structural CJK placeholders must be painted (china-s), not Helvetica '???'
     text = pdf_io.extract_text(out)
+    assert "手机号" in text
+    if has_cjk_source:
+        assert "郝测一" not in text
+        assert "某甲" in text
+
+
+def test_pdf_cjk_replacements_with_builtin_font(tmp_path: Path) -> None:
+    """Does not need a system CJK font — china-s is built into PyMuPDF."""
+    src = tmp_path / "in.pdf"
+    doc = fitz.open()
+    try:
+        page = doc.new_page()
+        page.insert_text(
+            (72, 72),
+            "联系人郝测一 手机13900001111",
+            fontsize=12,
+            fontname="china-s",
+        )
+        doc.save(str(src))
+    finally:
+        doc.close()
+    assert "郝测一" in pdf_io.extract_text(src)
+    out = tmp_path / "out.pdf"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=FIXTURES / "entities_ai.json",
+        work_dir=tmp_path,
+    )
+    assert result.ok, result.residual.summary
+    text = pdf_io.extract_text(out)
+    assert "13900001111" not in text
     assert "郝测一" not in text
     assert "某甲" in text
     assert "手机号" in text
