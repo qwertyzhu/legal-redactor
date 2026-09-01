@@ -72,6 +72,12 @@ def test_cli_help_lists_redact_scan_verify() -> None:
     assert "verify" in help_text
     assert "脱敏" in help_text or "证件号" in help_text
 
+    scan_help = _run_cli("redact-scan", "--help")
+    assert scan_help.returncode == 0, scan_help.stderr
+    assert "--redact-party" in scan_help.stdout
+    assert "--party-spec" in scan_help.stdout
+    assert "甲方" in scan_help.stdout and "乙方" in scan_help.stdout
+
 
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:
     src = tmp_path / "sample_contract.md"

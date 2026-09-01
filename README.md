@@ -24,6 +24,18 @@
 
 姓名、单位、作品名等由 Agent（或你）写入 `entities.json`；CLI 做确定性替换与结构性残留扫描。
 
+### 整方遮甲方 / 乙方
+
+扫描合同还支持由用户选择只遮甲方、只遮乙方或双方。整方模式会处理已确认的名称、联系人、地址、联系方式和账号，并用人工确认区域覆盖签名及**整枚公章**；未选中的一方默认全部保留。
+
+```console
+legal-redactor redact-scan scan.pdf --mode production \
+  --redact-party a --party-spec party-spec.json \
+  -o scan.party-a-redacted.pdf
+```
+
+`party-spec.json` 模板位于 `skills/legal-document-redactor/references/party-redaction.template.json`。公章不能只依赖 OCR，必须以归一化区域覆盖完整外圈、名称、编号和中心图案，并逐页人工复核。
+
 ## 60 秒上手
 
 ```console

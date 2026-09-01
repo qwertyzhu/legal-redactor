@@ -1,4 +1,4 @@
 interface:
   display_name: "法律文书脱敏"
-  short_description: "中国法律文书双模式脱敏（ai 给模型 / production 交法院）"
-  default_prompt: "请脱敏这份法律文书。先确认模式 ai 或 production，保持原文件格式，写本地 ledger，交付前做残留扫描。"
+  short_description: "中国法律文书本地脱敏，可选择整方遮甲方、乙方或双方并覆盖公章"
+  default_prompt: "使用 $legal-document-redactor 脱敏这份法律文书；如需整方遮挡，先确认甲方、乙方或双方，并覆盖所选方名称、签名和整枚公章。"

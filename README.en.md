@@ -22,6 +22,18 @@ Built for lawyers who need (1) a privacy-safe copy before pasting into online AI
 
 Agent (or you) supplies person/org/work-title entities. The CLI applies replacements deterministically and residual-scans structural PII.
 
+### Hide Party A, Party B, or both
+
+For scanned contracts, the user can choose to hide Party A only, Party B only, or both parties. Whole-party mode covers confirmed names, contacts, addresses, contact details, and accounts, plus reviewed regions for signatures and the **complete seal**. An unselected party is preserved by default.
+
+```console
+legal-redactor redact-scan scan.pdf --mode production \
+  --redact-party a --party-spec party-spec.json \
+  -o scan.party-a-redacted.pdf
+```
+
+Start from `skills/legal-document-redactor/references/party-redaction.template.json`. A seal must be covered by a reviewed normalized region containing its full outer ring, entity name, number, and center mark; OCR text boxes alone are insufficient. Review every output page before delivery.
+
 ## 60-second start
 
 ```console

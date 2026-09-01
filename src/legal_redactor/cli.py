@@ -245,6 +245,23 @@ def _build_parser() -> argparse.ArgumentParser:
     prs.add_argument("--extra-categories", action="append", default=[], metavar="CAT")
     prs.add_argument("--tesseract", type=Path, default=None)
     prs.add_argument("--tessdata", type=Path, default=None)
+    prs.add_argument(
+        "--redact-party",
+        choices=("a", "b", "both"),
+        default=None,
+        help="整方脱敏：a=甲方，b=乙方，both=双方；必须同时提供 --party-spec",
+    )
+    prs.add_argument(
+        "--party-spec",
+        type=Path,
+        default=None,
+        help="已人工确认的当事方标识与公章/签署区规范 JSON（仅本地）",
+    )
+    prs.add_argument(
+        "--also-redact-structural-all",
+        action="store_true",
+        help="整方脱敏之外，仍按 mode 遮挡所有各方的结构性号码（默认只遮所选方）",
+    )
 
     return p
 
@@ -540,10 +557,15 @@ def main(argv: list[str] | None = None) -> int:
                 tesseract_cmd=args.tesseract,
                 tessdata_dir=args.tessdata,
                 work_dir=args.work_dir,
+                redact_party=args.redact_party,
+                party_spec_path=args.party_spec,
+                also_redact_structural_all=args.also_redact_structural_all,
             )
             print(f"mode:    {result.mode}")
             print(f"output:  {result.output_path}")
             print(f"hits:    {len(result.hits)}")
+            if result.party_scope:
+                print(f"party:   {result.party_scope}")
             print(f"bbox:    {result.hits_path}")
             print(
                 "NOTE: best-effort OCR boxes. Human page-flip review required before court filing."

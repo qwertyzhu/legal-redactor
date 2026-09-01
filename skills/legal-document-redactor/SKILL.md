@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-description: 中国法律文书双模式脱敏：ai（给在线 AI 前激进去标识）与 production（交法院/对方前只去证件号、手机、邮箱等），原格式返回（DOCX→DOCX、PDF→PDF、文本→文本），并生成本地 ledger 与残留扫描。凡用户提到 脱敏、去标识、匿名化、redact、anonymize、strip PII、交给网上AI前处理、出证前遮盖，或需要一份可外传的法律文件副本时使用。
+description: 中国法律文书本地脱敏：支持 ai、production，以及由用户选择“整方遮甲方 / 乙方 / 双方”（包括名称、联系方式、签名和整枚公章），原格式返回并生成本地审计记录。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
 # 法律文书脱敏
@@ -25,6 +25,23 @@ description: 中国法律文书双模式脱敏：ai（给在线 AI 前激进去�
 **禁止**把 `ai` 模式产物当作起诉材料。  
 **禁止**把 ledger（原文→替身映射）贴进在线模型对话。
 
+## 整方脱敏：必须让用户选边
+
+用户要求“遮挡甲方/乙方全部信息”“连名称和公章一起遮”时，不得直接套用默认 `production`。如果上下文尚未明确，先让用户选择：
+
+- `a`：只遮甲方；
+- `b`：只遮乙方；
+- `both`：甲乙双方都遮。
+
+“整方信息”至少包括：主体全称与简称、关联公司、法定代表人/联系人、地址、邮编、电话、邮箱、证件/信用代码、银行账户、签名、签署日期，以及**整枚公章（含外圈、名称、编号和中心图案）**。未选中的一方默认全部保留，包括其联系方式和账号。
+
+扫描件整方脱敏需要本地 `party-spec.json`：
+
+- `identifiers` 列出已确认的名称、别名、联系人和结构性字段；
+- `regions` 使用页面归一化坐标 `[x0,y0,x1,y1]` 标记公章、签名和整块签署栏；
+- 公章不能只靠 OCR 文字框，必须用覆盖整枚印章的 `regions`；
+- 模板见 [references/party-redaction.template.json](references/party-redaction.template.json)。
+
 ## 不可妥协的边界
 
 1. 只处理**本地副本**。不要覆盖唯一原件。
@@ -34,7 +51,7 @@ description: 中国法律文书双模式脱敏：ai（给在线 AI 前激进去�
    - **扫描件 / 纯图片 PDF**：`ocr` 后再对 markdown 脱敏，供 AI/文本使用；交法院视觉涂黑用 `redact-scan`。见 [references/scanned-pdf.md](references/scanned-pdf.md)。
 4. 文本产物交付前，残留结构性扫描必须 **PASS**（除非用户明确接受残留风险）。视觉 `redact-scan` 必须**人工翻页**（OCR 框会漏）。
 5. 仓库样例和测试均为**虚构**。不要提交真实客户 ledger 或 OCR 导出。
-6. 必须人工复核。扫描通过不等于自然语言标识已全部清除。
+6. 必须人工复核。扫描通过不等于自然语言标识已全部清除；整方脱敏必须逐页确认所选方名称和每枚公章均不可见、未选方未被误遮。
 
 ## 工作流
 
@@ -45,6 +62,7 @@ description: 中国法律文书双模式脱敏：ai（给在线 AI 前激进去�
 - 去向：在线 AI，还是法院/对方；
 - 输入路径；
 - 当事人姓名是保留（`production`）还是去掉（`ai`）。
+- 是否需要整方脱敏；若需要，选择甲方、乙方或双方。
 
 ### 2. 抽取并列出实体（Agent 判断）
 
@@ -169,12 +187,20 @@ legal-redactor redact workdir/ocr.normalized.md --mode ai --entities entities.js
 
 # 扫描件 PDF → 视觉涂黑（交法院）
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
+
+# 扫描件 PDF → 只遮甲方全部信息（名称、公章等来自已确认的 party spec）
+legal-redactor redact-scan scan.pdf --mode production --redact-party a \
+  --party-spec party-spec.json -o scan.party-a-redacted.pdf
+
+# 只遮乙方：--redact-party b；双方都遮：--redact-party both
+# 如还要额外遮掉所有各方的结构性号码，再加 --also-redact-structural-all
 ```
 
-## 限制（v0.8）
+## 限制
 
 - PDF：文字层走 `redact`；扫描件走 `ocr` / `redact-scan`（本地 Tesseract + chi_sim）
 - `redact-scan` 是 OCR 框尽力而为 — **交法院前必须人工翻页**
+- 整方脱敏必须使用 `--redact-party` + `--party-spec`；名称靠确认后的 identifiers，公章/签名靠 reviewed regions
 - DOCX：单 run 内格式尽量保留；跨 run 实体会折叠段落
 - 自然语言姓名需要已确认的 entities JSON；suspects 只是复核提示（现含地址）
 - 多文件事项：优先 `redact DIR --unify`，保证替身稳定
