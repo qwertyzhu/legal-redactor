@@ -178,10 +178,13 @@ Document → extract text → merge structural detectors + entities.json
 
 Details: [skills/legal-document-redactor/references/methodology.md](skills/legal-document-redactor/references/methodology.md)
 
-## Limits (v0.8)
+## Limitations
 
 - PDF: text-layer via `redact`; scans via `ocr` / `redact-scan` (local Tesseract + chi_sim)
 - `redact-scan` is OCR-box best-effort — **human page-flip before court filing**
+- Whole-party redaction depends on confirmed `party-spec` identifiers and reviewed regions; an omitted name, signature, or seal region can remain visible
+- A seal cannot rely on OCR text boxes alone: cover its complete outer ring, entity name, number, and center mark, then review every page
+- An unselected party is preserved by default; only `--also-redact-structural-all` additionally covers structural identifiers for every party
 - Natural-language names need confirmed `entities.json`; suspects are hints only
 - Multi-doc AI upload: prefer `redact DIR --unify` so aliases stay stable
 - DOCX: single-run formatting is preserved when possible; cross-run entities still collapse the paragraph

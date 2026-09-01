@@ -158,10 +158,13 @@ python scripts/run_demo.py --clean
 
 演示材料完全虚构。
 
-## 限制（v0.8）
+## 限制
 
 - PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
 - `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
+- 整方脱敏依赖已确认的 `party-spec` 标识与人工复核区域；漏列名称、签名或公章区域即可能漏遮
+- 公章不能只依赖 OCR 文字框，必须覆盖完整外圈、名称、编号和中心图案，并逐页复核
+- 未选中的一方默认完整保留；只有显式使用 `--also-redact-structural-all` 才会额外遮挡所有各方的结构性号码
 - 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
 - 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
 - DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
