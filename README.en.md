@@ -89,7 +89,7 @@ legal-redactor --help    # lists redact / scan / verify
 CLI-only from the GitHub Release wheel:
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.8.0/legal_redactor-0.8.0-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.9.0/legal_redactor-0.9.0-py3-none-any.whl
 ```
 
 Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).

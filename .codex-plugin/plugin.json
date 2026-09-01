@@ -1,7 +1,7 @@
 {
   "name": "legal-redactor",
-  "version": "0.8.0",
-  "description": "中国法律文书双模式脱敏：给 AI 前去标识，交法院/对方前只去证件号手机邮箱。Privacy-first dual-mode redaction (ai vs production)",
+  "version": "0.9.0",
+  "description": "中国法律文书本地脱敏：支持 ai、production 及按甲方/乙方整方遮挡名称、签名和公章。Local-first legal document redaction",
   "author": {
     "name": "qwertyzhu"
   },
