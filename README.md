@@ -54,7 +54,7 @@ python scripts/run_demo.py --clean
 legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
 ```
 
-`production` 加同一个参数仍保留当事人，只自动去掉第三人。没把握的名字留在 `*.suspects.json`，不会被猜着改掉。简称和全称共用一个替身。
+`production` 加同一个参数仍保留当事人，只自动去掉第三人。没把握的名字留在输出旁边的疑似清单里，不会被猜着改掉。简称和全称共用一个替身。
 
 ## 虚构样例：脱敏前后
 
