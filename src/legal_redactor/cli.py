@@ -117,6 +117,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     pr.add_argument(
+        "--auto-confident",
+        action="store_true",
+        help=(
+            "一次扫完高置信姓名、单位、地址和作品名（ai），"
+            "或第三人姓名（production）。不必先让模型手写 entities.json"
+        ),
+    )
+    pr.add_argument(
         "--allow-residual",
         action="store_true",
         help="即使残留扫描仍发现结构性个人信息，也以退出码 0 结束",
@@ -303,6 +311,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             extra_categories=_split_cats(args.extra_categories),
             recursive=args.recursive,
             unify_first=bool(getattr(args, "unify", False)),
+            auto_confident=bool(getattr(args, "auto_confident", False)),
         )
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
@@ -345,6 +354,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         work_dir=args.work_dir,
         keep_categories=_split_cats(args.keep_categories),
         extra_categories=_split_cats(args.extra_categories),
+        auto_confident=bool(getattr(args, "auto_confident", False)),
     )
     print(f"mode:        {result.mode}")
     print(f"output:      {result.output_path}")

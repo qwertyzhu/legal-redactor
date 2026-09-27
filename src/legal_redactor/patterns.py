@@ -23,8 +23,16 @@ _ID18 = re.compile(
 )
 # 15-digit legacy ID
 _ID15 = re.compile(r"(?<!\d)[1-9]\d{7}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}(?!\d)")
-# Mainland mobile
-_MOBILE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+# Mainland mobile, including groups split by spaces or dashes: 138 0000 2222
+_MOBILE_SPACED = re.compile(r"(?<!\d)1[3-9](?:[\s\u3000-]{0,2}\d){9}(?!\d)")
+# 18-digit ID with optional separators
+_ID18_SPACED = re.compile(
+    r"(?<!\d)[1-9]\d{5}[\s-]?(?:19|20)\d{2}[\s-]?(?:0[1-9]|1[0-2])[\s-]?"
+    r"(?:0[1-9]|[12]\d|3[01])[\s-]?\d{3}[\s-]?[\dXx](?!\d)"
+)
+_LABELED_ACCOUNT = re.compile(
+    r"(?:账号|帐号|账户|卡号|银行账号|收款账户)\s*[：:]\s*([0-9][0-9 \u3000-]{8,32}[0-9])"
+)
 # Simple landline: 0xx-xxxxxxx or 0xx xxxxxxxx
 _LANDLINE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
 # Email
@@ -84,8 +92,16 @@ def detect_structural(text: str) -> list[PatternHit]:
     for m in _ID15.finditer(text):
         candidates.append(PatternHit("id_card", m.group(0), m.start(), m.end()))
 
-    for m in _MOBILE.finditer(text):
+    for m in _MOBILE_SPACED.finditer(text):
         candidates.append(PatternHit("mobile", m.group(0), m.start(), m.end()))
+
+    for m in _ID18_SPACED.finditer(text):
+        compact = re.sub(r"[\s-]", "", m.group(0))
+        if len(compact) == 18 and re.fullmatch(
+            r"[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]",
+            compact,
+        ):
+            candidates.append(PatternHit("id_card", m.group(0), m.start(), m.end()))
 
     for m in _LANDLINE.finditer(text):
         candidates.append(PatternHit("landline", m.group(0), m.start(), m.end()))
@@ -97,7 +113,11 @@ def detect_structural(text: str) -> list[PatternHit]:
         candidates.append(PatternHit("case_number", m.group(0), m.start(), m.end()))
 
     for m in _USCC.finditer(text):
-        candidates.append(PatternHit("uscc", m.group(0), m.start(), m.end()))
+        val = m.group(0)
+        # An all-digit 18-char run is an ID or account, not a credit code.
+        if val.isdigit():
+            continue
+        candidates.append(PatternHit("uscc", val, m.start(), m.end()))
 
     for m in _BANK.finditer(text):
         val = m.group(0)
@@ -112,6 +132,19 @@ def detect_structural(text: str) -> list[PatternHit]:
         elif len(val) in (16, 17, 19):
             # Keep obvious card-length numbers even if Luhn fails (test fixtures)
             candidates.append(PatternHit("bank_account", val, m.start(), m.end()))
+
+    for m in _LABELED_ACCOUNT.finditer(text):
+        raw = m.group(1)
+        compact = re.sub(r"[\s\u3000-]", "", raw)
+        if not (10 <= len(compact) <= 22) or not compact.isdigit():
+            continue
+        if re.fullmatch(
+            r"[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]",
+            compact,
+        ):
+            continue
+        start = m.start(1)
+        candidates.append(PatternHit("bank_account", raw, start, start + len(raw)))
 
     # Resolve overlaps: prefer longer, then earlier
     candidates.sort(key=lambda h: (-(h.end - h.start), h.start))

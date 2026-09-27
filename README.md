@@ -48,6 +48,14 @@ python scripts/run_demo.py --clean
 
 `run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
 
+不想先手写 `entities.json` 时，用一条命令扫完高置信姓名和单位（模型不必通读全文）：
+
+```console
+legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
+```
+
+`production` 加同一个参数仍保留当事人，只自动去掉第三人。没把握的名字留在 `*.suspects.json`，不会被猜着改掉。简称和全称共用一个替身。
+
 ## 虚构样例：脱敏前后
 
 样例当事人是 **郝测一**，样例手机是 **13900001111**（完全虚构）。
@@ -107,6 +115,9 @@ Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS
 legal-redactor scan contract.docx --mode ai
 
 legal-redactor redact contract.docx --mode ai --entities entities.json -o contract.redacted-ai.docx
+
+# 不写实体表，一次扫完高置信姓名 / 单位 / 地址 / 作品 / 金额：
+legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
 
 legal-redactor redact contract.docx --mode production --entities entities.json -o contract.redacted-production.docx
 

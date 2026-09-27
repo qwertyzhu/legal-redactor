@@ -115,6 +115,7 @@ def redact_file(
     work_dir: Path | None = None,
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
+    auto_confident: bool = False,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -140,6 +141,7 @@ def redact_file(
         preserve=preserve,
         keep_categories=keep,
         extra_categories=extra,
+        auto_confident=auto_confident,
     )
     mapping = plan.mapping()
     output_text = _apply(input_path, output_path, mapping)
@@ -228,6 +230,7 @@ def redact_tree(
     extra_categories: list[str] | set[str] | None = None,
     recursive: bool = False,
     unify_first: bool = False,
+    auto_confident: bool = False,
 ) -> BatchRedactResult:
     """Redact every supported file under input_dir into output_dir (flat names).
 
@@ -281,6 +284,7 @@ def redact_tree(
                 work_dir=work_root,
                 keep_categories=keep_categories,
                 extra_categories=extra_categories,
+                auto_confident=auto_confident,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues

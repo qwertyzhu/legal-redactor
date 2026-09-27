@@ -7,7 +7,7 @@ description: 中国法律文书本地脱敏：支持 ai、production，以及由
 
 为本地法律文书生成**同格式**脱敏副本，附带可审计的替换 ledger，以及结构性个人信息残留扫描。
 
-本 skill 驱动 `legal-redactor` Python 包。判断（谁是当事人姓名 / 作品名）留给 Agent；替换与校验由 CLI 确定性完成。
+本 skill 驱动 `legal-redactor` Python 包。结构性字段和高置信当事人由 CLI 一次扫完；只有 `--auto-confident` 没接住、或用户明确要求核对的名字，才由 Agent 补进 `entities.json`。
 
 ## 先选模式
 
@@ -64,9 +64,24 @@ description: 中国法律文书本地脱敏：支持 ai、production，以及由
 - 当事人姓名是保留（`production`）还是去掉（`ai`）。
 - 是否需要整方脱敏；若需要，选择甲方、乙方或双方。
 
-### 2. 抽取并列出实体（Agent 判断）
+### 2. 先跑一条命令，不要先通读全文
 
-阅读文书（或本地抽文本）。编写 `entities.json`：
+默认不要把整篇文书读进对话、再手写 `entities.json`。那会多好几轮，而且容易漏改、替身不稳定。
+
+```bash
+legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
+legal-redactor redact INPUT.docx --mode production --auto-confident -o OUTPUT.docx
+```
+
+`--auto-confident` 在同一次进程里完成：
+
+- 证件、手机（含 `138 0000 2222`）、邮箱、账号（含「账号：」「收款账户：」引导）、信用代码，以及 `ai` 模式下的案号
+- `ai`：高置信姓名、单位、地址、作品名；精确金额改成量级。「以下简称」的简称和全称共用同一个替身
+- `production`：当事人、案号、地址、作品名保留；第三人姓名去掉；证件和联系方式仍去掉
+
+然后只看旁边的 `*.suspects.json`。里面剩下的是**没有**自动替换的提示。空的就不要再开一轮补实体。非空时只问用户那些条目。
+
+仍要手写 `entities.json` 的情况：用户给了自定义替身，或要保留某个本应去掉的名称。
 
 ```json
 {
@@ -89,16 +104,12 @@ description: 中国法律文书本地脱敏：支持 ai、production，以及由
 起步模板：[references/entities.template.json](references/entities.template.json)。  
 见 [references/methodology.md](references/methodology.md) 与 [schemas/entities.schema.json](schemas/entities.schema.json)。
 
-可选：本地起草结构性行 + 自然语言疑似提示：
+可选，且不是默认路径：
 
 ```bash
 legal-redactor draft-entities INPUT.docx -o entities.draft.json
 # 只要结构性字段：加 --no-suspects
 ```
-
-疑似行使用 `source=suspect-hint` 且**没有替身**。写入 AI 模式前先确认 `role` / `replacement`。未经你确认，工具不会把当事人姓名写成最终替身。
-
-然后由你补全或确认自然语言姓名。
 
 ### 3. 跑确定性脱敏
 
@@ -155,6 +166,9 @@ legal-redactor verify OUTPUT.docx --mode ai
 # 只检测
 legal-redactor scan contract.docx --mode ai --entities entities.json
 
+# 脱敏（推荐：不必先写实体表）
+legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
+
 # 脱敏
 legal-redactor redact contract.docx --mode ai --entities entities.json -o contract.redacted-ai.docx
 
@@ -202,6 +216,6 @@ legal-redactor redact-scan scan.pdf --mode production --redact-party a \
 - `redact-scan` 是 OCR 框尽力而为 — **交法院前必须人工翻页**
 - 整方脱敏必须使用 `--redact-party` + `--party-spec`；名称靠确认后的 identifiers，公章/签名靠 reviewed regions
 - DOCX：单 run 内格式尽量保留；跨 run 实体会折叠段落
-- 自然语言姓名需要已确认的 entities JSON；suspects 只是复核提示（现含地址）
+- 自然语言姓名：优先 `--auto-confident`。没接住的才看 suspects，不要为了已经替换的名字再通读全文
 - 多文件事项：优先 `redact DIR --unify`，保证替身稳定
 - 目录 `verify` 会检查目录内所有支持后缀 — 不要把 ledger 混进校验目录

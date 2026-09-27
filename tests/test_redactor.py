@@ -600,3 +600,47 @@ def test_address_suspect_from_label():
     addrs = [s for s in suspects if s.category == "address"]
     assert len(addrs) >= 2
     assert any("海淀区测试路" in s.text for s in addrs)
+
+
+def test_spaced_mobile_and_digit_run_is_not_uscc():
+    hits = detect_structural("手机：138 0000 2222\n账号：622202123456789012")
+    texts = {h.text: h.category for h in hits}
+    assert texts.get("138 0000 2222") == "mobile"
+    assert texts.get("622202123456789012") == "bank_account"
+    assert "uscc" not in texts.values()
+
+
+def test_auto_confident_ai_one_pass_without_entities_file():
+    plan = build_plan(SAMPLE, mode="ai", auto_confident=True)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" not in text
+    assert "沈例二" not in text
+    assert "北测文化传播有限公司" not in text
+    assert "《星河测例》" not in text
+    assert "13900001111" not in text
+    assert "1280000" not in text
+    assert "北京互联网法院" in text
+    hao = next(entity for entity in plan.entities if entity.original == "郝测一")
+    assert hao.replacement == "某甲"
+    assert hao.source == "auto-confident"
+    report = scan_residual(text, "ai")
+    assert report.ok, report.summary
+
+
+def test_auto_confident_production_keeps_parties():
+    plan = build_plan(SAMPLE, mode="production", auto_confident=True)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" in text
+    assert "北测文化传播有限公司" in text
+    assert "13900001111" not in text
+    assert "（2024）京0491民初1234号" in text
+
+
+def test_auto_confident_links_abbreviation():
+    raw = "甲方：北测文化传播有限公司（以下简称“北测”）。北测与对方签约。"
+    plan = build_plan(raw, mode="ai", auto_confident=True)
+    text = apply_mapping_to_text(raw, plan.mapping())
+    assert "北测" not in text
+    company = next(entity for entity in plan.entities if entity.original == "北测文化传播有限公司")
+    short = next(entity for entity in plan.entities if entity.original == "北测")
+    assert short.replacement == company.replacement
