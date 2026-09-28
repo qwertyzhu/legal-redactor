@@ -1,4 +1,4 @@
 interface:
   display_name: "法律文书脱敏"
-  short_description: "中国法律文书本地脱敏，可选择整方遮甲方、乙方或双方并覆盖公章"
-  default_prompt: "使用 $legal-document-redactor 脱敏这份法律文书；如需整方遮挡，先确认甲方、乙方或双方，并覆盖所选方名称、签名和整枚公章。"
+  short_description: "一条命令本地脱敏。给 AI 用 ai，出证用 production，不必先通读全文"
+  default_prompt: "使用 $legal-document-redactor。先确认给 AI 还是出证，然后直接运行 legal-redactor redact --mode ai 或 production --auto-confident。不要先通读全文、手写实体表。只有需要整方遮挡时，再确认甲方、乙方或双方，并覆盖所选方名称、签名和整枚公章。"

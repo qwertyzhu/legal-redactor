@@ -99,7 +99,7 @@ legal-redactor --help    # 列出 redact / scan / verify
 只要 CLI，装 GitHub Release 的 wheel：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.0/legal_redactor-0.10.0-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.1/legal_redactor-0.10.1-py3-none-any.whl
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
