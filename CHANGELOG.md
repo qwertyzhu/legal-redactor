@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.2 - 2026-09-28
+
+- Release 增加 `legal-document-redactor-skillhub.zip`。压缩包根目录就是 `SKILL.md`，可直接上传 Skillhub。不要上传整仓 zip，也不要上传 `.skill`。
+
 ## 0.10.1 - 2026-09-28
 
 - Skill 入口改成先跑 `redact --auto-confident`。技能卡片和默认提示不再要求先通读全文。

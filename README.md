@@ -99,7 +99,7 @@ legal-redactor --help    # 列出 redact / scan / verify
 只要 CLI，装 GitHub Release 的 wheel：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.1/legal_redactor-0.10.1-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.2/legal_redactor-0.10.2-py3-none-any.whl
 ```
 
 也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
@@ -107,7 +107,8 @@ python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/downl
 ### Claude Code / Codex Skill
 
 把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。  
-Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。
+Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。  
+上传 Skillhub 时用 `legal-document-redactor-skillhub.zip`（根目录就是 `SKILL.md`）。不要传整仓 zip，也不要传 `.skill`。
 
 ## 命令行
 

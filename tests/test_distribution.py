@@ -68,6 +68,17 @@ def test_pack_skill_builds_reproducible_archive(tmp_path: Path) -> None:
     assert any(member.startswith("legal-document-redactor/agents/") for member in members)
     assert any(member.startswith("legal-document-redactor/schemas/") for member in members)
 
+    hub = first / "legal-document-redactor-skillhub.zip"
+    assert hub.is_file()
+    assert hub.read_bytes() == (second / hub.name).read_bytes()
+    hub_digest = hashlib.sha256(hub.read_bytes()).hexdigest().upper()
+    assert f"{hub_digest}  {hub.name}" in checksums
+    with zipfile.ZipFile(hub) as package:
+        hub_members = package.namelist()
+    assert "SKILL.md" in hub_members
+    assert "references/methodology.md" in hub_members
+    assert all(not member.startswith("legal-document-redactor/") for member in hub_members)
+
     notes = (first / "RELEASE_NOTES.md").read_text(encoding="utf-8")
     assert notes.startswith(f"legal-redactor {_pyproject_version()}")
     assert f"## {_pyproject_version()}" in notes

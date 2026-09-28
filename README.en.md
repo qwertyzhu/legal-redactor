@@ -89,7 +89,7 @@ legal-redactor --help    # lists redact / scan / verify
 CLI-only from the GitHub Release wheel:
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.1/legal_redactor-0.10.1-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.2/legal_redactor-0.10.2-py3-none-any.whl
 ```
 
 Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
@@ -97,7 +97,8 @@ Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-r
 ### Claude Code / Codex skill
 
 Copy or junction `skills/legal-document-redactor` into `~/.claude/skills/` (or `~/.agents/skills/`).  
-Release assets also include a packed `legal-document-redactor.skill` plus `SHA256SUMS.txt`.
+Release assets also include a packed `legal-document-redactor.skill` plus `SHA256SUMS.txt`.  
+For Skillhub, upload `legal-document-redactor-skillhub.zip` (`SKILL.md` is at the zip root). Do not upload the repository zip or the `.skill` file.
 
 Codex:
 

@@ -124,16 +124,33 @@ def archive_name(path: Path, skill_dir: Path) -> str:
     return relative
 
 
-def write_zip(skill_dir: Path, destination: Path) -> None:
-    files = iter_skill_files(skill_dir)
+def flat_archive_name(path: Path, skill_dir: Path) -> str:
+    """Skillhub wants SKILL.md at the zip root, not inside a wrapper folder."""
+    relative = path.relative_to(skill_dir).as_posix()
+    if not relative or relative.startswith("/") or ".." in relative.split("/"):
+        raise PackError(f"refusing unsafe archive member: {relative}")
+    return relative
+
+
+def _write_members(destination: Path, files: list[Path], names: list[str]) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "w") as archive:
-        for path in files:
-            info = zipfile.ZipInfo(archive_name(path, skill_dir), date_time=ZIP_TIMESTAMP)
+        for path, name in zip(files, names):
+            info = zipfile.ZipInfo(name, date_time=ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
             info.external_attr = UNIX_FILE_ATTR
             archive.writestr(info, path.read_bytes())
+
+
+def write_zip(skill_dir: Path, destination: Path) -> None:
+    files = iter_skill_files(skill_dir)
+    _write_members(destination, files, [archive_name(path, skill_dir) for path in files])
+
+
+def write_skillhub_zip(skill_dir: Path, destination: Path) -> None:
+    files = iter_skill_files(skill_dir)
+    _write_members(destination, files, [flat_archive_name(path, skill_dir) for path in files])
 
 
 def write_sha256sums(output_dir: Path, filenames: Iterable[str]) -> Path:
@@ -205,12 +222,16 @@ def pack_skills(root: Path, output_dir: Path, expect_version: str | None = None)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     archives: list[Path] = []
+    packed: list[Path] = []
     for skill_dir in discover_skills(root / "skills"):
         archive = output_dir / f"{skill_dir.name}.skill"
         write_zip(skill_dir, archive)
         archives.append(archive)
+        hub = output_dir / f"{skill_dir.name}-skillhub.zip"
+        write_skillhub_zip(skill_dir, hub)
+        packed.extend((archive, hub))
 
-    write_sha256sums(output_dir, [path.name for path in archives])
+    write_sha256sums(output_dir, [path.name for path in packed])
     write_release_notes(root, output_dir, version)
     return archives
 

@@ -38,9 +38,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(dist/*.skill dist/SHA256SUMS.txt dist/*.whl dist/*.tar.gz)
-          if [ ${#assets[@]} -lt 4 ]; then
-            echo "expected .skill, SHA256SUMS.txt, wheel, and sdist under dist/" >&2
+          assets=(dist/*.skill dist/*-skillhub.zip dist/SHA256SUMS.txt dist/*.whl dist/*.tar.gz)
+          if [ ${#assets[@]} -lt 5 ]; then
+            echo "expected .skill, skillhub zip, SHA256SUMS.txt, wheel, and sdist under dist/" >&2
             ls -la dist || true
             exit 1
           fi
