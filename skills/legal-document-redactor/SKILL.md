@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-version: 0.10.3
+version: 0.10.4
 description: 中国法律文书本地脱敏，0.10 起默认一条命令扫完，不要先通读全文或手写实体表。ai 用于交给网上模型，production 保留当事人。也可整方遮甲方、乙方或双方（名称、签名、整枚公章）。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
@@ -19,7 +19,31 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 ```bash
 legal-redactor --version                      # 应在 PATH（本机软链 ~/.local/bin/legal-redactor → legal-ops venv）
 tesseract --list-langs | grep chi_sim         # 仅扫描件 ocr / redact-scan 前必查
+ollama list                                   # 仅全本地路径必查（见下节）
 ```
+
+## 全本地 vs 在线：识别层二选一（本地增补）
+
+替换层永远由 CLI 确定性执行；可选择的只是**自然语言实体谁来识别**：
+
+| 路径 | 识别者 | 适用 |
+|---|---|---|
+| 在线（默认） | Agent（Claude 等）读 suspects 补 entities | 文书本身允许给在线模型看，或实体很少 |
+| **全本地** | 本机 Ollama 模型，文书不出设备 | 文书敏感度高、不想给在线模型看原文；或无网环境 |
+
+全本地路径（Ollama 只负责「找」，替换仍走 `legal-redactor` 确定性执行）：
+
+```bash
+# 1. 本地模型识别 → 草稿（source=ollama-draft）
+python3 scripts/ollama_entities.py INPUT.docx -o entities.ollama.draft.json
+# 2. 人工/Agent 确认草稿：核对角色、补 replacement 替身（草稿不准时直接改）
+# 3. 确认后正常脱敏（不要加 --auto-confident，避免重复替换）
+legal-redactor redact INPUT.docx --mode ai --entities entities.ollama.draft.json -o OUTPUT.docx
+```
+
+- 默认模型 `qwen3.5:latest`，`--model` 可换；扫描件先 `legal-redactor ocr` 再对 md 跑本脚本
+- 草稿里的 `other` 类（出生日期、车牌号、权证号）正是 `--auto-confident` 的盲区，确认时重点看
+- 本地模型会漏，**verify + 反推三问仍是强制项**；全本地 ≠ 免人工
 
 为本地法律文书生成**同格式**脱敏副本，附带可审计的替换 ledger，以及结构性个人信息残留扫描。
 

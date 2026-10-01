@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.10.4 - 2026-10-01
+
+仅 Skill 增强；Python 包不变（仍为 0.10.2）。
+
+- 新增 `scripts/ollama_entities.py`：本地 Ollama 模型识别自然语言实体，产出 entities 草稿（`source=ollama-draft`）。Ollama 只负责「找」，替换仍由 CLI 确定性执行；设备可选全本地（Ollama 识别）或在线（Agent 识别）路径。默认模型 `qwen3.5:latest`，支持 .docx / 文字层 .pdf / .txt / .md，纯 stdlib HTTP 调用。
+- 识别带原文逐字校验（容忍模型在字符间插空格），结构性字段（证件/手机/邮箱等）仍交给确定性扫描，不让模型报。
+- SKILL.md 新增「全本地 vs 在线：识别层二选一」工作流；环境自检补 `ollama list`。
+
 ## 0.10.3 - 2026-10-01
 
 仅 Skill 文档与模板增强；Python 包不变（仍为 0.10.2）。
