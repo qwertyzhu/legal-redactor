@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-version: 0.10.5
+version: 0.10.6
 description: 中国法律文书本地脱敏，0.10 起默认一条命令扫完，不要先通读全文或手写实体表。ai 用于交给网上模型，production 保留当事人。也可整方遮甲方、乙方或双方（名称、签名、整枚公章）。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
@@ -55,6 +55,19 @@ legal-redactor redact INPUT.docx --mode ai --entities entities.ollama.draft.json
 - 默认模型 `qwen3.5:latest`，`--model` 可换；扫描件先 `legal-redactor ocr` 再对 md 跑识别脚本
 - 草稿里的 `other` 类（出生日期、车牌号、权证号）正是 `--auto-confident` 的盲区，确认时重点看
 - 本地模型会漏，**verify + 反推三问仍是强制项**；全本地 ≠ 免人工
+
+全本地运行规则（按输入类型分流）：
+
+| 输入 | 链路 | 需要的本地模型 |
+|---|---|---|
+| DOCX / 文字层 PDF / txt / md | 直接抽文字 → 文本模型识别 → CLI 替换 | **只需文本模型**（qwen3.5 等） |
+| 扫描件 → 给 AI / 出文字版 | Tesseract `ocr` → md → 文本模型识别 → CLI 替换 | Tesseract（非模型）+ 文本模型 |
+| 扫描件 → 交法院涂黑 | `redact-scan`（Tesseract 词坐标涂黑） | Tesseract；**视觉模型不参与** |
+
+- **实体识别永远用文本模型**，不需要视觉模型。OCR 层（Tesseract）的任务是把图像变成「文字 + 坐标」，涂黑依赖坐标，视觉模型给的坐标不可靠，不能替代。
+- 可选增强：扫描质量差、Tesseract 错字多时，可用本机视觉模型（如 `glm-ocr`）先把页面图像转成文字稿，人工校对后再走文本模型识别——视觉模型只出文字，不进坐标链路；这是可选项，不是默认流程。
+- 公章 / 签名区域识别目前不支持本地模型自动圈定，仍按 party-spec 人工标 regions。
+- 网络边界：确认 Ollama 仅监听本机（`lsof -nP -iTCP:11434 -sTCP:LISTEN` 应显示 `127.0.0.1`），未设 `OLLAMA_HOST=0.0.0.0`；ledger、草稿、OCR 中间产物全部留在本地。
 
 为本地法律文书生成**同格式**脱敏副本，附带可审计的替换 ledger，以及结构性个人信息残留扫描。
 
