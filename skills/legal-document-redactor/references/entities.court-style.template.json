@@ -1,0 +1,57 @@
+{
+  "_comment": "裁判文书上网式隐名模板（法释〔2016〕19号风格）。复制后改名 entities.json 并删掉本注释。适用：公开传播、公众号案例、普法文章。全部样例为虚构。",
+  "entities": [
+    {
+      "original": "张测三",
+      "category": "person",
+      "role": "party",
+      "replacement": "张某",
+      "notes": "保留姓氏+某；同姓多人用 张某1、张某2 区分（法释〔2016〕19号第九条）"
+    },
+    {
+      "original": "李测四",
+      "category": "person",
+      "role": "party",
+      "replacement": "李某"
+    },
+    {
+      "original": "1985年3月12日出生",
+      "category": "other",
+      "replacement": "19××年×月出生",
+      "notes": "准标识符：生日+性别+区县可反推个人（GB/T 37964）；公开传播必脱，交法院（production）不需"
+    },
+    {
+      "original": "杭州市西湖区文三路100号",
+      "category": "address",
+      "role": "party",
+      "replacement": "杭州市西湖区",
+      "notes": "住所地保留到县/区即符合裁判文书上网粒度（法释〔2016〕19号第十一条）"
+    },
+    {
+      "original": "浙A12345",
+      "category": "other",
+      "replacement": "（车牌号已删除）",
+      "notes": "工具不识别车牌号，必须手写（法释〔2016〕19号第十条删除项）"
+    },
+    {
+      "original": "浙(2020)杭州市不动产权第0012345号",
+      "category": "other",
+      "replacement": "（权属证书编号已删除）",
+      "notes": "工具不识别不动产权证号，必须手写（法释〔2016〕19号第十条删除项）"
+    },
+    {
+      "original": "（单位全称）",
+      "category": "organization",
+      "role": "party",
+      "replacement": "甲公司",
+      "notes": "律协指引替换法：A公司/甲公司/供应商乙"
+    },
+    {
+      "original": "（精确金额，如 1280000）",
+      "category": "amount",
+      "role": "other",
+      "replacement": "一百余万元",
+      "notes": "模糊法：精确金额改量级，既防反推又保住事实（律协指引 2.3.3）"
+    }
+  ]
+}

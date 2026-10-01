@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.10.3 - 2026-10-01
+
+仅 Skill 文档与模板增强；Python 包不变（仍为 0.10.2）。
+
+- Skill 新增「指哪打哪」选择性脱敏决策表：`--keep-categories` 反向枚举、点名人名 entities、`--preserve`、整方 `--redact-party` 的选用对照。
+- Skill 新增提速工作流：OCR 只跑一次后在 markdown 上迭代；`--dpi 200`；批量 `--unify`；`verify` 退出码机器化验收。
+- Skill 新增环境自检（CLI 在 PATH、Tesseract chi_sim）。
+- 新增 `references/redaction-standards.md`：法释〔2016〕19号、个人信息保护法、GB/T 37964-2019、上海律协 AI 指引（2026）与工具参数对照；收录工具识别盲区（出生日期、车牌号、不动产权证号、无锚点姓名）。
+- 新增 `references/entities.court-style.template.json`：裁判文书上网式隐名模板（保留姓氏+某、住所地到县/区、金额模糊化）。
+- 交付清单新增「反推三问」验收项。
+
 ## 0.10.2 - 2026-09-28
 
 - Release 增加 `legal-document-redactor-skillhub.zip`。压缩包根目录就是 `SKILL.md`，可直接上传 Skillhub。不要上传整仓 zip，也不要上传 `.skill`。

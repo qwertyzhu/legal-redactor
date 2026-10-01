@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-version: 0.10.2
+version: 0.10.3
 description: 中国法律文书本地脱敏，0.10 起默认一条命令扫完，不要先通读全文或手写实体表。ai 用于交给网上模型，production 保留当事人。也可整方遮甲方、乙方或双方（名称、签名、整枚公章）。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
@@ -13,6 +13,13 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 ```
 
 交法院或对方时把 `ai` 换成 `production`。只有这条命令没接住的名字，才补 `entities.json`。
+
+环境自检（本地增补，跑任何命令前花两秒确认）：
+
+```bash
+legal-redactor --version                      # 应在 PATH（本机软链 ~/.local/bin/legal-redactor → legal-ops venv）
+tesseract --list-langs | grep chi_sim         # 仅扫描件 ocr / redact-scan 前必查
+```
 
 为本地法律文书生成**同格式**脱敏副本，附带可审计的替换 ledger，以及结构性个人信息残留扫描。
 
@@ -33,6 +40,25 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 **禁止**把 `ai` 模式产物当作起诉材料。  
 **禁止**把 ledger（原文→替身映射）贴进在线模型对话。
+
+规范基线（本地增补）：去向是「公开传播 / 公众号案例」时按裁判文书上网标准（法释〔2016〕19号）做隐名，替身模板见 [references/entities.court-style.template.json](references/entities.court-style.template.json)；四套规范与工具参数的完整对照、以及工具识别盲区清单（出生日期、车牌号、不动产权证号、无锚点姓名——`--auto-confident` 全部接不住），见 [references/redaction-standards.md](references/redaction-standards.md)。
+
+## 指哪打哪：用户指定只脱敏某部分（本地增补）
+
+用户说"只脱敏 X"时，不要套默认模式，按下表选参数；拿不准就问用户。
+
+| 用户要求 | 做法 |
+|---|---|
+| 只脱敏某一类结构性字段（如只去身份证号） | `--mode production` + `--keep-categories` 反向枚举其余类。例：只去证件号 → `--keep-categories mobile,email,bank_account,uscc,case_number,landline` |
+| 只替换用户点名的名称 / 人名，其他一概不动 | entities.json 只列这些条目（可带 `replacement`），**不加 `--auto-confident`**，且用 `--keep-categories id_card,mobile,landline,email,bank_account,uscc,case_number` 把结构性字段也全部放行 |
+| 某段原文 / 某名称必须原样保留 | `--preserve "原文"`，可重复传入 |
+| 只遮甲方 / 乙方（含名称、签名、整枚公章） | 扫描件 `redact-scan --redact-party a\|b\|both --party-spec party-spec.json`（见下节，必须先让用户选边） |
+| 额外去掉 production 默认保留的案号 | `--extra-categories case_number` |
+| 金额不脱敏 | ai 模式下金额只在 entities 列出时才处理，不列即可 |
+
+`--keep-categories` 可选值：`id_card, mobile, landline, email, bank_account, uscc, case_number`（逗号分隔或重复传入）。
+
+注意：`keep/extra-categories` 只管结构性字段。姓名、单位、地址、作品名等自然语言实体只能用 entities.json 控制——"只去结构性号码、一个名字都不动"的正确做法是 `production --keep-categories ...` 且不加 `--auto-confident`。
 
 ## 整方脱敏：必须让用户选边
 
@@ -150,6 +176,12 @@ python skills/legal-document-redactor/scripts/redact_cli.py redact INPUT.docx --
 legal-redactor verify OUTPUT.docx --mode ai
 ```
 
+机器化验收（本地增补）：用退出码判断，FAIL 就不要交付、回到脱敏步骤修正；`verify` 的 keep/extra 参数必须与 `redact` 完全一致：
+
+```bash
+legal-redactor verify OUTPUT.docx --mode ai && echo PASS || echo FAIL
+```
+
 交付清单：
 
 - [ ] 模式与去向一致
@@ -158,6 +190,7 @@ legal-redactor verify OUTPUT.docx --mode ai
 - [ ] 抽查当事人姓名（按预期保留或去掉）
 - [ ] ledger 未上传任何地方
 - [ ] 已告知用户：结构性通过 ≠ 自然语言已完美匿名
+- [ ] 反推三问（本地增补，上海律协 AI 指引 2.3.4）：无残留可识别信息？上下文组合（生日+性别+区县、作品名+案由）反推不出当事人？未过度脱敏导致事实缺失？
 
 ### 5. 向用户汇报
 
@@ -218,6 +251,16 @@ legal-redactor redact-scan scan.pdf --mode production --redact-party a \
 # 只遮乙方：--redact-party b；双方都遮：--redact-party both
 # 如还要额外遮掉所有各方的结构性号码，再加 --also-redact-structural-all
 ```
+
+## 提速工作流（本地增补）
+
+瓶颈排序：Tesseract OCR ≫ PDF/DOCX 解析 > 替换本身。提速全部围绕"少跑 OCR、少跑重复轮次"：
+
+1. **文字层 PDF / DOCX 直接 `redact`，绝不 `ocr`**——先快速判断有没有文字层（能选中文字即有）。
+2. **扫描件给 AI 用：`ocr` 只跑一次**，拿到 `ocr.normalized.md` 后，所有实体表调整、"指哪打哪"迭代都在 md 上 `redact`（秒级）。禁止每改一次实体表就重跑 OCR。
+3. **扫描件可 `--dpi 200` 提速**（默认 300）；发现公章、小字漏识别时回到 300。
+4. **多文件一次跑**：`redact DIR --unify -o OUTDIR`，不要逐个文件循环调用。
+5. 批量后只 `verify OUTDIR` 一次，用退出码验收，不通读全文。
 
 ## 限制
 
