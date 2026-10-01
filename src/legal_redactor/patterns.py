@@ -36,7 +36,9 @@ _LABELED_ACCOUNT = re.compile(
 # Simple landline: 0xx-xxxxxxx or 0xx xxxxxxxx
 _LANDLINE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
 # Email
-_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+# Email. Chinese labels like 邮箱 are word chars in Python re, so \b fails for
+# label-adjacent addresses (邮箱zhang@example.com). Use charset lookarounds instead.
+_EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9._%+-])")
 # Bank card-ish 16-19 digits (exclude IDs already matched by length context later)
 _BANK = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
 # PRC case number, e.g. （2024）京73民初1234号

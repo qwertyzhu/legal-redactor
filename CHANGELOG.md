@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.10.7 - 2026-10-01
+
+修复包的真实漏检，并补齐 Skill 回归测试。Python 包 0.10.2 → 0.10.7（跳号对齐 Skill 版本）。
+
+- **修复（包）**：邮箱检测改用字符集 lookaround。原正则的 `\b` 把中文字符视为单词字符，导致「邮箱zhang@example.com」这类中文标签紧贴邮箱的写法漏检，且残留扫描误报 PASS。新增回归测试 `test_email_adjacent_to_chinese_label`。
+- 新增 `skills/legal-document-redactor/scripts/self_test.py`：Skill 安装自检/回归套件，虚构数据端到端覆盖双模式、指哪打哪、裁判文书式替身、verify 退出码、Ollama 链路（无 Ollama 自动 SKIP）；退出码可用于 CI/Agent 判断。
+
 ## 0.10.6 - 2026-10-01
 
 仅 Skill 文档；Python 包不变（仍为 0.10.2）。

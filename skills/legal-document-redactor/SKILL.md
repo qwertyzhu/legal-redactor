@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-version: 0.10.6
+version: 0.10.7
 description: 中国法律文书本地脱敏，0.10 起默认一条命令扫完，不要先通读全文或手写实体表。ai 用于交给网上模型，production 保留当事人。也可整方遮甲方、乙方或双方（名称、签名、整枚公章）。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
@@ -20,6 +20,7 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 legal-redactor --version                      # 应在 PATH（本机软链 ~/.local/bin/legal-redactor → legal-ops venv）
 tesseract --list-langs | grep chi_sim         # 仅扫描件 ocr / redact-scan 前必查
 ollama list                                   # 仅全本地路径必查（见下节）
+python3 scripts/self_test.py                  # 新设备安装后/升级后跑一次：9 项全 PASS 才算就绪
 ```
 
 ## 全本地 vs 在线：识别层二选一（本地增补）

@@ -37,6 +37,17 @@ def test_detect_structural_on_fiction():
     assert "bank_account" in cats
 
 
+def test_email_adjacent_to_chinese_label():
+    # 中文标签（邮箱）紧贴邮箱地址时也必须检出；\b 会把中文视为 \w 导致漏检
+    for text in ["邮箱zhang@example.com", "邮箱：zhang@example.com", "邮箱 zhang@example.com"]:
+        hits = detect_structural(text)
+        assert any(h.category == "email" for h in hits), text
+    # 但不误伤更长地址的前缀匹配
+    hits = detect_structural("zhang@example.commercial")
+    assert not any(h.category == "email" and h.text.endswith(".com") and "commercial" not in h.text
+                   for h in hits)
+
+
 def test_ai_mode_plan_redacts_parties_and_case():
     plan = build_plan(
         SAMPLE,
