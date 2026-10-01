@@ -1,6 +1,6 @@
 ---
 name: legal-document-redactor
-version: 0.10.4
+version: 0.10.5
 description: 中国法律文书本地脱敏，0.10 起默认一条命令扫完，不要先通读全文或手写实体表。ai 用于交给网上模型，production 保留当事人。也可整方遮甲方、乙方或双方（名称、签名、整枚公章）。凡用户提到脱敏、去标识、匿名化、整方遮挡、公章遮挡、交给网上 AI 前处理或出证前遮盖时使用。
 ---
 
@@ -31,7 +31,18 @@ ollama list                                   # 仅全本地路径必查（见�
 | 在线（默认） | Agent（Claude 等）读 suspects 补 entities | 文书本身允许给在线模型看，或实体很少 |
 | **全本地** | 本机 Ollama 模型，文书不出设备 | 文书敏感度高、不想给在线模型看原文；或无网环境 |
 
-全本地路径（Ollama 只负责「找」，替换仍走 `legal-redactor` 确定性执行）：
+**何时询问用户选路径**（不要每次运行都问）：默认走在线；仅当用户说「本机/全本地/不出设备/离线」等、或文书明显高敏（刑事案件、涉未成年人、未公开并购）时，才主动问一次。
+
+用户选全本地后，先跑检测脚本（只读），按结果分流：
+
+```bash
+python3 scripts/ollama_setup.py          # 人类可读；--json 供 Agent 判断
+```
+
+- **(a) 已装 Ollama** → 脚本列出已安装模型并给出「实体识别首选」，直接用 `--model <首选>` 跑识别；首次使用主动向用户念一遍检测结论即可，之后同设备不必再跑。
+- **(b) 未装 Ollama** → 脚本按设备内存给出安装命令和推荐模型（≥32GB→12-14B 级；16-31GB→7-8B 级如 qwen3.5；<16GB→4B 级勉强可用，更建议回在线路径）。把命令念给用户，**征得同意后**再执行安装/拉取；拉取完重跑一次本脚本确认就绪。
+
+全本地识别与替换（Ollama 只负责「找」，替换仍走 `legal-redactor` 确定性执行）：
 
 ```bash
 # 1. 本地模型识别 → 草稿（source=ollama-draft）
@@ -41,7 +52,7 @@ python3 scripts/ollama_entities.py INPUT.docx -o entities.ollama.draft.json
 legal-redactor redact INPUT.docx --mode ai --entities entities.ollama.draft.json -o OUTPUT.docx
 ```
 
-- 默认模型 `qwen3.5:latest`，`--model` 可换；扫描件先 `legal-redactor ocr` 再对 md 跑本脚本
+- 默认模型 `qwen3.5:latest`，`--model` 可换；扫描件先 `legal-redactor ocr` 再对 md 跑识别脚本
 - 草稿里的 `other` 类（出生日期、车牌号、权证号）正是 `--auto-confident` 的盲区，确认时重点看
 - 本地模型会漏，**verify + 反推三问仍是强制项**；全本地 ≠ 免人工
 
