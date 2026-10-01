@@ -96,13 +96,17 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI，装 GitHub Release 的 wheel：
+只要 CLI，装**最新** GitHub Release 的 wheel（以 v0.10.7 为例，安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对最新版本号）：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.2/legal_redactor-0.10.2-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.7/legal_redactor-0.10.7-py3-none-any.whl
 ```
 
-也可从最新 [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest) 获取。
+**升级规则**：Skill 包和 Python 包要**一起换**。CHANGELOG 标注「仅 Skill」的版本可以不升 wheel；标注「修复（包）」的版本（如 v0.10.7 修复中文标签紧贴邮箱的漏检）**必须换 wheel**，只换 Skill 文件无效。装完跑一遍自检确认就绪：
+
+```console
+python3 ~/.claude/skills/legal-document-redactor/scripts/self_test.py   # 全 PASS 才算装好
+```
 
 ### Claude Code / Codex Skill
 
