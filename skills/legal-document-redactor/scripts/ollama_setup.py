@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ollama_setup.py — 全本地脱敏路径的环境检测与模型推荐（只读，不改动系统）。
+"""ollama_setup.py — 本机 Ollama 识别路径的环境检测与模型推荐（只读，不改动系统）。
 
 用法：
     python3 ollama_setup.py            # 检测并给出推荐
@@ -9,7 +9,7 @@
 - 未装 Ollama → 打印安装命令 + 按设备内存推荐首个要 pull 的模型；
 - 已装 → 列出已安装模型，标出实体识别首选；没有合适的就推荐 pull 哪个。
 
-推荐表（Apple Silicon 统一内存；Intel Mac 或 <16GB 不建议全本地，召回太差）：
+推荐表（Apple Silicon 统一内存；Intel Mac 或 <16GB 不建议用本机模型，召回太差）：
     ≥32GB → 12-14B 级（如 gemma4:12b / qwen3:14b）
     16-31GB → 7-8B 级（如 qwen3.5:latest / qwen3:8b）——实测实体识别够用
     <16GB  → 4B 级（如 qwen3:4b）勉强可用，必须人工兜底；更建议走在线路径
@@ -68,7 +68,7 @@ def pick_installed(models: list[str]) -> str | None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="全本地脱敏环境检测与模型推荐（只读）")
+    ap = argparse.ArgumentParser(description="本机 Ollama 识别环境检测与模型推荐（只读）")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -109,7 +109,7 @@ def main() -> None:
     print(f"实体识别首选：{best}（用 --model {best}）")
     if rec["model"] and not any(m.startswith(rec["model"].split(":")[0]) for m in models):
         print(f"可选升级：ollama pull {rec['model']}  # 按你 {dev['ram_gb']}GB 内存推荐，{rec['note']}")
-    print("就绪：可以走全本地路径。")
+    print("就绪：可以用本机 Ollama 识别。")
 
 
 if __name__ == "__main__":

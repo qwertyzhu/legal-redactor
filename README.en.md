@@ -38,9 +38,9 @@ Start from `skills/legal-document-redactor/references/party-redaction.template.j
 
 No need to adopt a whole mode: reverse-enumerate `--keep-categories` to strip one structural category only, name specific persons via `entities.json`, or `--preserve` passages verbatim. Decision table in the skill's `SKILL.md`.
 
-### Fully local path: Ollama detection (v0.10.4+)
+### Optional local Ollama model for entity detection (v0.10.4+)
 
-Entity detection can run on a **local Ollama model** so documents never leave the device; replacement stays deterministic via the CLI (the local model only finds, never rewrites):
+The tool always runs on your machine. Entity detection can use a **local Ollama model** instead of the online agent, so the original text is not sent to an online model; replacement stays deterministic via the CLI (the model only finds, never rewrites):
 
 ```console
 python3 skills/legal-document-redactor/scripts/ollama_setup.py      # read-only check; recommends a model by device RAM
@@ -48,7 +48,7 @@ python3 skills/legal-document-redactor/scripts/ollama_entities.py INPUT.docx -o 
 legal-redactor redact INPUT.docx --mode ai --entities entities.draft.json -o OUTPUT.docx
 ```
 
-A plain text model (default qwen3.5) is enough for detection; OCR stays with Tesseract, and vision models are only an optional OCR-quality booster. See "fully-local operating rules" in the skill.
+A plain text model (default qwen3.5) is enough for detection; OCR stays with Tesseract, and vision models are only an optional OCR-quality booster. See "operating rules for local Ollama" in the skill.
 
 ### Norm baselines and templates (v0.10.3+)
 

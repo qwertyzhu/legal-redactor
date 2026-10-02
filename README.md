@@ -40,9 +40,9 @@ legal-redactor redact-scan scan.pdf --mode production \
 
 不必套用整个模式：`--keep-categories` 反向枚举实现「只脱敏某一类」；entities.json 点名人名实现「只换指定名称」；`--preserve` 原样保留指定段落。决策表见 Skill 内 `SKILL.md`。
 
-### 全本地路径：Ollama 识别（v0.10.4+）
+### 实体识别可选用本机 Ollama 模型（v0.10.4+）
 
-实体识别可选**本机 Ollama 模型**，文书不出设备；替换仍由 CLI 确定性执行（本地模型只负责「找」）：
+工具全程在本机运行。实体识别可**改用本机 Ollama 模型**，避免把原文交给在线模型；替换仍由 CLI 确定性执行（模型只负责「找」）：
 
 ```console
 python3 skills/legal-document-redactor/scripts/ollama_setup.py      # 只读检测：按设备内存推荐模型
@@ -50,7 +50,7 @@ python3 skills/legal-document-redactor/scripts/ollama_entities.py INPUT.docx -o 
 legal-redactor redact INPUT.docx --mode ai --entities entities.draft.json -o OUTPUT.docx
 ```
 
-实体识别只需普通文本模型（默认 qwen3.5）；OCR 层仍是 Tesseract，视觉模型仅作可选 OCR 增强。规则详见 Skill 内「全本地运行规则」。
+实体识别只需普通文本模型（默认 qwen3.5）；OCR 层仍是 Tesseract，视觉模型仅作可选 OCR 增强。规则详见 Skill 内「本机 Ollama 的运行规则」。
 
 ### 规范基线与模板（v0.10.3+）
 

@@ -6,9 +6,8 @@
 
 仅 Skill 与文档；Python 包不变（仍为 0.10.7）。
 
-- SKILL.md frontmatter 描述融合 Skillhub 展示文案：补「指哪打哪」「全本地 Ollama」卖点与「本机脱敏/全本地脱敏/离线脱敏」触发词。
-- README（中英文）补齐 v0.10.3 起新增能力：选择性脱敏、全本地 Ollama 路径、规范基线、self_test 自检；安装命令指向最新 wheel 并写明「Skill 与包一起换」的升级规则。
-- CONTRIBUTING 新增 Skillhub 发布节：zip 选择、版本号对齐仓库、可粘贴的标题/简介模板、包修复版的配套提示。
+- SKILL.md 描述与 README（中英文）补齐自 v0.10.3 起的新能力：选择性脱敏、本机 Ollama 识别、规范基线、self_test 自检；安装命令指向最新 wheel 并写明「Skill 与包一起换」的升级规则。
+- 统一表述：工具全程在本机运行，可选的只是「实体识别用在线 Agent 还是本机 Ollama」；去掉「全本地脱敏 / 本机脱敏 / 离线脱敏」等易误解说法。
 
 ## 0.10.7 - 2026-10-01
 
@@ -21,22 +20,22 @@
 
 仅 Skill 文档；Python 包不变（仍为 0.10.2）。
 
-- SKILL.md 新增「全本地运行规则」：按输入类型分流（文字层→只需文本模型；扫描件给 AI→Tesseract+文本模型；扫描件涂黑→Tesseract 坐标，视觉模型不参与）；明确实体识别永远用文本模型，视觉模型仅作可选 OCR 增强（出文字不进坐标链路）；公章/签名区域仍人工圈定；补 Ollama 网络边界自检（仅监听 127.0.0.1）。
+- SKILL.md 新增「本机 Ollama 的运行规则」：按输入类型分流（文字层→只需文本模型；扫描件给 AI→Tesseract+文本模型；扫描件涂黑→Tesseract 坐标，视觉模型不参与）；明确实体识别永远用文本模型，视觉模型仅作可选 OCR 增强（出文字不进坐标链路）；公章/签名区域仍人工圈定；补 Ollama 网络边界自检（仅监听 127.0.0.1）。
 
 ## 0.10.5 - 2026-10-01
 
 仅 Skill 增强；Python 包不变（仍为 0.10.2）。
 
-- 新增 `scripts/ollama_setup.py`：全本地路径的只读环境检测——未装 Ollama 时按设备内存（Apple Silicon 统一内存分档：≥32GB→12-14B / 16-31GB→7-8B / <16GB→4B 勉强或建议回在线）打印安装与模型推荐命令；已装则列出模型并标出实体识别首选。支持 `--json` 供 Agent 判断。
-- SKILL.md 明确路径选择时机：默认在线，仅在用户要求本机/全本地或文书明显高敏时询问一次；首次配置分流（已装→选模型，未装→按设备推荐，征得同意后安装）。
+- 新增 `scripts/ollama_setup.py`：本机 Ollama 路径的只读环境检测——未装 Ollama 时按设备内存（Apple Silicon 统一内存分档：≥32GB→12-14B / 16-31GB→7-8B / <16GB→4B 勉强或建议用在线 Agent）打印安装与模型推荐命令；已装则列出模型并标出实体识别首选。支持 `--json` 供 Agent 判断。
+- SKILL.md 明确识别方式选择时机：默认用在线 Agent，仅在用户要求用本机模型/Ollama 或文书明显高敏时询问一次；首次配置分流（已装→选模型，未装→按设备推荐，征得同意后安装）。
 
 ## 0.10.4 - 2026-10-01
 
 仅 Skill 增强；Python 包不变（仍为 0.10.2）。
 
-- 新增 `scripts/ollama_entities.py`：本地 Ollama 模型识别自然语言实体，产出 entities 草稿（`source=ollama-draft`）。Ollama 只负责「找」，替换仍由 CLI 确定性执行；设备可选全本地（Ollama 识别）或在线（Agent 识别）路径。默认模型 `qwen3.5:latest`，支持 .docx / 文字层 .pdf / .txt / .md，纯 stdlib HTTP 调用。
+- 新增 `scripts/ollama_entities.py`：本地 Ollama 模型识别自然语言实体，产出 entities 草稿（`source=ollama-draft`）。Ollama 只负责「找」，替换仍由 CLI 确定性执行；设备可选本机 Ollama 识别或在线 Agent 识别。默认模型 `qwen3.5:latest`，支持 .docx / 文字层 .pdf / .txt / .md，纯 stdlib HTTP 调用。
 - 识别带原文逐字校验（容忍模型在字符间插空格），结构性字段（证件/手机/邮箱等）仍交给确定性扫描，不让模型报。
-- SKILL.md 新增「全本地 vs 在线：识别层二选一」工作流；环境自检补 `ollama list`。
+- SKILL.md 新增「实体识别：在线 Agent 还是本机 Ollama」工作流；环境自检补 `ollama list`。
 
 ## 0.10.3 - 2026-10-01
 

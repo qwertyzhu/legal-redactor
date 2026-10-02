@@ -160,7 +160,7 @@ def main() -> None:
             else:
                 s.check("T8 Ollama 识别", False, r.stderr[-200:])
         else:
-            s.skip("T8 Ollama 识别", "本机未配置 Ollama，全本地路径不可用（在线路径不受影响）")
+            s.skip("T8 Ollama 识别", "本机未配置 Ollama，本机 Ollama 识别不可用（在线 Agent 识别不受影响）")
 
     report(s, args.json)
     sys.exit(0 if all(r["status"] != "FAIL" for r in s.results) else 1)
