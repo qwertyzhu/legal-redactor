@@ -36,6 +36,27 @@ legal-redactor redact-scan scan.pdf --mode production \
 
 `party-spec.json` 模板位于 `skills/legal-document-redactor/references/party-redaction.template.json`。公章不能只依赖 OCR，必须以归一化区域覆盖完整外圈、名称、编号和中心图案，并逐页人工复核。
 
+### 指哪打哪：选择性脱敏（v0.10.3+）
+
+不必套用整个模式：`--keep-categories` 反向枚举实现「只脱敏某一类」；entities.json 点名人名实现「只换指定名称」；`--preserve` 原样保留指定段落。决策表见 Skill 内 `SKILL.md`。
+
+### 全本地路径：Ollama 识别（v0.10.4+）
+
+实体识别可选**本机 Ollama 模型**，文书不出设备；替换仍由 CLI 确定性执行（本地模型只负责「找」）：
+
+```console
+python3 skills/legal-document-redactor/scripts/ollama_setup.py      # 只读检测：按设备内存推荐模型
+python3 skills/legal-document-redactor/scripts/ollama_entities.py INPUT.docx -o entities.draft.json
+legal-redactor redact INPUT.docx --mode ai --entities entities.draft.json -o OUTPUT.docx
+```
+
+实体识别只需普通文本模型（默认 qwen3.5）；OCR 层仍是 Tesseract，视觉模型仅作可选 OCR 增强。规则详见 Skill 内「全本地运行规则」。
+
+### 规范基线与模板（v0.10.3+）
+
+- `references/redaction-standards.md`：裁判文书上网规则（法释〔2016〕19号）、个人信息保护法、GB/T 37964-2019、律师 AI 应用指引与工具参数对照，含工具识别盲区清单
+- `references/entities.court-style.template.json`：裁判文书上网式隐名模板（保留姓氏+某、住所地到县/区、金额模糊化）
+
 ## 60 秒上手
 
 ```console
@@ -170,6 +191,9 @@ legal-redactor verify ./matters-redacted/ --mode ai
 ```console
 python -m pytest
 python scripts/run_demo.py --clean
+
+# Skill 安装自检（新设备 / 升级后跑一次，全 PASS 才算就绪）：
+python3 skills/legal-document-redactor/scripts/self_test.py
 ```
 
 演示材料完全虚构。

@@ -34,6 +34,27 @@ legal-redactor redact-scan scan.pdf --mode production \
 
 Start from `skills/legal-document-redactor/references/party-redaction.template.json`. A seal must be covered by a reviewed normalized region containing its full outer ring, entity name, number, and center mark; OCR text boxes alone are insufficient. Review every output page before delivery.
 
+### Selective redaction (v0.10.3+)
+
+No need to adopt a whole mode: reverse-enumerate `--keep-categories` to strip one structural category only, name specific persons via `entities.json`, or `--preserve` passages verbatim. Decision table in the skill's `SKILL.md`.
+
+### Fully local path: Ollama detection (v0.10.4+)
+
+Entity detection can run on a **local Ollama model** so documents never leave the device; replacement stays deterministic via the CLI (the local model only finds, never rewrites):
+
+```console
+python3 skills/legal-document-redactor/scripts/ollama_setup.py      # read-only check; recommends a model by device RAM
+python3 skills/legal-document-redactor/scripts/ollama_entities.py INPUT.docx -o entities.draft.json
+legal-redactor redact INPUT.docx --mode ai --entities entities.draft.json -o OUTPUT.docx
+```
+
+A plain text model (default qwen3.5) is enough for detection; OCR stays with Tesseract, and vision models are only an optional OCR-quality booster. See "fully-local operating rules" in the skill.
+
+### Norm baselines and templates (v0.10.3+)
+
+- `references/redaction-standards.md`: maps PRC judgment-publication rules, PIPL, GB/T 37964-2019, and bar-association AI guidance onto tool parameters, incl. known detector blind spots
+- `references/entities.court-style.template.json`: court-publication-style aliases (surname + 某, district-level addresses, fuzzed amounts)
+
 ## 60-second start
 
 ```console
@@ -86,13 +107,17 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
 ```
 
-CLI-only from the GitHub Release wheel:
+CLI-only from the **latest** GitHub Release wheel (v0.10.7 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.2/legal_redactor-0.10.2-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.7/legal_redactor-0.10.7-py3-none-any.whl
 ```
 
-Or install from the latest [GitHub Release](https://github.com/qwertyzhu/legal-redactor/releases/latest).
+**Upgrade rule**: update the skill bundle and the Python package together. CHANGELOG entries marked "skill only" need no wheel upgrade; entries marked "fix (package)" (e.g. v0.10.7 fixing label-adjacent email misses) **require** the new wheel. After installing, run the self-check:
+
+```console
+python3 ~/.claude/skills/legal-document-redactor/scripts/self_test.py   # all PASS = ready
+```
 
 ### Claude Code / Codex skill
 
@@ -165,6 +190,9 @@ Optional structural + suspect draft: `legal-redactor draft-entities INPUT.docx`.
 ```console
 python -m pytest
 python scripts/run_demo.py --clean
+
+# Skill install self-check (run once on a new device / after upgrades; all PASS = ready):
+python3 skills/legal-document-redactor/scripts/self_test.py
 ```
 
 Demo inputs are completely fictional. Any resemblance to real parties is coincidental.
