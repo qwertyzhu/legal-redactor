@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.10.8 - 2026-10-02
+
+仅 Skill 与文档；Python 包不变（仍为 0.10.7）。
+
+- SKILL.md frontmatter 描述融合 Skillhub 展示文案：补「指哪打哪」「全本地 Ollama」卖点与「本机脱敏/全本地脱敏/离线脱敏」触发词。
+- README（中英文）补齐 v0.10.3 起新增能力：选择性脱敏、全本地 Ollama 路径、规范基线、self_test 自检；安装命令指向最新 wheel 并写明「Skill 与包一起换」的升级规则。
+- CONTRIBUTING 新增 Skillhub 发布节：zip 选择、版本号对齐仓库、可粘贴的标题/简介模板、包修复版的配套提示。
+
 ## 0.10.7 - 2026-10-01
 
 修复包的真实漏检，并补齐 Skill 回归测试。Python 包 0.10.2 → 0.10.7（跳号对齐 Skill 版本）。
