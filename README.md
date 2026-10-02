@@ -6,8 +6,9 @@
 [![许可证](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
 
-**中国法律文书本地脱敏：给 AI 之前去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
-输入什么格式，就返回什么格式：DOCX→DOCX，PDF→PDF（文字层），文本→文本。  
+**中国法律文书本地脱敏助手：交在线 AI 之前激进去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
+支持按用户选择**整方遮挡甲方、乙方或双方**（名称、联系方式、签名和整枚公章）；实体识别**可选本机 Ollama 模型**，避免把原文交给在线模型。  
+输入什么格式，就返回什么格式：DOCX→DOCX，PDF→PDF（文字层），文本→文本。生成本地审计记录并执行残留检查。  
 两个刚需：
 
 1. **给在线 AI 之前**——激进脱敏，降低事项可反查性；  

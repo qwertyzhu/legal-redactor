@@ -6,9 +6,10 @@
 [![License](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
 
-**中国法律文书本地脱敏：给 AI 之前去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
+**中国法律文书本地脱敏助手：交在线 AI 之前激进去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
 **Local-first dual-mode redaction for Chinese legal documents.**  
-Same format out as in: DOCX→DOCX, PDF→PDF (text-layer), text→text.  
+Hide Party A, Party B, or both on request (names, contact details, signatures, the complete seal). Entity detection can use a **local Ollama model** so the original text is not sent to an online model.  
+Same format out as in: DOCX→DOCX, PDF→PDF (text-layer), text→text. Writes a local audit ledger and runs a residual check.  
 Built for lawyers who need (1) a privacy-safe copy before pasting into online AI, and (2) a selective production copy before court or opponent disclosure.
 
 > Early preview. Does not replace lawyer judgment. A passing residual scan is not proof of perfect anonymization.
