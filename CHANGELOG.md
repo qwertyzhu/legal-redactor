@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-10-14
+
+P2：可选 NER、图片 OCR、公章草稿、docx 修订模式、Agent 入口。叠加在 0.11.0（P1）之上。
+
+- **规则修复**：`审判长/审判员/人民陪审员/书记员/法官助理/执行员` 后的人名识别为 role=court_staff，**所有 profile（ai/production/minimal/publish）默认保留**，需要时用 `--redact-court-staff` 或 profile 键 `redact_court_staff: true` 改为替换；`受X委托 / 接受X的委托` 识别委托人；组织名去掉「本所受」等前缀。语料：孙测五（受托当事人）转为 must_remove，赵测审（审判长）改为 must_keep。
+- **可选 NER**（`pip install 'legal-redactor[ner]'`，选 LTP：比 HanLP 小）：抓无角色词锚点的人名（如「小明」）。**只进 suspects，永不自动替换**；未安装时静默返回空。`LEGAL_REDACTOR_NER=ltp|hanlp|off`。
+- **内嵌图片 OCR**（需 Tesseract + chi_sim）：文字层 PDF 中的图片复用扫描件路径 OCR，结构性号码与已确认实体处像素涂黑；docx `word/media/*` OCR 后逐图告警 `IMAGE-PII`（图片不改，提示替换）。`--ocr-images auto|on|off`，缺 Tesseract 时 auto 只告警。
+- **公章草稿**（`pip install 'legal-redactor[vision]'`）：`legal-redactor seal-draft IN.pdf` 用 OpenCV Hough 找红色圆章，输出 party-spec 格式区域草稿，不做任何遮挡。
+- **docx 修订**：`--revisions accept|reject|keep-and-redact`，默认 accept（原行为）；keep-and-redact 保留 w:ins/w:del 并脱敏其中文字（含 w:delText），作者照旧匿名。目录 verify 同时扫描修订内文字。
+- **`legal-redactor doctor`**：查看 Tesseract / OpenCV / NER 是否可用。
+- **AGENTS.md** 指向 SKILL.md；Codex plugin 版本对齐 0.12.0。
+
 ## 0.11.0 - 2026-10-14
 
 P1：ledger 加固与还原、脱敏等级配置、审计报告、回归语料、单一入口。叠加在 0.10.9（P0）之上。

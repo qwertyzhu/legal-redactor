@@ -64,6 +64,9 @@ def draft_entities_payload(
     suspect_rows: list[dict[str, Any]] = []
     if include_suspects:
         suspects = detect_suspects(body, known=seen)
+        from .ner import detect_ner_suspects
+
+        suspects += detect_ner_suspects(body, known=seen | {x.text for x in suspects})
         suspect_rows = suspects_to_entity_rows(suspects)
         for row in suspect_rows:
             original = row["original"]

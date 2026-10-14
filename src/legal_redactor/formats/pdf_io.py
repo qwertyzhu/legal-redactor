@@ -78,7 +78,10 @@ def redact_pdf(
     *,
     preserve_hyperlinks: bool = False,  # unused for pdf text-layer path
     preserve_bookmarks: bool = False,
+    ocr_images: str = "auto",
+    image_categories: set[str] | None = None,
 ) -> str:
+    warn = warnings if warnings is not None else []
     doc = fitz.open(str(input_path))
     try:
         if not _has_text_layer(doc):
@@ -108,6 +111,8 @@ def redact_pdf(
             if found_any:
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
+        _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
+
         meta = doc.metadata or {}
         for key in list(meta.keys()):
             val = meta.get(key)
@@ -128,6 +133,72 @@ def redact_pdf(
         doc.close()
 
     return extract_text(output_path)
+
+
+def _redact_embedded_images(
+    doc: "fitz.Document",
+    mapping: list[tuple[str, str]],
+    warnings: list[str],
+    ocr_images: str,
+    categories: set[str] | None,
+) -> None:
+    """OCR raster images on text-layer pages and black-box PII pixels (scan path reuse)."""
+    from ..image_scan import ocr_available, ocr_image_hits
+
+    pages_with_images = [p for p in doc if p.get_images(full=True)]
+    if not pages_with_images:
+        return
+    if ocr_images == "off":
+        warnings.append(
+            f"PDF has embedded images on {len(pages_with_images)} page(s); --ocr-images off — review manually"
+        )
+        return
+    if not ocr_available():
+        if ocr_images == "on":
+            raise RuntimeError("--ocr-images on requires Tesseract (chi_sim)")
+        warnings.append(
+            f"PDF has embedded images on {len(pages_with_images)} page(s); Tesseract not installed — "
+            "images not OCR-scanned, review manually"
+        )
+        return
+    from ..patterns import categories_for_mode
+
+    cats = categories if categories is not None else categories_for_mode("ai")
+    terms = [o for o, _ in mapping]
+    total = 0
+    for page in pages_with_images:
+        page_hits = 0
+        for info in page.get_images(full=True):
+            xref = info[0]
+            rects = page.get_image_rects(xref)
+            if not rects:
+                continue
+            try:
+                raw = doc.extract_image(xref)["image"]
+                hits, w, h, _ = ocr_image_hits(raw, categories=cats, extra_terms=terms)
+            except Exception as exc:  # pragma: no cover - defensive
+                warnings.append(f"page {page.number + 1} image xref {xref}: OCR failed ({exc})")
+                continue
+            if not hits or not w or not h:
+                continue
+            for rect in rects:
+                sx, sy = rect.width / w, rect.height / h
+                for hit in hits:
+                    x0, y0, x1, y1 = hit.box
+                    page.add_redact_annot(
+                        fitz.Rect(
+                            rect.x0 + x0 * sx, rect.y0 + y0 * sy, rect.x0 + x1 * sx, rect.y0 + y1 * sy
+                        ),
+                        fill=(0, 0, 0),
+                    )
+                    page_hits += 1
+        if page_hits:
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+            total += page_hits
+    if total:
+        warnings.append(
+            f"IMAGE-PII: blacked out {total} OCR hit box(es) inside embedded images — spot-check the output"
+        )
 
 
 def create_sample_pdf(path: Path, text: str) -> None:
