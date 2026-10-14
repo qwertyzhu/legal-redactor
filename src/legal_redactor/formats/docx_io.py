@@ -37,31 +37,51 @@ def _local(tag: str) -> str:
     return tag
 
 
-def _flatten_revisions(root: etree._Element) -> None:
-    """Accept insertions and discard deletions so visible text is complete."""
+REVISION_MODES = ("accept", "reject", "keep-and-redact")
+
+
+def _unwrap(el: etree._Element) -> None:
+    parent = el.getparent()
+    if parent is None:
+        return
+    idx = parent.index(el)
+    for offset, child in enumerate(list(el)):
+        parent.insert(idx + offset, child)
+    parent.remove(el)
+
+
+def _flatten_revisions(root: etree._Element, revisions: str = "accept") -> None:
+    """Resolve tracked changes.
+
+    accept: keep insertions, drop deletions (default, historic behaviour).
+    reject: drop insertions, restore deletions (w:delText -> w:t).
+    keep-and-redact: leave w:ins / w:del in place; text inside both is redacted.
+    """
+    if revisions == "keep-and-redact":
+        return
+    if revisions not in REVISION_MODES:
+        raise ValueError(f"revisions must be one of {REVISION_MODES}")
+    drop = {"del", "moveFrom"} if revisions == "accept" else {"ins", "moveTo"}
+    keep = {"ins", "moveTo"} if revisions == "accept" else {"del", "moveFrom"}
     for el in list(root.iter()):
-        if _local(el.tag) == "del":
+        if _local(el.tag) in drop:
             parent = el.getparent()
             if parent is not None:
                 parent.remove(el)
-
+    if revisions == "reject":
+        for el in root.iter():
+            if _local(el.tag) == "delText":
+                el.tag = f"{W}t"
+            elif _local(el.tag) == "delInstrText":
+                el.tag = f"{W}instrText"
     changed = True
     while changed:
         changed = False
         for el in list(root.iter()):
-            name = _local(el.tag)
-            if name not in {"ins", "moveFrom", "moveTo"}:
-                continue
-            parent = el.getparent()
-            if parent is None:
-                continue
-            idx = parent.index(el)
-            children = list(el)
-            for offset, child in enumerate(children):
-                parent.insert(idx + offset, child)
-            parent.remove(el)
-            changed = True
-            break
+            if _local(el.tag) in keep and el.getparent() is not None:
+                _unwrap(el)
+                changed = True
+                break
 
 
 def _scrub_authors_and_rsids(root: etree._Element) -> None:
@@ -77,10 +97,25 @@ def _scrub_authors_and_rsids(root: etree._Element) -> None:
                 del el.attrib[attr]
 
 
+def _revision_owner(node: etree._Element) -> etree._Element | None:
+    for anc in node.iterancestors():
+        if _local(anc.tag) in ("ins", "del", "moveFrom", "moveTo"):
+            return anc
+        if _local(anc.tag) == "p":
+            return None
+    return None
+
+
 def _paragraph_text(p: etree._Element) -> str:
     parts: list[str] = []
+    owner: object = False
     for node in p.iter():
-        if _local(node.tag) == "t":
+        if _local(node.tag) in ("t", "delText"):
+            cur = _revision_owner(node)
+            # keep-and-redact: deleted & inserted text must not glue together
+            if owner is not False and cur is not owner and parts:
+                parts.append("\n")
+            owner = cur
             parts.append(node.text or "")
         elif _local(node.tag) == "tab":
             parts.append("\t")
@@ -120,7 +155,8 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
     if updated == original:
         return original
 
-    t_nodes = [n for n in p.iter() if _local(n.tag) == "t"]
+    t_nodes = [n for n in p.iter() if _local(n.tag) in ("t", "delText")]
+    has_revision = any(_local(n.tag) in ("ins", "del") for n in p.iter())
     if t_nodes:
         for t in t_nodes:
             old = t.text or ""
@@ -131,6 +167,11 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
         after = _paragraph_text(p)
         if after == updated:
             return updated
+        if has_revision:
+            # Collapsing would destroy tracked-change structure; report the
+            # per-run result and let residual verify flag what is left.
+            _REVISION_SPLIT_WARN.append(original[:40])
+            return after
         # Entity spanned runs (or per-run order differed) — safe collapse.
         _set_paragraph_text(p, updated)
         return updated
@@ -139,9 +180,14 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
     return updated
 
 
-def _process_xml_bytes(data: bytes, mapping: list[tuple[str, str]] | None) -> tuple[bytes, str]:
+_REVISION_SPLIT_WARN: list[str] = []
+
+
+def _process_xml_bytes(
+    data: bytes, mapping: list[tuple[str, str]] | None, revisions: str = "accept"
+) -> tuple[bytes, str]:
     root = etree.fromstring(data)
-    _flatten_revisions(root)
+    _flatten_revisions(root, revisions)
     if mapping is not None:
         _scrub_authors_and_rsids(root)
 
@@ -166,13 +212,13 @@ def _process_xml_bytes(data: bytes, mapping: list[tuple[str, str]] | None) -> tu
     return out, "\n".join(texts)
 
 
-def extract_text(path: Path) -> str:
+def extract_text(path: Path, revisions: str = "accept") -> str:
     chunks: list[str] = []
     with zipfile.ZipFile(path, "r") as zin:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
-            _, text = _process_xml_bytes(zin.read(name), mapping=None)
+            _, text = _process_xml_bytes(zin.read(name), mapping=None, revisions=revisions)
             if text.strip():
                 chunks.append(text)
     return "\n".join(chunks)
@@ -258,6 +304,9 @@ def redact_docx(
     *,
     preserve_hyperlinks: bool = False,
     preserve_bookmarks: bool = False,  # unused for docx; accepted for API symmetry
+    revisions: str = "accept",
+    ocr_images: str = "auto",
+    image_categories: set[str] | None = None,
 ) -> str:
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -268,7 +317,9 @@ def redact_docx(
     with zipfile.ZipFile(input_path, "r") as zin:
         names = zin.namelist()
         if any(n.startswith("word/media/") for n in names):
-            warn.append("docx contains word/media/* — embedded images not OCR-scanned; review manually")
+            warn.extend(
+                _media_warnings(input_path, mapping, ocr_images, image_categories)
+            )
         if any(n.startswith("word/embeddings/") for n in names):
             warn.append("docx contains word/embeddings/* (OLE) — review or remove before sharing")
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
@@ -276,7 +327,7 @@ def redact_docx(
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(data, mapping)
+                    data, text = _process_xml_bytes(data, mapping, revisions)
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":
@@ -292,7 +343,51 @@ def redact_docx(
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)
 
+    if _REVISION_SPLIT_WARN:
+        warn.append(
+            "keep-and-redact: entity spans a tracked-change boundary in "
+            f"{len(_REVISION_SPLIT_WARN)} paragraph(s); not collapsed — check residual report"
+        )
+        _REVISION_SPLIT_WARN.clear()
     return "\n".join(collected)
+
+
+def _media_warnings(
+    path: Path,
+    mapping: list[tuple[str, str]],
+    ocr_images: str,
+    categories: set[str] | None,
+) -> list[str]:
+    """List word/media images; OCR them when Tesseract is available (auto/on)."""
+    from ..image_scan import ocr_available, scan_docx_media
+
+    if ocr_images == "off" or not ocr_available():
+        why = "--ocr-images off" if ocr_images == "off" else "Tesseract not installed"
+        if ocr_images == "on" and why != "--ocr-images off":
+            raise RuntimeError("--ocr-images on requires Tesseract (chi_sim) — see references/ocr.md")
+        with zipfile.ZipFile(path) as z:
+            media = [n for n in z.namelist() if n.startswith("word/media/")]
+        return [
+            f"docx contains {len(media)} embedded image(s) ({why}) — not OCR-scanned; "
+            "review manually: " + ", ".join(media[:10])
+        ]
+    from ..patterns import categories_for_mode
+
+    cats = categories if categories is not None else categories_for_mode("ai")
+    items = scan_docx_media(path, categories=cats, extra_terms=[o for o, _ in mapping])
+    out: list[str] = []
+    for it in items:
+        if it["hits"]:
+            kinds = sorted({h["category"] for h in it["hits"]})
+            out.append(
+                f"IMAGE-PII {it['name']}: OCR found {len(it['hits'])} hit(s) ({', '.join(kinds)}) — "
+                "image NOT modified; replace or crop it before sharing"
+            )
+        elif not it["ocr"]:
+            out.append(f"docx image {it['name']} not OCR-scanned (undecodable/tiny/unsupported); review manually")
+    if not out:
+        out.append(f"docx word/media images OCR-scanned ({len(items)}), no structural PII found — still glance at seals/signatures")
+    return out
 
 
 def create_sample_docx(path: Path, text: str) -> None:

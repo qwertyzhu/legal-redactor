@@ -32,6 +32,7 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 - `--preserve "原文"` — 单段保留
 - 整方遮挡扫描件：见 [references/party-redaction.md](references/party-redaction.md)
 - 扫描件 OCR / 涂黑：见 [references/scanned-pdf.md](references/scanned-pdf.md)
+- docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
 

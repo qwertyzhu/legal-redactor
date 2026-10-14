@@ -18,9 +18,15 @@ legal-redactor redact ./inbox/ --mode ai --unify -o ./outbox/
 legal-redactor draft-entities contract.docx -o entities.draft.json
 legal-redactor ocr scan.pdf -o workdir/
 legal-redactor redact-scan scan.pdf --mode production -o scan.redacted.pdf
+legal-redactor redact draft.docx --mode ai --revisions keep-and-redact -o out.docx   # accept(默认)|reject|keep-and-redact
+legal-redactor redact contract.pdf --mode ai --ocr-images on -o out.pdf   # 内嵌图片 OCR，需 Tesseract
+legal-redactor seal-draft scan.pdf -o seals.json    # 公章区域草稿，需 [vision]，只出草稿
+legal-redactor doctor                               # Tesseract / OpenCV / NER 可用性
 python3 scripts/self_test.py
 ```
 
 `--keep-categories` / `--extra-categories`：`id_card,mobile,landline,email,bank_account,uscc,case_number,passport,hk_mo_permit,plate,property_cert,wechat_qq,ip,birth_date`。
 
 批量优先 `redact DIR --unify`。目录 `verify` 不要把 ledger 混进校验目录。
+
+可选 NER：`pip install 'legal-redactor[ner]'`（LTP）。结果只进 `*.suspects.json`（reason=ner），需人工确认后写进 entities 才会替换。

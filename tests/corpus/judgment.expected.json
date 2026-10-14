@@ -5,7 +5,8 @@
     "（2025）京73民终678号",
     "南测网络科技有限公司",
     "郝测一",
-    "1990年1月1日出生"
+    "1990年1月1日出生",
+    "赵测审"
   ],
   "must_keep": [
     "《中华人民共和国民事诉讼法》第一百七十七条",
@@ -18,9 +19,5 @@
   "residual_status": [
     "PASS",
     "WARN"
-  ],
-  "known_misses": [
-    "赵测审"
-  ],
-  "known_misses_note": "Documented detector gaps (no role colon / 受X委托). Tracked, not asserted."
+  ]
 }

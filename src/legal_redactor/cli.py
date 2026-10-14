@@ -174,6 +174,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="pdf：保留书签（书签标题不脱敏，需人工检查）",
     )
+    pr.add_argument(
+        "--revisions",
+        choices=("accept", "reject", "keep-and-redact"),
+        default="accept",
+        help="docx 修订：accept=接受修订（默认）；reject=拒绝修订；keep-and-redact=保留修订并脱敏 w:ins/w:del 内文字",
+    )
+    pr.add_argument(
+        "--ocr-images",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="内嵌图片 OCR（需 Tesseract）：auto=有则用（默认）；on=缺失即报错；off=只列出提醒",
+    )
     pr.add_argument("--json", action="store_true", help="打印机器可读 JSON 结果")
 
     ps = sub.add_parser("scan", help="只检测结构性个人信息 / 生成计划，不写出脱敏文件")
@@ -339,6 +351,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="整方脱敏之外，仍按 mode 遮挡所有各方的结构性号码（默认只遮所选方）",
     )
 
+    psd = sub.add_parser(
+        "seal-draft",
+        help="（可选 OpenCV）检测红色圆形公章，输出待人工确认的区域草稿 JSON，不做任何遮挡",
+    )
+    psd.add_argument("input", type=Path, help="PDF 或图片")
+    psd.add_argument("-o", "--output", type=Path, default=None, help="草稿 JSON 路径")
+    psd.add_argument("--dpi", type=int, default=150)
+
+    pdoc = sub.add_parser("doctor", help="检查可选组件：Tesseract / OpenCV / NER")
+    pdoc.add_argument("--json", action="store_true")
+
     return p
 
 
@@ -400,6 +423,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             ledger_encrypt=bool(getattr(args, "ledger_encrypt", False)),
             preserve_hyperlinks=bool(getattr(args, "preserve_hyperlinks", False)),
             preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
+            revisions=getattr(args, "revisions", "accept"),
+            ocr_images=getattr(args, "ocr_images", "auto"),
         )
         if getattr(args, "json", False):
             print(
@@ -477,6 +502,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         ledger_beside_output=True if getattr(args, "ledger_beside_output", False) else None,
         preserve_hyperlinks=bool(getattr(args, "preserve_hyperlinks", False)),
         preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
+        revisions=getattr(args, "revisions", "accept"),
+        ocr_images=getattr(args, "ocr_images", "auto"),
     )
     if getattr(args, "json", False):
         print(
@@ -531,6 +558,48 @@ def _cmd_redact(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_seal_draft(args: argparse.Namespace) -> int:
+    from .image_scan import detect_seals, seal_detection_available, seal_draft_for_pdf
+
+    src = Path(args.input)
+    if not seal_detection_available():
+        print("seal-draft 需要 OpenCV：pip install 'legal-redactor[vision]'", file=sys.stderr)
+        return 3
+    if src.suffix.lower() == ".pdf":
+        payload = seal_draft_for_pdf(src, dpi=args.dpi)
+    else:
+        payload = {
+            "draft": True,
+            "available": True,
+            "source": str(src),
+            "regions": [
+                {"page": 1, "rect": s["rect"], "category": "seal", "note": "DRAFT seal"}
+                for s in detect_seals(src.read_bytes())
+            ],
+        }
+    out = args.output or src.with_name(f"{src.stem}.seal-draft.json")
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"seal drafts: {len(payload['regions'])} -> {out}（仅草稿，需人工确认后写入 party spec）")
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    from .image_scan import ocr_available, seal_detection_available
+    from .ner import ner_status
+
+    info = {
+        "tesseract": ocr_available(),
+        "opencv": seal_detection_available(),
+        "ner": ner_status(),
+    }
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+    else:
+        for k, v in info.items():
+            print(f"{k}: {v}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _configure_stdio()
     parser = _build_parser()
@@ -539,6 +608,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "redact":
             return _cmd_redact(args)
+
+        if args.command == "seal-draft":
+            return _cmd_seal_draft(args)
+
+        if args.command == "doctor":
+            return _cmd_doctor(args)
 
         if args.command == "scan":
             args.mode, _scan_profile = _resolve_mode_profile(args)

@@ -17,6 +17,7 @@ from .ledger_store import (
 )
 from .profiles_loader import Profile, resolve_profile
 from .formats import docx_io, pdf_io, text_io
+from .patterns import categories_for_mode
 from .suspects import Suspect, detect_suspects
 from .verify import ResidualReport, scan_residual
 
@@ -70,10 +71,14 @@ class BatchRedactResult:
         return [r for r in self.results if not r.ok]
 
 
-def _extract(path: Path) -> str:
+REVISION_MODES = ("accept", "reject", "keep-and-redact")
+OCR_IMAGE_MODES = ("auto", "on", "off")
+
+
+def _extract(path: Path, *, revisions: str = "accept") -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
-        return docx_io.extract_text(path)
+        return docx_io.extract_text(path, revisions=revisions)
     if suffix == ".pdf":
         return pdf_io.extract_text(path)
     if suffix in TEXT_SUFFIXES or suffix == "":
@@ -89,15 +94,31 @@ def _apply(
     *,
     preserve_hyperlinks: bool = False,
     preserve_bookmarks: bool = False,
+    revisions: str = "accept",
+    ocr_images: str = "auto",
+    image_categories: set[str] | None = None,
 ) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
         return docx_io.redact_docx(
-            path, output, mapping, warnings=warnings, preserve_hyperlinks=preserve_hyperlinks
+            path,
+            output,
+            mapping,
+            warnings=warnings,
+            preserve_hyperlinks=preserve_hyperlinks,
+            revisions=revisions,
+            ocr_images=ocr_images,
+            image_categories=image_categories,
         )
     if suffix == ".pdf":
         return pdf_io.redact_pdf(
-            path, output, mapping, warnings=warnings, preserve_bookmarks=preserve_bookmarks
+            path,
+            output,
+            mapping,
+            warnings=warnings,
+            preserve_bookmarks=preserve_bookmarks,
+            ocr_images=ocr_images,
+            image_categories=image_categories,
         )
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
@@ -154,6 +175,13 @@ def resolve_allowlist(
     )
 
 
+def _ner_suspects(text: str, known: set[str]) -> list[Suspect]:
+    """Optional NER names (suspects only, never auto-replaced). [] if not installed."""
+    from .ner import detect_ner_suspects
+
+    return detect_ner_suspects(text, known=known)
+
+
 def _deferred_suspects(plan: RedactionPlan) -> list[Suspect]:
     out: list[Suspect] = []
     seen: set[str] = set()
@@ -193,6 +221,8 @@ def redact_file(
     ledger_beside_output: bool | None = None,
     preserve_hyperlinks: bool = False,
     preserve_bookmarks: bool = False,
+    revisions: str = "accept",
+    ocr_images: str = "auto",
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -230,7 +260,11 @@ def redact_file(
         allowlist = resolve_allowlist(
             input_path, allowlist_files, include_defaults=use_default_allowlist
         )
-    source_text = _extract(input_path)
+    if revisions not in REVISION_MODES:
+        raise ValueError(f"revisions must be one of {REVISION_MODES}")
+    if ocr_images not in OCR_IMAGE_MODES:
+        raise ValueError(f"ocr_images must be one of {OCR_IMAGE_MODES}")
+    source_text = _extract(input_path, revisions=revisions)
     only = prof.categories if prof is not None else None
     if prof is not None and prof.categories is None:
         keep |= prof.keep_categories
@@ -258,6 +292,11 @@ def redact_file(
         warnings=warnings,
         preserve_hyperlinks=preserve_hyperlinks,
         preserve_bookmarks=preserve_bookmarks,
+        revisions=revisions,
+        ocr_images=ocr_images,
+        image_categories=categories_for_mode(
+            mode, keep_categories=keep, extra_categories=extra, only_categories=only
+        ),
     )
     residual = scan_residual(
         output_text,
@@ -278,6 +317,7 @@ def redact_file(
     suspects = _deferred_suspects(plan) + detect_suspects(
         source_text, known=known, allowlist=allowlist
     )
+    suspects += _ner_suspects(source_text, known | {x.text for x in suspects})
 
     ledger_target = resolve_ledger_path(
         input_path,
@@ -402,6 +442,8 @@ def redact_tree(
     ledger_encrypt: bool = False,
     preserve_hyperlinks: bool = False,
     preserve_bookmarks: bool = False,
+    revisions: str = "accept",
+    ocr_images: str = "auto",
 ) -> BatchRedactResult:
     """Redact every supported file under input_dir into output_dir (flat names).
 
@@ -465,6 +507,8 @@ def redact_tree(
                 ledger_beside_output=True,
                 preserve_hyperlinks=preserve_hyperlinks,
                 preserve_bookmarks=preserve_bookmarks,
+                revisions=revisions,
+                ocr_images=ocr_images,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues
@@ -517,7 +561,8 @@ def verify_tree(
     for path in iter_batch_inputs(input_dir, recursive=recursive):
         if path.name.endswith(sidecar_suffixes) or path.name.startswith(("entities.consistent", "consistency.report")):
             continue
-        text = _extract(path)
+        # Superset view: deleted/inserted revision text is scanned too.
+        text = _extract(path, revisions="keep-and-redact")
         report = scan_residual(
             text,
             mode=mode,
@@ -698,6 +743,7 @@ def detect_only(
     suspects = _deferred_suspects(plan) + detect_suspects(
         text, known=known, allowlist=allowlist
     )
+    suspects += _ner_suspects(text, known | {x.text for x in suspects})
     return {
         "mode": mode,
         "keep_categories": sorted(keep),
