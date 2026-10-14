@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from .allowlist import load_allowlist
 from .entities import RedactionPlan, build_plan, load_entities_file
 from .formats import docx_io, pdf_io, text_io
 from .suspects import Suspect, detect_suspects
@@ -28,6 +29,7 @@ class RedactResult:
     output_text: str
     suspects: list[Suspect]
     suspects_path: Path | None = None
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -62,12 +64,17 @@ def _extract(path: Path) -> str:
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
 
 
-def _apply(path: Path, output: Path, mapping: list[tuple[str, str]]) -> str:
+def _apply(
+    path: Path,
+    output: Path,
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None = None,
+) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
-        return docx_io.redact_docx(path, output, mapping)
+        return docx_io.redact_docx(path, output, mapping, warnings=warnings)
     if suffix == ".pdf":
-        return pdf_io.redact_pdf(path, output, mapping)
+        return pdf_io.redact_pdf(path, output, mapping, warnings=warnings)
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
             output = output.with_suffix(suffix or ".txt")
@@ -106,6 +113,43 @@ def _normalize_keep_extra(
     return keep, extra
 
 
+def resolve_allowlist(
+    input_path: Path | None,
+    allowlist_files: list[Path] | None = None,
+    *,
+    include_defaults: bool = True,
+) -> set[str]:
+    dirs = [Path.cwd()]
+    if input_path is not None:
+        base = Path(input_path)
+        dirs.append(base if base.is_dir() else base.parent)
+    return load_allowlist(
+        extra_files=[Path(p) for p in (allowlist_files or [])],
+        search_dirs=dirs,
+        include_defaults=include_defaults,
+    )
+
+
+def _deferred_suspects(plan: RedactionPlan) -> list[Suspect]:
+    out: list[Suspect] = []
+    seen: set[str] = set()
+    for hit in plan.deferred_structural:
+        if hit.text in seen:
+            continue
+        seen.add(hit.text)
+        out.append(
+            Suspect(
+                text=hit.text,
+                category=hit.category,
+                reason=hit.notes or f"confidence={hit.confidence}",
+                start=hit.start,
+                end=hit.end,
+                role_hint="unknown",
+            )
+        )
+    return out
+
+
 def redact_file(
     input_path: Path,
     mode: str,
@@ -116,6 +160,9 @@ def redact_file(
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
     auto_confident: bool = False,
+    allowlist_files: list[Path] | None = None,
+    use_default_allowlist: bool = True,
+    allowlist: set[str] | None = None,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -133,6 +180,10 @@ def redact_file(
 
     keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
 
+    if allowlist is None:
+        allowlist = resolve_allowlist(
+            input_path, allowlist_files, include_defaults=use_default_allowlist
+        )
     source_text = _extract(input_path)
     plan = build_plan(
         source_text,
@@ -142,9 +193,11 @@ def redact_file(
         keep_categories=keep,
         extra_categories=extra,
         auto_confident=auto_confident,
+        allowlist=allowlist,
     )
     mapping = plan.mapping()
-    output_text = _apply(input_path, output_path, mapping)
+    warnings: list[str] = []
+    output_text = _apply(input_path, output_path, mapping, warnings=warnings)
     residual = scan_residual(
         output_text, mode=mode, keep_categories=keep, extra_categories=extra
     )
@@ -156,7 +209,10 @@ def redact_file(
         original = str(raw.get("original") or raw.get("text") or "").strip()
         if original:
             known.add(original)
-    suspects = detect_suspects(source_text, known=known)
+    known |= set(allowlist)
+    suspects = _deferred_suspects(plan) + detect_suspects(
+        source_text, known=known, allowlist=allowlist
+    )
 
     ledger_path = work_dir / f"{output_path.stem}.ledger.json"
     residual_path = work_dir / f"{output_path.stem}.residual.json"
@@ -189,6 +245,7 @@ def redact_file(
             keep=keep,
             extra=extra,
             suspects=suspects,
+            warnings=warnings,
         ),
         encoding="utf-8",
     )
@@ -204,6 +261,7 @@ def redact_file(
         output_text=output_text,
         suspects=suspects,
         suspects_path=suspects_path,
+        warnings=warnings,
     )
 
 
@@ -231,6 +289,8 @@ def redact_tree(
     recursive: bool = False,
     unify_first: bool = False,
     auto_confident: bool = False,
+    allowlist_files: list[Path] | None = None,
+    use_default_allowlist: bool = True,
 ) -> BatchRedactResult:
     """Redact every supported file under input_dir into output_dir (flat names).
 
@@ -264,6 +324,9 @@ def redact_tree(
     results: list[RedactResult] = []
     skipped: list[tuple[Path, str]] = []
     used_names: set[str] = set()
+    batch_allow = resolve_allowlist(
+        input_dir, allowlist_files, include_defaults=use_default_allowlist
+    )
 
     for src in iter_batch_inputs(input_dir, recursive=recursive):
         name = f"{src.stem}.redacted-{mode}{src.suffix}"
@@ -285,6 +348,7 @@ def redact_tree(
                 keep_categories=keep_categories,
                 extra_categories=extra_categories,
                 auto_confident=auto_confident,
+                allowlist=batch_allow,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues
@@ -351,6 +415,8 @@ def scan_tree(
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
     recursive: bool = False,
+    allowlist_files: list[Path] | None = None,
+    use_default_allowlist: bool = True,
 ) -> dict[str, Any]:
     """detect_only for every supported file under a directory."""
     rows = []
@@ -362,6 +428,8 @@ def scan_tree(
             preserve=preserve,
             keep_categories=keep_categories,
             extra_categories=extra_categories,
+            allowlist_files=allowlist_files,
+            use_default_allowlist=use_default_allowlist,
         )
         payload["path"] = str(path)
         payload["name"] = path.name
@@ -381,6 +449,7 @@ def _render_summary(
     keep: set[str] | None = None,
     extra: set[str] | None = None,
     suspects: list[Suspect] | None = None,
+    warnings: list[str] | None = None,
 ) -> str:
     lines = [
         f"# Redaction summary",
@@ -430,6 +499,11 @@ def _render_summary(
             t = s.text.replace("|", "\\|")
             lines.append(f"| `{t}` | {s.category} | {s.role_hint} | {s.reason} |")
         lines.append("")
+    if warnings:
+        lines.extend(["## Warnings (manual review)", ""])
+        for w in warnings:
+            lines.append(f"- {w}")
+        lines.append("")
     lines.extend(
         [
             "## Notes",
@@ -451,8 +525,13 @@ def detect_only(
     preserve: list[str] | None = None,
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
+    allowlist_files: list[Path] | None = None,
+    use_default_allowlist: bool = True,
 ) -> dict[str, Any]:
     keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
+    allowlist = resolve_allowlist(
+        Path(input_path), allowlist_files, include_defaults=use_default_allowlist
+    )
     text = _extract(Path(input_path))
     plan = build_plan(
         text,
@@ -461,6 +540,7 @@ def detect_only(
         preserve=preserve,
         keep_categories=keep,
         extra_categories=extra,
+        allowlist=allowlist,
     )
     residual_if_unchanged = scan_residual(
         text, mode=mode, keep_categories=keep, extra_categories=extra
@@ -471,7 +551,10 @@ def detect_only(
         original = str(raw.get("original") or raw.get("text") or "").strip()
         if original:
             known.add(original)
-    suspects = detect_suspects(text, known=known)
+    known |= set(allowlist)
+    suspects = _deferred_suspects(plan) + detect_suspects(
+        text, known=known, allowlist=allowlist
+    )
     return {
         "mode": mode,
         "keep_categories": sorted(keep),

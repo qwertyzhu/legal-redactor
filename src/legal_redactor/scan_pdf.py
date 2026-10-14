@@ -23,7 +23,7 @@ from typing import Any
 import pymupdf as fitz
 
 from .ocr_engine import find_tesseract, find_tessdata
-from .patterns import categories_for_mode
+from .patterns import categories_for_mode, detect_structural
 
 BANK_RE = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
 MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -40,31 +40,23 @@ PARTY_SCOPES = {"a", "b", "both"}
 def _hits_in(text: str, cats: set[str]) -> list[tuple[str, str]]:
     t = text or ""
     out: list[tuple[str, str]] = []
-    bank_spans: list[tuple[int, int]] = []
-    if "bank_account" in cats:
-        for m in BANK_RE.finditer(t):
-            out.append(("bank_account", m.group(0)))
-            bank_spans.append((m.start(), m.end()))
-
-    def covered(a: int, b: int) -> bool:
-        return any(a >= s and b <= e for s, e in bank_spans)
-
-    if "mobile" in cats:
-        for m in MOBILE_RE.finditer(t):
-            if not covered(m.start(), m.end()):
-                out.append(("mobile", m.group(0)))
-    if "landline" in cats:
-        for m in LAND_RE.finditer(t):
-            out.append(("landline", m.group(0)))
+    seen: set[tuple[str, str]] = set()
+    for hit in detect_structural(t):
+        if hit.category not in cats or not hit.auto_replace:
+            continue
+        key = (hit.category, hit.text)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    # OCR often inserts spaces inside emails — keep tolerant matcher
     if "email" in cats:
         for m in EMAIL_RE.finditer(t):
-            out.append(("email", re.sub(r"\s+", "", m.group(0))))
-    if "id_card" in cats:
-        for m in ID18_RE.finditer(t):
-            out.append(("id_card", m.group(0)))
-    if "uscc" in cats:
-        for m in USCC_RE.finditer(t):
-            out.append(("uscc", m.group(0)))
+            val = re.sub(r"\s+", "", m.group(0))
+            key = ("email", val)
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
     return out
 
 
