@@ -3,12 +3,97 @@
     {
       "id": "ai-docx-fiction",
       "prompt": "Using legal-document-redactor in ai mode, redact examples/fictional sample contract DOCX with entities_ai.json. Residual scan must pass and party names must be gone.",
-      "expected": "same-format docx, ledger present, no raw mobile/id/case number"
+      "expected": "same-format docx, ledger in ~/.legal-redactor/ledgers, no raw mobile/id/case number"
     },
     {
       "id": "production-keeps-parties",
       "prompt": "Using production mode on the same fiction, keep 郝测一 and company names, strip phones and ID.",
       "expected": "parties remain, structural contacts removed, residual pass"
+    },
+    {
+      "id": "statute-not-work",
+      "prompt": "Redact a complaint citing 《中华人民共和国著作权法》第十条 and the work 《星河测例》 in ai mode.",
+      "expected": "statute title kept verbatim; 《星河测例》 replaced with 某作品"
+    },
+    {
+      "id": "court-names-kept",
+      "prompt": "Redact a judgment mentioning 最高人民法院 and 北京互联网法院 in ai mode.",
+      "expected": "court names unchanged (default allowlist)"
+    },
+    {
+      "id": "order-number-not-card",
+      "prompt": "A document contains 订单号 1234567890123456 (fails Luhn, no account label). Redact in ai mode.",
+      "expected": "order number kept; listed in suspects as low-confidence; verify status WARN not FAIL"
+    },
+    {
+      "id": "labeled-account-replaced",
+      "prompt": "Redact 收款账户：6222 0212 3456 7894 in production mode.",
+      "expected": "account replaced with [账号]"
+    },
+    {
+      "id": "uscc-checksum-fail-unlabeled",
+      "prompt": "Redact text with 编号 91110105MA01ABCDE8 (bad checksum, no 信用代码 label).",
+      "expected": "value kept and flagged in suspects, not auto-replaced"
+    },
+    {
+      "id": "case-number-stage",
+      "prompt": "Redact （2025）京73民终678号 in ai mode.",
+      "expected": "replacement keeps 民终 stage: （20XX）X民终X号"
+    },
+    {
+      "id": "person-no-colon",
+      "prompt": "Redact 法定代表人李测强，住所地… in ai mode with --auto-confident.",
+      "expected": "李测强 replaced with 某X alias"
+    },
+    {
+      "id": "plate-property-production",
+      "prompt": "Production-mode redaction of 车牌京A12345 and 京(2023)朝阳区不动产权第0012345号.",
+      "expected": "both replaced per 法释〔2016〕19号; birth date kept"
+    },
+    {
+      "id": "publish-profile",
+      "prompt": "Use --profile publish on a complaint for a public case write-up.",
+      "expected": "person aliases in 张某 style; addresses truncated to 县/区; amounts fuzzed"
+    },
+    {
+      "id": "minimal-profile",
+      "prompt": "Use --profile minimal: only ID, mobile, email, bank account.",
+      "expected": "names, case number, landline, plate untouched; ID/mobile/email/account replaced"
+    },
+    {
+      "id": "restore-ai-reply",
+      "prompt": "After ai-mode redaction, restore an online-AI reply containing 某甲 and 某单位A using the local ledger.",
+      "expected": "legal-redactor restore writes original names back; ambiguous tokens warned"
+    },
+    {
+      "id": "ledger-not-beside-output",
+      "prompt": "Run a default redact and check where the ledger lands.",
+      "expected": "ledger under ~/.legal-redactor/ledgers/<hash>/ with 0600; only a pointer file beside output"
+    },
+    {
+      "id": "ledger-encrypt",
+      "prompt": "Redact with --ledger-encrypt and LEGAL_REDACTOR_LEDGER_PASS set; then restore.",
+      "expected": "ledger.json.enc written, no plaintext ledger; restore works with the same password"
+    },
+    {
+      "id": "audit-report",
+      "prompt": "Redact a complaint and open *.audit.md.",
+      "expected": "per-replacement category/confidence/rule/paragraph/context; residual risk section; status PASS/WARN/FAIL"
+    },
+    {
+      "id": "verify-three-levels",
+      "prompt": "Run verify on (a) clean output (b) output with an order number (c) original source.",
+      "expected": "PASS exit 0; WARN exit 0 (1 with --strict); FAIL exit 2"
+    },
+    {
+      "id": "docx-metadata",
+      "prompt": "Redact a docx whose app.xml has Company and comments have authors.",
+      "expected": "Company/Manager cleared, authors normalized to 作者, rsid stripped"
+    },
+    {
+      "id": "preserve-hyperlinks",
+      "prompt": "Redact a docx containing an infringing-URL hyperlink as evidence with --preserve-hyperlinks.",
+      "expected": "external hyperlink targets kept"
     }
   ]
 }

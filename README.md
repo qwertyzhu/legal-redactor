@@ -176,7 +176,8 @@ legal-redactor verify ./matters-redacted/ --mode ai
 
 每次成功运行还会生成：
 
-- `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）
+- `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）。v0.11 起默认写到 `~/.legal-redactor/ledgers/<hash>/`（0600），输出旁只留 `*.ledger-path.txt` 指针；可加 `--ledger-encrypt`，用 `legal-redactor restore` 还原 AI 回复
+- `*.audit.json` / `*.audit.md` — 逐条替换审计与残留风险（含上下文，仅本地）
 - `*.residual.json` — 结构性残留报告
 - `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
 - `*.summary.md` — 可读对照表
@@ -210,7 +211,7 @@ python3 skills/legal-document-redactor/scripts/self_test.py
 - 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
 - DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
-- 目录 `verify` 会检查目录内所有支持后缀（勿把 ledger.json 和正文混在同一校验目录）
+- 目录 `verify` 会跳过 ledger / audit 等旁路文件；退出码 0=PASS、2=FAIL，WARN 默认 0、`--strict` 时 1
 - 不是法律意见，不能替代律所保密流程
 
 ## 安全

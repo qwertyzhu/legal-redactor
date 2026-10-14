@@ -1,0 +1,12 @@
+name: ai
+description: 给在线模型 / 可外传笔记 — 激进去标识
+mode: ai
+# null = use mode defaults from categories_for_mode
+categories: null
+keep_categories: []
+extra_categories: []
+alias_style: generic
+address_granularity: full
+amount_fuzzy: true
+preserve: []
+auto_confident: true

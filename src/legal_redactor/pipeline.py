@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .allowlist import load_allowlist
+from .audit import AuditReport, build_audit_report
 from .entities import RedactionPlan, build_plan, load_entities_file
+from .ledger_store import (
+    resolve_ledger_path,
+    write_ledger_payload,
+    write_ledger_pointer,
+)
+from .profiles_loader import Profile, resolve_profile
 from .formats import docx_io, pdf_io, text_io
 from .suspects import Suspect, detect_suspects
 from .verify import ResidualReport, scan_residual
@@ -30,10 +37,20 @@ class RedactResult:
     suspects: list[Suspect]
     suspects_path: Path | None = None
     warnings: list[str] = field(default_factory=list)
+    audit: AuditReport | None = None
+    audit_json_path: Path | None = None
+    audit_md_path: Path | None = None
+    profile: str | None = None
 
     @property
     def ok(self) -> bool:
         return self.residual.ok
+
+    @property
+    def status(self) -> str:
+        if self.audit is not None:
+            return self.audit.status
+        return self.residual.status
 
 
 @dataclass
@@ -69,12 +86,19 @@ def _apply(
     output: Path,
     mapping: list[tuple[str, str]],
     warnings: list[str] | None = None,
+    *,
+    preserve_hyperlinks: bool = False,
+    preserve_bookmarks: bool = False,
 ) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
-        return docx_io.redact_docx(path, output, mapping, warnings=warnings)
+        return docx_io.redact_docx(
+            path, output, mapping, warnings=warnings, preserve_hyperlinks=preserve_hyperlinks
+        )
     if suffix == ".pdf":
-        return pdf_io.redact_pdf(path, output, mapping, warnings=warnings)
+        return pdf_io.redact_pdf(
+            path, output, mapping, warnings=warnings, preserve_bookmarks=preserve_bookmarks
+        )
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
             output = output.with_suffix(suffix or ".txt")
@@ -163,10 +187,32 @@ def redact_file(
     allowlist_files: list[Path] | None = None,
     use_default_allowlist: bool = True,
     allowlist: set[str] | None = None,
+    profile: str | Profile | None = None,
+    ledger: Path | None = None,
+    ledger_encrypt: bool = False,
+    ledger_beside_output: bool | None = None,
+    preserve_hyperlinks: bool = False,
+    preserve_bookmarks: bool = False,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
         raise FileNotFoundError(input_path)
+
+    prof: Profile | None
+    if isinstance(profile, Profile):
+        prof = profile
+    elif profile:
+        prof = resolve_profile(profile=str(profile), mode=None)
+    else:
+        prof = None
+    if prof is not None:
+        mode = prof.mode
+        preserve = list(preserve or []) + list(prof.preserve)
+        if not auto_confident:
+            auto_confident = prof.auto_confident
+    # Backward compat: explicit work_dir means caller wants sidecars there (incl. ledger)
+    if ledger_beside_output is None:
+        ledger_beside_output = work_dir is not None and ledger is None
 
     mode = mode.lower().strip()
     output_path = Path(output_path) if output_path else default_output_path(input_path, mode)
@@ -185,6 +231,10 @@ def redact_file(
             input_path, allowlist_files, include_defaults=use_default_allowlist
         )
     source_text = _extract(input_path)
+    only = prof.categories if prof is not None else None
+    if prof is not None and prof.categories is None:
+        keep |= prof.keep_categories
+        extra |= prof.extra_categories
     plan = build_plan(
         source_text,
         mode=mode,
@@ -194,12 +244,27 @@ def redact_file(
         extra_categories=extra,
         auto_confident=auto_confident,
         allowlist=allowlist,
+        only_categories=only,
+        alias_style=prof.alias_style if prof else "generic",
+        address_granularity=prof.address_granularity if prof else "full",
+        amount_fuzzy=prof.amount_fuzzy if prof else True,
     )
     mapping = plan.mapping()
     warnings: list[str] = []
-    output_text = _apply(input_path, output_path, mapping, warnings=warnings)
+    output_text = _apply(
+        input_path,
+        output_path,
+        mapping,
+        warnings=warnings,
+        preserve_hyperlinks=preserve_hyperlinks,
+        preserve_bookmarks=preserve_bookmarks,
+    )
     residual = scan_residual(
-        output_text, mode=mode, keep_categories=keep, extra_categories=extra
+        output_text,
+        mode=mode,
+        keep_categories=keep,
+        extra_categories=extra,
+        only_categories=only,
     )
 
     known = {e.original for e in plan.entities}
@@ -214,10 +279,24 @@ def redact_file(
         source_text, known=known, allowlist=allowlist
     )
 
-    ledger_path = work_dir / f"{output_path.stem}.ledger.json"
+    ledger_target = resolve_ledger_path(
+        input_path,
+        mode=mode,
+        output_path=output_path,
+        ledger=ledger,
+        legacy_beside_output=bool(ledger_beside_output),
+    )
+    if ledger_beside_output and ledger is None:
+        ledger_target = work_dir / f"{output_path.stem}.ledger.json"
+    ledger_payload = plan.to_dict()
+    ledger_payload["input_path"] = str(input_path)
+    ledger_payload["output_path"] = str(output_path)
+    ledger_payload["profile"] = prof.name if prof else None
+    ledger_path = write_ledger_payload(ledger_target, ledger_payload, encrypt=ledger_encrypt)
+    if not ledger_beside_output:
+        write_ledger_pointer(work_dir, output_path.stem, ledger_path)
     residual_path = work_dir / f"{output_path.stem}.residual.json"
     suspects_path = work_dir / f"{output_path.stem}.suspects.json"
-    plan.dump(ledger_path)
     residual.dump(residual_path)
     suspects_path.write_text(
         json.dumps(
@@ -250,6 +329,21 @@ def redact_file(
         encoding="utf-8",
     )
 
+    audit = build_audit_report(
+        source_text=source_text,
+        output_text=output_text,
+        plan=plan,
+        residual=residual,
+        input_path=input_path,
+        output_path=output_path,
+        profile=prof.name if prof else None,
+        part=_audit_part_label(input_path),
+    )
+    audit_json_path = work_dir / f"{output_path.stem}.audit.json"
+    audit_md_path = work_dir / f"{output_path.stem}.audit.md"
+    audit.dump_json(audit_json_path)
+    audit.dump_md(audit_md_path)
+
     return RedactResult(
         input_path=input_path,
         output_path=output_path,
@@ -262,7 +356,20 @@ def redact_file(
         suspects=suspects,
         suspects_path=suspects_path,
         warnings=warnings,
+        audit=audit,
+        audit_json_path=audit_json_path,
+        audit_md_path=audit_md_path,
+        profile=prof.name if prof else None,
     )
+
+
+def _audit_part_label(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        return "word/document.xml+parts"
+    if suffix == ".pdf":
+        return "pdf:text-layer"
+    return "text"
 
 
 def iter_batch_inputs(input_dir: Path, *, recursive: bool = False) -> list[Path]:
@@ -291,6 +398,10 @@ def redact_tree(
     auto_confident: bool = False,
     allowlist_files: list[Path] | None = None,
     use_default_allowlist: bool = True,
+    profile: str | None = None,
+    ledger_encrypt: bool = False,
+    preserve_hyperlinks: bool = False,
+    preserve_bookmarks: bool = False,
 ) -> BatchRedactResult:
     """Redact every supported file under input_dir into output_dir (flat names).
 
@@ -349,6 +460,11 @@ def redact_tree(
                 extra_categories=extra_categories,
                 auto_confident=auto_confident,
                 allowlist=batch_allow,
+                profile=profile,
+                ledger_encrypt=ledger_encrypt,
+                ledger_beside_output=True,
+                preserve_hyperlinks=preserve_hyperlinks,
+                preserve_bookmarks=preserve_bookmarks,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues
@@ -380,31 +496,58 @@ def verify_tree(
     keep_categories: list[str] | set[str] | None = None,
     extra_categories: list[str] | set[str] | None = None,
     recursive: bool = False,
+    only_categories: set[str] | None = None,
+    **_ignored: Any,
 ) -> dict[str, Any]:
-    """Residual-scan every supported file under a directory."""
+    """Residual-scan every supported file under a directory.
+
+    Ledger / audit / residual sidecars are skipped (they carry originals by design).
+    """
     keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
     rows: list[dict[str, Any]] = []
+    sidecar_suffixes = (
+        ".ledger.json",
+        ".residual.json",
+        ".suspects.json",
+        ".audit.json",
+        ".summary.md",
+        ".audit.md",
+        ".ledger-path.txt",
+    )
     for path in iter_batch_inputs(input_dir, recursive=recursive):
+        if path.name.endswith(sidecar_suffixes) or path.name.startswith(("entities.consistent", "consistency.report")):
+            continue
         text = _extract(path)
-        report = scan_residual(text, mode=mode, keep_categories=keep, extra_categories=extra)
+        report = scan_residual(
+            text,
+            mode=mode,
+            keep_categories=keep,
+            extra_categories=extra,
+            only_categories=only_categories,
+        )
         rows.append(
             {
                 "path": str(path),
                 "name": path.name,
                 "ok": report.ok,
+                "status": report.status,
                 "summary": report.summary,
                 "hits": report.hits,
+                "warnings": report.warnings,
             }
         )
-    failed = [r for r in rows if not r["ok"]]
+    failed = [r for r in rows if r["status"] == "FAIL"]
+    warned = [r for r in rows if r["status"] == "WARN"]
+    status = "FAIL" if failed else ("WARN" if warned else "PASS")
     return {
         "mode": mode,
         "files": len(rows),
         "failed": len(failed),
+        "warned": len(warned),
         "ok": len(failed) == 0,
+        "status": status,
         "results": rows,
     }
-
 
 def scan_tree(
     input_dir: Path,

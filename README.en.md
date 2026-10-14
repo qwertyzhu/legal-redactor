@@ -175,7 +175,8 @@ legal-redactor verify ./matters-redacted/ --mode ai
 
 Each successful `redact` also writes:
 
-- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**)
+- `*.ledger.json` — original→replacement map (**keep local; never commit or upload**). Since v0.11 it defaults to `~/.legal-redactor/ledgers/<hash>/` (0600) with a `*.ledger-path.txt` pointer beside the output; `--ledger-encrypt` and `legal-redactor restore` are available
+- `*.audit.json` / `*.audit.md` — per-replacement audit and residual risks (contains context; local only)
 - `*.residual.json` — structural residual report
 - `*.suspects.json` — natural-language entity **hints** (not auto-redacted)
 - `*.summary.md` — human-readable table
