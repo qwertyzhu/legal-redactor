@@ -34,10 +34,46 @@ def _redaction_fontname(text: str) -> str:
     return "helv"
 
 
+def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None) -> None:
+    """Drop XMP, bookmarks, form fields, comment annotations and attachments."""
+    warn = warnings if warnings is not None else []
+    try:
+        doc.del_xml_metadata()
+    except Exception as exc:  # noqa: BLE001
+        warn.append(f"pdf: could not delete XMP metadata ({exc})")
+    try:
+        if doc.get_toc():
+            doc.set_toc([])
+            warn.append("pdf: bookmarks removed (titles may carry names)")
+    except Exception as exc:  # noqa: BLE001
+        warn.append(f"pdf: could not clear bookmarks ({exc})")
+    removed_annots = removed_widgets = 0
+    for page in doc:
+        for widget in list(page.widgets() or []):
+            page.delete_widget(widget)
+            removed_widgets += 1
+        for annot in list(page.annots() or []):
+            page.delete_annot(annot)
+            removed_annots += 1
+    if removed_widgets:
+        warn.append(f"pdf: {removed_widgets} form field(s) removed")
+    if removed_annots:
+        warn.append(f"pdf: {removed_annots} annotation(s)/comment(s) removed")
+    try:
+        names = list(doc.embfile_names())
+    except Exception:  # noqa: BLE001
+        names = []
+    for name in names:
+        doc.embfile_del(name)
+    if names:
+        warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
     mapping: list[tuple[str, str]],
+    warnings: list[str] | None = None,
 ) -> str:
     doc = fitz.open(str(input_path))
     try:
@@ -76,7 +112,11 @@ def redact_pdf(
         for key in ("author", "title", "subject", "keywords", "producer", "creator"):
             if key in meta and isinstance(meta[key], str):
                 meta[key] = apply_mapping_to_text(meta[key], mapping)
+        for key in ("author", "creator", "producer"):
+            if key in meta:
+                meta[key] = ""
         doc.set_metadata(meta)
+        _clear_pdf_extras(doc, warnings)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(output_path), deflate=True, garbage=3)

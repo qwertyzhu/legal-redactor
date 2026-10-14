@@ -75,7 +75,8 @@ def _build_parser() -> argparse.ArgumentParser:
             metavar="CAT",
             help=(
                 "不自动脱敏的结构类别（可重复或逗号分隔）。"
-                "例如：uscc, bank_account, case_number, mobile, email, id_card, landline"
+                "例如：uscc, bank_account, case_number, mobile, email, id_card, landline, "
+                "passport, hk_mo_permit, plate, property_cert, wechat_qq, ip, birth_date"
             ),
         )
         sp.add_argument(
@@ -84,6 +85,19 @@ def _build_parser() -> argparse.ArgumentParser:
             default=[],
             metavar="CAT",
             help="在模式默认之外额外自动脱敏的结构类别",
+        )
+        sp.add_argument(
+            "--allowlist",
+            action="append",
+            default=[],
+            type=Path,
+            metavar="FILE",
+            help="白名单文件（每行一个必须原样保留的字符串，可重复）；另自动读取 .redactor/allow.txt",
+        )
+        sp.add_argument(
+            "--no-default-allowlist",
+            action="store_true",
+            help="不加载内置法律/法院白名单",
         )
 
     pr = sub.add_parser(
@@ -312,6 +326,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             recursive=args.recursive,
             unify_first=bool(getattr(args, "unify", False)),
             auto_confident=bool(getattr(args, "auto_confident", False)),
+            allowlist_files=list(getattr(args, "allowlist", []) or []),
+            use_default_allowlist=not getattr(args, "no_default_allowlist", False),
         )
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
@@ -355,6 +371,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         keep_categories=_split_cats(args.keep_categories),
         extra_categories=_split_cats(args.extra_categories),
         auto_confident=bool(getattr(args, "auto_confident", False)),
+        allowlist_files=list(getattr(args, "allowlist", []) or []),
+        use_default_allowlist=not getattr(args, "no_default_allowlist", False),
     )
     print(f"mode:        {result.mode}")
     print(f"output:      {result.output_path}")
@@ -364,6 +382,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"suspects:    {result.suspects_path} ({len(result.suspects)})")
     print(f"replaced:    {len(result.plan.entities)}")
     print(f"scan:        {result.residual.summary}")
+    for w in result.warnings:
+        print(f"WARNING:     {w}")
     if result.suspects:
         print("suspect NL entities (NOT auto-redacted):")
         for s in result.suspects[:20]:
@@ -400,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
                     keep_categories=_split_cats(args.keep_categories),
                     extra_categories=_split_cats(args.extra_categories),
                     recursive=args.recursive,
+                    allowlist_files=list(getattr(args, "allowlist", []) or []),
+                    use_default_allowlist=not getattr(args, "no_default_allowlist", False),
                 )
                 if args.json:
                     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -420,6 +442,8 @@ def main(argv: list[str] | None = None) -> int:
                 preserve=args.preserve,
                 keep_categories=_split_cats(args.keep_categories),
                 extra_categories=_split_cats(args.extra_categories),
+                allowlist_files=list(getattr(args, "allowlist", []) or []),
+                use_default_allowlist=not getattr(args, "no_default_allowlist", False),
             )
             if args.json:
                 print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -458,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
                     keep_categories=keep,
                     extra_categories=extra,
                     recursive=args.recursive,
+                    allowlist_files=list(getattr(args, "allowlist", []) or []),
+                    use_default_allowlist=not getattr(args, "no_default_allowlist", False),
                 )
                 if args.json:
                     print(json.dumps(payload, ensure_ascii=False, indent=2))

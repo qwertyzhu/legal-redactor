@@ -97,7 +97,7 @@ def main() -> None:
         # T3: 指哪打哪——只去身份证号，其余结构性字段放行
         out = w / "t3.docx"
         r = run([cli, "redact", str(src), "--mode", "production",
-                 "--keep-categories", "mobile,email,bank_account,uscc,case_number,landline", "-o", str(out)])
+                 "--keep-categories", "mobile,email,bank_account,uscc,case_number,landline,passport,hk_mo_permit,plate,property_cert,wechat_qq,ip,birth_date", "-o", str(out)])
         text = docx_text(out) if out.exists() else ""
         ok = (r.returncode == 0 and "330106198503121234" not in text
               and "138 0000 2222" in text and "zhang@example.com" in text)
@@ -110,7 +110,7 @@ def main() -> None:
             ensure_ascii=False), encoding="utf-8")
         out = w / "t4.docx"
         r = run([cli, "redact", str(src), "--mode", "production", "--entities", str(ent),
-                 "--keep-categories", "id_card,mobile,landline,email,bank_account,uscc,case_number",
+                 "--keep-categories", "id_card,mobile,landline,email,bank_account,uscc,case_number,passport,hk_mo_permit,plate,property_cert,wechat_qq,ip,birth_date",
                  "-o", str(out)])
         text = docx_text(out) if out.exists() else ""
         ok = (r.returncode == 0 and "某甲" in text and "张测三" not in text

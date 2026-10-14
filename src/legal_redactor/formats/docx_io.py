@@ -3,6 +3,7 @@
 Handles track-changes (w:ins / w:del) and run-split entity strings by:
 1. accepting insertions and dropping deletions;
 2. applying replacements at run granularity when possible, else paragraph level.
+Also cleans core/app/custom props, author/rsid attributes, and mailto/external rels.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ W = "{%s}" % W_NS
 _TEXT_PART_RE = re.compile(
     r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
 )
+_RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 
 
 def _local(tag: str) -> str:
@@ -60,6 +62,19 @@ def _flatten_revisions(root: etree._Element) -> None:
             parent.remove(el)
             changed = True
             break
+
+
+def _scrub_authors_and_rsids(root: etree._Element) -> None:
+    for el in root.iter():
+        # Attribute keys may be Clark notation
+        for attr in list(el.attrib):
+            local = _local(attr)
+            if local in ("author", "lastModifiedBy"):
+                el.attrib[attr] = "作者"
+            elif local == "initials":
+                el.attrib[attr] = "作"
+            elif _RSID_ATTR_RE.match(local):
+                del el.attrib[attr]
 
 
 def _paragraph_text(p: etree._Element) -> str:
@@ -127,6 +142,8 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
 def _process_xml_bytes(data: bytes, mapping: list[tuple[str, str]] | None) -> tuple[bytes, str]:
     root = etree.fromstring(data)
     _flatten_revisions(root)
+    if mapping is not None:
+        _scrub_authors_and_rsids(root)
 
     texts: list[str] = []
     for p in root.iter():
@@ -161,42 +178,117 @@ def extract_text(path: Path) -> str:
     return "\n".join(chunks)
 
 
-def redact_docx(
-    input_path: Path,
-    output_path: Path,
-    mapping: list[tuple[str, str]],
-) -> str:
-    input_path = Path(input_path)
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    collected: list[str] = []
-    with zipfile.ZipFile(input_path, "r") as zin:
-        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if _TEXT_PART_RE.match(item.filename):
-                    data, text = _process_xml_bytes(data, mapping)
-                    if text.strip():
-                        collected.append(text)
-                elif item.filename == "docProps/core.xml":
-                    data = _redact_core_props(data, mapping)
-                zout.writestr(item, data)
-
-    return "\n".join(collected)
-
-
 def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
     try:
         root = etree.fromstring(data)
     except etree.XMLSyntaxError:
         return data
     for el in root.iter():
+        local = _local(el.tag)
+        if local in {"creator", "lastModifiedBy"}:
+            el.text = "作者"
+            continue
         if el.text and isinstance(el.text, str) and el.text.strip():
             el.text = apply_mapping_to_text(el.text, mapping)
         if el.tail and isinstance(el.tail, str) and el.tail.strip():
             el.tail = apply_mapping_to_text(el.tail, mapping)
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _clean_app_props(data: bytes) -> bytes:
+    try:
+        root = etree.fromstring(data)
+    except etree.XMLSyntaxError:
+        return data
+    for el in root.iter():
+        local = _local(el.tag)
+        if local in {"Company", "Manager", "CompanyDoc", "HyperlinkBase"}:
+            el.text = ""
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _clean_custom_props(data: bytes) -> bytes:
+    try:
+        root = etree.fromstring(data)
+    except etree.XMLSyntaxError:
+        return data
+    # Remove all property children under Properties
+    for child in list(root):
+        root.remove(child)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _scrub_misc_part(data: bytes) -> bytes:
+    try:
+        root = etree.fromstring(data)
+    except etree.XMLSyntaxError:
+        return data
+    for el in list(root.iter()):
+        if _local(el.tag) in {"rsids", "presenceInfo"}:
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+    _scrub_authors_and_rsids(root)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _scrub_rels(data: bytes) -> bytes:
+    try:
+        root = etree.fromstring(data)
+    except etree.XMLSyntaxError:
+        return data
+    changed = False
+    for el in root.iter():
+        if _local(el.tag) != "Relationship":
+            continue
+        target = el.get("Target") or ""
+        if target.lower().startswith("mailto:") or el.get("TargetMode") == "External":
+            el.set("Target", "#")
+            changed = True
+    if not changed:
+        return data
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def redact_docx(
+    input_path: Path,
+    output_path: Path,
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None = None,
+) -> str:
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    collected: list[str] = []
+    warn = warnings if warnings is not None else []
+    with zipfile.ZipFile(input_path, "r") as zin:
+        names = zin.namelist()
+        if any(n.startswith("word/media/") for n in names):
+            warn.append("docx contains word/media/* — embedded images not OCR-scanned; review manually")
+        if any(n.startswith("word/embeddings/") for n in names):
+            warn.append("docx contains word/embeddings/* (OLE) — review or remove before sharing")
+        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                name = item.filename
+                if _TEXT_PART_RE.match(name):
+                    data, text = _process_xml_bytes(data, mapping)
+                    if text.strip():
+                        collected.append(text)
+                elif name == "docProps/core.xml":
+                    data = _redact_core_props(data, mapping)
+                elif name == "docProps/app.xml":
+                    data = _clean_app_props(data)
+                elif name == "docProps/custom.xml":
+                    data = _clean_custom_props(data)
+                elif name.startswith("word/_rels/") and name.endswith(".rels"):
+                    data = _scrub_rels(data)
+                elif name in ("word/settings.xml", "word/people.xml"):
+                    data = _scrub_misc_part(data)
+                zout.writestr(item, data)
+
+    return "\n".join(collected)
 
 
 def create_sample_docx(path: Path, text: str) -> None:

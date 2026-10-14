@@ -63,6 +63,7 @@ _HOME_UNIX = re.compile(r"(?i)/home/(?!user\b|runner\b|<)[a-z0-9._-]+")
 
 # Allowlist exact strings that are documentation placeholders, not live data.
 _EMAIL_ALLOW = {
+    "zhang@example.com",
     "noreply@anthropic.com",
     "example@example.com",
     "user@example.com",
@@ -79,6 +80,9 @@ _FICTIONAL_DEMO_TOKENS = {
     "110101199001011234",
     "（2024）京0491民初1234号",
     "(2024)京0491民初1234号",
+    "330106198503121234",
+    "138 0000 2222",
+    "zhang@example.com",
 }
 _PATH_ALLOW_FRAGMENTS = (
     "C:\\Users\\<you>",

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.10.9 - 2026-10-14
+
+P0 硬化：白名单与法条保护、扩充结构性类别、校验位置信度、规则修复、docx/PDF 元数据清理、Skill 精简。
+
+- **白名单**：内置法院/法条种子表 `references/allowlist.default.txt`；支持 `--allowlist FILE` 与 `.redactor/allow.txt`。书名号匹配法条形态或后接「第X条」时不再当作品名脱敏。
+- **新结构性类别**：passport、hk_mo_permit（需标签）、plate、property_cert、wechat_qq（需标签）、ip、birth_date（`…日出生` 或出生日期标签）。`production` 默认去掉车牌与不动产权证号（法释〔2016〕19号）。
+- **校验位**：身份证 / 银行卡 Luhn / 统一社会信用代码 GB 32100。身份证校验失败仍替换但标 medium；信用代码无标签且校验失败、银行卡无前缀且 Luhn 失败 → 只进 suspects，不自动替换。
+- **规则修复**：角色词后冒号可选（「法定代表人李测强」）；地址前缀补「住/现住/户籍地/经常居住地」；组织名去掉「开户行/甲乙方」前缀；案号占位符保留「民终/民初」等审级。
+- **元数据**：docx 清理 app/custom、作者/rsid、mailto/外链 rels，并对 media/OLE 告警；PDF 删除 XMP、书签、表单、批注与附件。
+- **Skill**：SKILL.md 压到短入口；Ollama / 整方 / 扫描件 / CLI 速查迁到 `references/`；版本对齐 0.10.9。
+
 ## 0.10.8 - 2026-10-02
 
 仅 Skill 与文档；Python 包不变（仍为 0.10.7）。

@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from .draft import extract_text
 from .entities import load_entities_file
-from .patterns import DEFAULT_PLACEHOLDERS, detect_structural
+from .patterns import DEFAULT_PLACEHOLDERS, detect_structural, structural_placeholder
 from .pipeline import iter_batch_inputs
 from .suspects import detect_suspects
 
@@ -21,7 +21,7 @@ _PERSON_COUNTER = "甲乙丙丁戊己庚辛壬癸"
 _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
-def _stable_alias(category: str, index: int) -> str:
+def _stable_alias(category: str, index: int, original: str = "") -> str:
     if category == "person":
         label = _PERSON_COUNTER[index % len(_PERSON_COUNTER)]
         cycle = index // len(_PERSON_COUNTER)
@@ -36,10 +36,9 @@ def _stable_alias(category: str, index: int) -> str:
         return f"某作品{index + 1}" if index else "某作品"
     if category == "amount":
         return DEFAULT_PLACEHOLDERS["amount"]
-    base = DEFAULT_PLACEHOLDERS.get(category, DEFAULT_PLACEHOLDERS["other"])
-    if category in {"mobile", "landline", "email", "id_card", "bank_account", "uscc", "case_number"}:
-        return base if index == 0 else f"{base.rstrip(']')}{index + 1}]"
-    return base
+    if category == "case_number":
+        return structural_placeholder("case_number", original or "（20XX）民初1号", index)
+    return structural_placeholder(category, original, index)
 
 
 @dataclass
@@ -295,7 +294,7 @@ def build_unified_entities(
             replacement = obs.replacements_seen[0]
         else:
             idx = counters.get(category, 0)
-            replacement = _stable_alias(category, idx)
+            replacement = _stable_alias(category, idx, obs.original)
             counters[category] = idx + 1
 
         row: dict[str, Any] = {

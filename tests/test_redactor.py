@@ -281,7 +281,7 @@ def test_keep_categories_uscc_on_production():
 
 def test_keep_categories_unknown_raises():
     with pytest.raises(ValueError, match="unknown structural"):
-        build_plan(SAMPLE, mode="ai", keep_categories={"passport"})
+        build_plan(SAMPLE, mode="ai", keep_categories={"not_a_category"})
 
 
 def test_pipeline_keep_categories_roundtrip(tmp_path: Path):

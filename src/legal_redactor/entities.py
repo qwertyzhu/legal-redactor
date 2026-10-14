@@ -8,7 +8,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .patterns import DEFAULT_PLACEHOLDERS, PatternHit, categories_for_mode, detect_structural
+from .patterns import (
+    DEFAULT_PLACEHOLDERS,
+    PatternHit,
+    categories_for_mode,
+    detect_structural,
+    structural_placeholder,
+)
 
 
 @dataclass
@@ -28,6 +34,7 @@ class EntityRecord:
 class RedactionPlan:
     mode: str
     entities: list[EntityRecord] = field(default_factory=list)
+    deferred_structural: list[PatternHit] = field(default_factory=list)
 
     def mapping(self) -> list[tuple[str, str]]:
         """Longest original first to avoid partial clobber."""
@@ -193,6 +200,7 @@ def build_plan(
     keep_categories: set[str] | None = None,
     extra_categories: set[str] | None = None,
     auto_confident: bool = False,
+    allowlist: set[str] | None = None,
 ) -> RedactionPlan:
     """Merge structural detections with optional agent/manual entity list."""
     mode = mode.lower().strip()
@@ -200,7 +208,10 @@ def build_plan(
         mode, keep_categories=keep_categories, extra_categories=extra_categories
     )
     preserve_set = {p.strip() for p in (preserve or []) if p and p.strip()}
+    allow_set = {a.strip() for a in (allowlist or set()) if a and str(a).strip()}
+    preserve_set |= allow_set
     plan = RedactionPlan(mode=mode)
+    deferred_structural: list[PatternHit] = []
 
     # 1) agent / manual entities
     person_i = org_i = addr_i = work_i = 0
@@ -236,6 +247,8 @@ def build_plan(
             elif category == "work_title":
                 replacement = _stable_alias("work_title", work_i)
                 work_i += 1
+            elif category == "case_number":
+                replacement = structural_placeholder("case_number", original, 0)
             else:
                 replacement = DEFAULT_PLACEHOLDERS.get(category, DEFAULT_PLACEHOLDERS["other"])
 
@@ -253,23 +266,24 @@ def build_plan(
     # 2) structural auto-detect
     already = {e.original for e in plan.entities}
     hits: list[PatternHit] = detect_structural(text)
-    # stable placeholders per distinct value within category
     counters: dict[str, dict[str, str]] = {}
     for hit in hits:
         if hit.category not in cats:
             continue
         if hit.text in preserve_set or hit.text in already:
             continue
+        if not hit.auto_replace:
+            deferred_structural.append(hit)
+            continue
         bucket = counters.setdefault(hit.category, {})
         if hit.text not in bucket:
-            base = DEFAULT_PLACEHOLDERS[hit.category]
-            # For multiples of same category structural type, suffix index when needed
-            if hit.category in {"mobile", "landline", "email", "id_card", "bank_account", "uscc"}:
-                n = len(bucket) + 1
-                # keep short fixed token; suffix only after first
-                bucket[hit.text] = base if n == 1 else f"{base.rstrip(']')}{n}]"
-            else:
-                bucket[hit.text] = base
+            n = len(bucket)
+            bucket[hit.text] = structural_placeholder(hit.category, hit.text, n)
+        note = hit.notes or ""
+        if hit.confidence == "medium" and note:
+            note = f"confidence=medium; {note}"
+        elif hit.confidence == "medium":
+            note = "confidence=medium"
         plan.entities.append(
             EntityRecord(
                 original=hit.text,
@@ -277,14 +291,19 @@ def build_plan(
                 replacement=bucket[hit.text],
                 role="structural",
                 source="structural",
+                notes=note,
             )
         )
         already.add(hit.text)
 
+    plan.deferred_structural = list(deferred_structural)
+
     if auto_confident:
         from .suspects import detect_suspects
 
-        for suspect in detect_suspects(text, known=already | preserve_set):
+        for suspect in detect_suspects(
+            text, known=already | preserve_set, allowlist=allow_set
+        ):
             if suspect.text in already or suspect.text in preserve_set:
                 continue
             if mode == "production" and not (

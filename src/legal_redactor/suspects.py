@@ -10,6 +10,8 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+from .allowlist import is_statute_title
+
 # Org-like endings common in Chinese contracts / pleadings.
 _ORG_SUFFIX = (
     r"(?:有限责任公司|股份有限公司|有限公司|集团有限公司|集团|律师事务所|事务所|"
@@ -20,6 +22,7 @@ _ORG = re.compile(
     rf"(?<![一-鿿])"
     rf"([一-鿿A-Za-z0-9（）()]{{2,40}}{_ORG_SUFFIX})"
 )
+_ORG_LEAD = re.compile(r"^(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*")
 
 # Role/title anchored natural persons.
 _PERSON_ROLES = (
@@ -27,21 +30,52 @@ _PERSON_ROLES = (
     r"指定联系人|授权代表|签字代表|"
     r"原告|被告|上诉人|被上诉人|申请人|被申请人|第三人|证人"
 )
-# Optional parenthetical annotation, then colon/space, then 2–4 CJK name chars.
-# Lookahead requires a boundary so we do not swallow the start of an org name.
+# Optional parenthetical annotation, then optional colon/space, then 2–4 CJK name chars.
 _PERSON = re.compile(
     rf"(?:{_PERSON_ROLES})"
     rf"(?:[（(][^）)\n]{{0,20}}[）)])?"
-    rf"(?:[：:]\s*|\s+)"
-    rf"([·一-鿿]{{2,4}})"
-    rf"(?=(?:[，,。；;、\s\d）)\n]|联系|电话|手机|身份证|电子|邮箱|住址|住所|$))"
+    rf"(?P<delim>[：:]\s*|\s*)"
+    rf"(?P<name>[·一-鿿]{{2,4}})"
+    rf"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|电子|邮箱|住址|住所|$))"
+)
+
+_SURNAMES = set(
+    "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
+    "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
+    "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄"
+    "和穆萧尹姚邵汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜"
+    "阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞"
+    "万支柯管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉钮龚程嵇邢"
+    "滑裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧山谷"
+    "车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘厉戎祖武符刘景詹束龙叶幸司韶郜"
+    "黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡"
+    "劳逄姬申扶堵冉宰郦雍桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕"
+    "连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧"
+    "殳沃利蔚越夔隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关"
+    "蒯相查后荆红游竺权逯盖益桓公"
+)
+_COMPOUND_SURNAMES = (
+    "欧阳",
+    "司马",
+    "上官",
+    "诸葛",
+    "司徒",
+    "宇文",
+    "长孙",
+    "慕容",
+    "东方",
+    "皇甫",
+    "令狐",
 )
 
 # Work titles in 《》 — high-value matter keys in copyright practice.
 _WORK = re.compile(r"《([^》\n]{1,40})》")
 
 # Address-like: label + PRC admin unit chain ending in 号/室/层 etc.
-_ADDRESS_LABEL = r"(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地)"
+_ADDRESS_LABEL = (
+    r"(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地|"
+    r"住|现住|户籍地|经常居住地)"
+)
 _ADDRESS = re.compile(
     rf"(?:{_ADDRESS_LABEL})[：:\s]*"
     rf"("
@@ -104,7 +138,7 @@ _WORK_BLOCKLIST = frozenset(
 @dataclass(frozen=True)
 class Suspect:
     text: str
-    category: str  # person | organization | work_title | address
+    category: str  # person | organization | work_title | address | structural medium
     reason: str
     start: int
     end: int
@@ -112,6 +146,12 @@ class Suspect:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _has_surname(name: str) -> bool:
+    if any(name.startswith(item) for item in _COMPOUND_SURNAMES):
+        return True
+    return bool(name) and name[0] in _SURNAMES
 
 
 def _role_hint_for_person(context: str) -> str:
@@ -141,16 +181,25 @@ def detect_suspects(
     *,
     known: Iterable[str] | None = None,
     ignore: Iterable[str] | None = None,
+    allowlist: Iterable[str] | None = None,
 ) -> list[Suspect]:
-    """Return unique NL suspects not already listed in known/ignore."""
+    """Return unique NL suspects not already listed in known/ignore/allowlist."""
     if not text:
         return []
     skip = {s.strip() for s in (known or []) if s and str(s).strip()}
     skip |= {s.strip() for s in (ignore or []) if s and str(s).strip()}
+    skip |= {s.strip() for s in (allowlist or []) if s and str(s).strip()}
     candidates: list[Suspect] = []
 
     for m in _ORG.finditer(text):
-        val = m.group(1).strip()
+        raw = m.group(1)
+        lead = _ORG_LEAD.match(raw)
+        if lead:
+            val = raw[lead.end() :].strip()
+            start = m.start(1) + lead.end()
+        else:
+            val = raw.strip()
+            start = m.start(1)
         if len(val) < 4:
             continue
         if val in _ORG_BLOCKLIST or val in skip:
@@ -167,17 +216,22 @@ def detect_suspects(
                 text=val,
                 category="organization",
                 reason="org_suffix",
-                start=m.start(1),
-                end=m.end(1),
+                start=start,
+                end=start + len(val),
                 role_hint="party",
             )
         )
 
     for m in _PERSON.finditer(text):
-        val = m.group(1).strip()
+        val = m.group("name").strip()
+        delim = m.group("delim") or ""
         if val in _PERSON_BLOCKLIST or val in skip:
             continue
         if val.endswith(("公司", "法院", "银行", "事务所")):
+            continue
+        # No colon/space delimiter → require surname to avoid 原告提交…
+        has_delim = bool(delim.strip()) or delim.startswith(("：", ":"))
+        if not has_delim and not _has_surname(val):
             continue
         ctx_start = max(0, m.start() - 16)
         context = text[ctx_start : m.end()]
@@ -186,8 +240,8 @@ def detect_suspects(
                 text=val,
                 category="person",
                 reason="role_anchored",
-                start=m.start(1),
-                end=m.end(1),
+                start=m.start("name"),
+                end=m.end("name"),
                 role_hint=_role_hint_for_person(context),
             )
         )
@@ -196,6 +250,11 @@ def detect_suspects(
         val = m.group(1).strip()
         full = f"《{val}》"
         if val in _WORK_BLOCKLIST or full in skip or val in skip:
+            continue
+        following = text[m.end() : m.end() + 12]
+        if is_statute_title(full, following=following):
+            continue
+        if full in skip:
             continue
         candidates.append(
             Suspect(
