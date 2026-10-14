@@ -5,7 +5,8 @@
     "E12345678",
     "sun.test@example-fictional.test",
     "203.0.113.7",
-    "《月光测例》"
+    "《月光测例》",
+    "孙测五"
   ],
   "must_keep": [
     "《中华人民共和国著作权法》第五十二条",
@@ -16,9 +17,5 @@
   "residual_status": [
     "PASS",
     "WARN"
-  ],
-  "known_misses": [
-    "孙测五"
-  ],
-  "known_misses_note": "Documented detector gaps (no role colon / 受X委托). Tracked, not asserted."
+  ]
 }

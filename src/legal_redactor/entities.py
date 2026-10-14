@@ -227,6 +227,7 @@ def build_plan(
     alias_style: str = "generic",
     address_granularity: str = "full",
     amount_fuzzy: bool = True,
+    redact_court_staff: bool = False,
 ) -> RedactionPlan:
     """Merge structural detections with optional agent/manual entity list."""
     mode = mode.lower().strip()
@@ -342,6 +343,9 @@ def build_plan(
             text, known=already | preserve_set, allowlist=allow_set
         ):
             if suspect.text in already or suspect.text in preserve_set:
+                continue
+            if suspect.role_hint == "court_staff" and not redact_court_staff:
+                # Court personnel names are public in judgments; keep by default.
                 continue
             if mode == "production" and not (
                 suspect.category == "person" and suspect.role_hint == "third_party"

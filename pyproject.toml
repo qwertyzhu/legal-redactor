@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "legal-redactor"
-version = "0.11.0"
+version = "0.12.0"
 description = "中国法律文书本地脱敏：支持 ai、production 及按甲方/乙方整方遮挡名称、签名和公章。Local-first Chinese legal document redaction."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,6 +43,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<9", "cryptography>=42"]
 crypto = ["cryptography>=42"]
+# Optional Chinese NER (suspects only). LTP chosen over HanLP: smaller (LTP/tiny) & fewer deps.
+ner = ["ltp>=4.2,<5", "transformers<4.46", "huggingface_hub<0.26"]
+# Optional red-seal region drafts (seal-draft). OCR itself needs system Tesseract + chi_sim.
+vision = ["opencv-python-headless>=4.8", "numpy>=1.24"]
 
 [project.urls]
 Homepage = "https://github.com/qwertyzhu/legal-redactor"

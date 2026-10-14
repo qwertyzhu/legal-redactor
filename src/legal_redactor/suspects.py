@@ -22,13 +22,21 @@ _ORG = re.compile(
     rf"(?<![一-鿿])"
     rf"([一-鿿A-Za-z0-9（）()]{{2,40}}{_ORG_SUFFIX})"
 )
-_ORG_LEAD = re.compile(r"^(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*")
+_ORG_LEAD = re.compile(
+    r"^(?:(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*|(?:本所|本律师|我所)?(?:接受|受))"
+)
 
 # Role/title anchored natural persons.
 _PERSON_ROLES = (
     r"法定代表人|委托诉讼代理人|诉讼代理人|委托代理人|负责人|联系人|"
     r"指定联系人|授权代表|签字代表|"
-    r"原告|被告|上诉人|被上诉人|申请人|被申请人|第三人|证人"
+    r"原告|被告|上诉人|被上诉人|申请人|被申请人|第三人|证人|"
+    r"审判长|审判员|代理审判员|人民陪审员|陪审员|书记员|法官助理|执行员"
+)
+_COURT_STAFF_ROLES = ("审判长", "审判员", "陪审员", "书记员", "法官助理", "执行员")
+# 受X委托 / 接受X的委托 — the name has no role word but is a client.
+_ENTRUSTED = re.compile(
+    r"(?:接受|受)(?P<name>[·一-鿿]{2,4}?)(?:的)?(?:全权)?委托"
 )
 # Optional parenthetical annotation, then optional colon/space, then 2–4 CJK name chars.
 _PERSON = re.compile(
@@ -155,6 +163,8 @@ def _has_surname(name: str) -> bool:
 
 
 def _role_hint_for_person(context: str) -> str:
+    if any(k in context[-12:] for k in _COURT_STAFF_ROLES):
+        return "court_staff"
     if any(k in context for k in ("第三人", "证人")):
         return "third_party"
     if any(
@@ -243,6 +253,23 @@ def detect_suspects(
                 start=m.start("name"),
                 end=m.end("name"),
                 role_hint=_role_hint_for_person(context),
+            )
+        )
+
+    for m in _ENTRUSTED.finditer(text):
+        val = m.group("name").strip()
+        if val in _PERSON_BLOCKLIST or val in skip or not _has_surname(val):
+            continue
+        if val.endswith(("公司", "法院", "银行", "事务所")) or val in {"本人", "当事人"}:
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="person",
+                reason="entrusted_by",
+                start=m.start("name"),
+                end=m.end("name"),
+                role_hint="party",
             )
         )
 

@@ -21,6 +21,7 @@ class Profile:
     alias_style: str = "generic"  # generic | court
     address_granularity: str = "full"  # full | district
     amount_fuzzy: bool = True
+    redact_court_staff: bool = False  # 审判长/书记员等法院人员姓名默认保留
     preserve: list[str] = field(default_factory=list)
     auto_confident: bool = False
 
@@ -48,6 +49,7 @@ class Profile:
             "alias_style": self.alias_style,
             "address_granularity": self.address_granularity,
             "amount_fuzzy": self.amount_fuzzy,
+            "redact_court_staff": self.redact_court_staff,
             "preserve": list(self.preserve),
             "auto_confident": self.auto_confident,
         }
@@ -117,6 +119,7 @@ def _profile_from_dict(data: dict[str, Any], *, fallback_name: str) -> Profile:
         alias_style=str(data.get("alias_style") or "generic").lower(),
         address_granularity=str(data.get("address_granularity") or "full").lower(),
         amount_fuzzy=bool(data.get("amount_fuzzy", True)),
+        redact_court_staff=bool(data.get("redact_court_staff", False)),
         preserve=preserve,
         auto_confident=bool(data.get("auto_confident", False)),
     )
