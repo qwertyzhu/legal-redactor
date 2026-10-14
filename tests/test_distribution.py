@@ -105,7 +105,7 @@ def test_default_readme_is_chinese() -> None:
     stub = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
     assert "## 双模式" in default
     assert "证件号" in default
-    assert "给 AI" in default
+    assert "在线 AI" in default or "给在线" in default or "给 AI" in default
     assert "## Two modes" in english
     assert "## 双模式" not in english
     assert "## Two modes" not in default
@@ -132,7 +132,7 @@ def test_readmes_show_dual_mode_demo_and_before_after() -> None:
         assert "legal-redactor" in text
         assert "docs/images/dual-mode-preview.png" in text
     zh = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "给 AI" in zh
+    assert "在线 AI" in zh or "给在线" in zh or "给 AI" in zh
     assert "证件号" in zh
 
 

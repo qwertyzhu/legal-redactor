@@ -2,15 +2,23 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RedactionEntities",
   "type": "object",
-  "required": ["entities"],
+  "required": [
+    "entities"
+  ],
   "properties": {
     "entities": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["original", "category"],
+        "required": [
+          "original",
+          "category"
+        ],
         "properties": {
-          "original": { "type": "string", "minLength": 1 },
+          "original": {
+            "type": "string",
+            "minLength": 1
+          },
           "category": {
             "type": "string",
             "enum": [
@@ -26,16 +34,36 @@
               "email",
               "bank_account",
               "case_number",
-              "uscc"
+              "uscc",
+              "passport",
+              "hk_mo_permit",
+              "plate",
+              "property_cert",
+              "wechat_qq",
+              "ip",
+              "birth_date"
             ]
           },
           "role": {
             "type": "string",
-            "enum": ["party", "third_party", "counsel", "other", "unknown", "structural"]
+            "enum": [
+              "party",
+              "third_party",
+              "counsel",
+              "other",
+              "unknown",
+              "structural"
+            ]
           },
-          "replacement": { "type": "string" },
-          "notes": { "type": "string" },
-          "source": { "type": "string" }
+          "replacement": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
         },
         "additionalProperties": true
       }
