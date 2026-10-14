@@ -1,0 +1,15 @@
+name: minimal
+description: 仅去掉证件号、手机、邮箱、银行账号
+mode: production
+categories:
+  - id_card
+  - mobile
+  - email
+  - bank_account
+keep_categories: []
+extra_categories: []
+alias_style: generic
+address_granularity: full
+amount_fuzzy: false
+preserve: []
+auto_confident: false

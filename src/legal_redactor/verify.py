@@ -9,6 +9,11 @@ from typing import Any
 
 from .patterns import PatternHit, categories_for_mode, detect_structural
 
+# Exit codes for CLI verify
+EXIT_PASS = 0
+EXIT_WARN = 1
+EXIT_FAIL = 2
+
 
 @dataclass
 class ResidualReport:
@@ -17,6 +22,7 @@ class ResidualReport:
     hits: list[dict[str, Any]]
     summary: str
     warnings: list[dict[str, Any]] = field(default_factory=list)
+    status: str = "PASS"  # PASS | WARN | FAIL
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -32,9 +38,13 @@ def scan_residual(
     *,
     keep_categories: set[str] | None = None,
     extra_categories: set[str] | None = None,
+    only_categories: set[str] | None = None,
 ) -> ResidualReport:
     cats = categories_for_mode(
-        mode, keep_categories=keep_categories, extra_categories=extra_categories
+        mode,
+        keep_categories=keep_categories,
+        extra_categories=extra_categories,
+        only_categories=only_categories,
     )
     all_hits = [h for h in detect_structural(text) if h.category in cats]
     # Checksum/Luhn-failed unlabeled values are never auto-replaced; report, don't fail.
@@ -44,25 +54,41 @@ def scan_residual(
         for h in all_hits
         if not h.auto_replace
     ]
-    # Also flag if original-looking placeholders failed and raw digits remain in ID shape etc.
     serializable = [
         {"category": h.category, "text": h.text, "start": h.start, "end": h.end} for h in hits
     ]
     ok = len(hits) == 0
-    if ok:
-        summary = f"residual scan passed for mode={mode}"
-        if low:
-            summary += f" ({len(low)} low-confidence value(s) left for manual review)"
-    else:
+    if not ok:
         kinds: dict[str, int] = {}
         for h in hits:
             kinds[h.category] = kinds.get(h.category, 0) + 1
         detail = ", ".join(f"{k}={v}" for k, v in sorted(kinds.items()))
         summary = f"residual scan FAILED for mode={mode}: {detail}"
-    return ResidualReport(mode=mode, ok=ok, hits=serializable, summary=summary, warnings=low)
+        status = "FAIL"
+    elif low:
+        summary = (
+            f"residual scan WARN for mode={mode}: "
+            f"{len(low)} low-confidence value(s) left for manual review"
+        )
+        status = "WARN"
+    else:
+        summary = f"residual scan passed for mode={mode}"
+        status = "PASS"
+    return ResidualReport(
+        mode=mode, ok=ok, hits=serializable, summary=summary, warnings=low, status=status
+    )
 
 
 def hits_from_report(report: ResidualReport) -> list[PatternHit]:
     return [
         PatternHit(h["category"], h["text"], h["start"], h["end"]) for h in report.hits
     ]
+
+
+def exit_code_for_status(status: str) -> int:
+    status = (status or "").upper()
+    if status == "FAIL":
+        return EXIT_FAIL
+    if status == "WARN":
+        return EXIT_WARN
+    return EXIT_PASS

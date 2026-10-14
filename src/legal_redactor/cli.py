@@ -53,8 +53,13 @@ def _build_parser() -> argparse.ArgumentParser:
             sp.add_argument(
                 "--mode",
                 choices=("ai", "production"),
-                required=True,
-                help="ai=全面去标识；production=保留当事人，去掉证件号/手机/邮箱等",
+                default=None,
+                help="ai=全面去标识；production=保留当事人，去掉证件号/手机/邮箱等（与 --profile 二选一）",
+            )
+            sp.add_argument(
+                "--profile",
+                default=None,
+                help="脱敏等级配置：ai | production | publish | minimal（覆盖 --mode）",
             )
         sp.add_argument(
             "--entities",
@@ -143,6 +148,33 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="即使残留扫描仍发现结构性个人信息，也以退出码 0 结束",
     )
+    pr.add_argument(
+        "--ledger",
+        type=Path,
+        default=None,
+        help="ledger 路径（文件或目录）。默认写到 ~/.legal-redactor/ledgers/<hash>/（0600）",
+    )
+    pr.add_argument(
+        "--ledger-beside-output",
+        action="store_true",
+        help="旧行为：把 *.ledger.json 写在输出旁（不推荐）",
+    )
+    pr.add_argument(
+        "--ledger-encrypt",
+        action="store_true",
+        help="加密 ledger（需 cryptography；口令取 LEGAL_REDACTOR_LEDGER_PASS）",
+    )
+    pr.add_argument(
+        "--preserve-hyperlinks",
+        action="store_true",
+        help="docx：不清理外部超链接 / mailto 目标",
+    )
+    pr.add_argument(
+        "--preserve-bookmarks",
+        action="store_true",
+        help="pdf：保留书签（书签标题不脱敏，需人工检查）",
+    )
+    pr.add_argument("--json", action="store_true", help="打印机器可读 JSON 结果")
 
     ps = sub.add_parser("scan", help="只检测结构性个人信息 / 生成计划，不写出脱敏文件")
     add_common(ps)
@@ -153,9 +185,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="输入为目录时，包含子目录中的支持文件",
     )
 
-    pv = sub.add_parser("verify", help="对已脱敏文件或目录做残留扫描")
+    pv = sub.add_parser(
+        "verify",
+        help="对已脱敏文件或目录做残留扫描（退出码：0=PASS，1=WARN 且 --strict，2=FAIL）",
+    )
     pv.add_argument("input", type=Path, help="已脱敏文件或目录")
-    pv.add_argument("--mode", choices=("ai", "production"), required=True)
+    pv.add_argument("--mode", choices=("ai", "production"), default=None)
+    pv.add_argument("--profile", default=None, help="与 redact 使用的 profile 一致")
+    pv.add_argument(
+        "--strict",
+        action="store_true",
+        help="WARN（低置信残留）也以退出码 1 结束",
+    )
     pv.add_argument(
         "--keep-categories",
         action="append",
@@ -175,7 +216,20 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="输入为目录时，包含子目录中的支持文件",
     )
-    pv.add_argument("--json", action="store_true", help="打印机器可读 JSON（目录模式）")
+    pv.add_argument("--json", action="store_true", help="打印机器可读 JSON")
+
+    prr = sub.add_parser(
+        "restore",
+        help="用本地 ledger 把替身还原为原文（例如在线 AI 的回复）",
+    )
+    prr.add_argument("input", type=Path, help="含替身的文件（.txt/.md/.docx/.pdf）")
+    prr.add_argument("--ledger", type=Path, required=True, help="ledger.json / ledger.json.enc 或其目录")
+    prr.add_argument("-o", "--output", type=Path, required=True, help="还原后的输出路径")
+    prr.add_argument("--ledger-password", default=None, help="加密 ledger 口令（也可用环境变量）")
+    prr.add_argument("--json", action="store_true", help="打印机器可读 JSON")
+
+    plp = sub.add_parser("profiles", help="列出内置脱敏等级配置")
+    plp.add_argument("--json", action="store_true")
 
     pd = sub.add_parser(
         "draft-entities",
@@ -304,7 +358,21 @@ def _split_cats(values: list[str]) -> list[str]:
     return out
 
 
+def _resolve_mode_profile(args: argparse.Namespace) -> tuple[str, str | None]:
+    profile = getattr(args, "profile", None)
+    mode = getattr(args, "mode", None)
+    if profile:
+        from .profiles_loader import load_profile
+
+        prof = load_profile(profile)
+        return prof.mode, prof.name
+    if not mode:
+        raise SystemExit("ERROR: --mode 或 --profile 必须提供一个")
+    return mode, None
+
+
 def _cmd_redact(args: argparse.Namespace) -> int:
+    args.mode, profile_name = _resolve_mode_profile(args)
     src = Path(args.input)
     if src.is_dir():
         if args.output is None:
@@ -328,7 +396,37 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             auto_confident=bool(getattr(args, "auto_confident", False)),
             allowlist_files=list(getattr(args, "allowlist", []) or []),
             use_default_allowlist=not getattr(args, "no_default_allowlist", False),
+            profile=profile_name,
+            ledger_encrypt=bool(getattr(args, "ledger_encrypt", False)),
+            preserve_hyperlinks=bool(getattr(args, "preserve_hyperlinks", False)),
+            preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
         )
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {
+                        "mode": batch.mode,
+                        "ok": batch.ok,
+                        "files": [
+                            {
+                                "input": str(r.input_path),
+                                "output": str(r.output_path),
+                                "status": r.status,
+                                "replaced": len(r.plan.entities),
+                                "ledger": str(r.ledger_path),
+                                "audit": str(r.audit_json_path) if r.audit_json_path else None,
+                            }
+                            for r in batch.results
+                        ],
+                        "skipped": [{"input": str(p), "reason": why} for p, why in batch.skipped],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            if batch.skipped and not batch.results:
+                return 1
+            return 2 if (batch.failed and not args.allow_residual) else 0
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
@@ -373,7 +471,37 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         auto_confident=bool(getattr(args, "auto_confident", False)),
         allowlist_files=list(getattr(args, "allowlist", []) or []),
         use_default_allowlist=not getattr(args, "no_default_allowlist", False),
+        profile=profile_name,
+        ledger=getattr(args, "ledger", None),
+        ledger_encrypt=bool(getattr(args, "ledger_encrypt", False)),
+        ledger_beside_output=True if getattr(args, "ledger_beside_output", False) else None,
+        preserve_hyperlinks=bool(getattr(args, "preserve_hyperlinks", False)),
+        preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
     )
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "mode": result.mode,
+                    "profile": result.profile,
+                    "status": result.status,
+                    "ok": result.ok,
+                    "output": str(result.output_path),
+                    "ledger": str(result.ledger_path),
+                    "residual": str(result.residual_path),
+                    "suspects": str(result.suspects_path) if result.suspects_path else None,
+                    "audit_json": str(result.audit_json_path) if result.audit_json_path else None,
+                    "audit_md": str(result.audit_md_path) if result.audit_md_path else None,
+                    "replaced": len(result.plan.entities),
+                    "suspect_count": len(result.suspects),
+                    "warnings": list(result.warnings),
+                    "summary": result.residual.summary,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if (result.ok or args.allow_residual) else 2
     print(f"mode:        {result.mode}")
     print(f"output:      {result.output_path}")
     print(f"ledger:      {result.ledger_path}")
@@ -382,6 +510,9 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"suspects:    {result.suspects_path} ({len(result.suspects)})")
     print(f"replaced:    {len(result.plan.entities)}")
     print(f"scan:        {result.residual.summary}")
+    print(f"status:      {result.status}")
+    if result.audit_md_path:
+        print(f"audit:       {result.audit_md_path}")
     for w in result.warnings:
         print(f"WARNING:     {w}")
     if result.suspects:
@@ -410,6 +541,7 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_redact(args)
 
         if args.command == "scan":
+            args.mode, _scan_profile = _resolve_mode_profile(args)
             src = Path(args.input)
             if src.is_dir():
                 payload = scan_tree(
@@ -471,19 +603,31 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "verify":
             from .pipeline import _parse_category_list
+            from .verify import exit_code_for_status
 
+            vmode = args.mode
+            only = None
+            if getattr(args, "profile", None):
+                from .profiles_loader import load_profile
+
+                prof = load_profile(args.profile)
+                vmode = prof.mode
+                only = prof.categories
+            if not vmode:
+                print("ERROR: --mode 或 --profile 必须提供一个", file=sys.stderr)
+                return 2
             src = Path(args.input)
             keep = _parse_category_list(_split_cats(args.keep_categories))
             extra = _parse_category_list(_split_cats(args.extra_categories))
+            strict = bool(getattr(args, "strict", False))
             if src.is_dir():
                 payload = verify_tree(
                     src,
-                    mode=args.mode,
+                    mode=vmode,
                     keep_categories=keep,
                     extra_categories=extra,
                     recursive=args.recursive,
-                    allowlist_files=list(getattr(args, "allowlist", []) or []),
-                    use_default_allowlist=not getattr(args, "no_default_allowlist", False),
+                    only_categories=only,
                 )
                 if args.json:
                     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -491,20 +635,69 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"mode:   {payload['mode']}")
                     print(f"files:  {payload['files']}")
                     print(f"failed: {payload['failed']}")
+                    print(f"warned: {payload['warned']}")
+                    print(f"status: {payload['status']}")
                     for row in payload["results"]:
-                        status = "PASS" if row["ok"] else "FAIL"
-                        print(f"  [{status}] {row['name']}: {row['summary']}")
+                        print(f"  [{row['status']}] {row['name']}: {row['summary']}")
                         for h in row.get("hits") or []:
                             print(f"    - {h['category']}: {h['text']}")
-                return 0 if payload["ok"] else 2
+                status = payload["status"]
+            else:
+                text = _extract_any(src)
+                report = scan_residual(
+                    text,
+                    mode=vmode,
+                    keep_categories=keep,
+                    extra_categories=extra,
+                    only_categories=only,
+                )
+                if args.json:
+                    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+                else:
+                    print(report.summary)
+                    print(f"status: {report.status}")
+                    for h in report.hits:
+                        print(f"  - {h['category']}: {h['text']}")
+                    for h in report.warnings:
+                        print(f"  ? {h['category']}: {h['text']} ({h.get('notes', '')})")
+                status = report.status
+            if status == "WARN" and not strict:
+                return 0
+            return exit_code_for_status(status)
 
-            text = _extract_any(src)
-            report = scan_residual(text, mode=args.mode, keep_categories=keep, extra_categories=extra)
-            print(report.summary)
-            if report.hits:
-                for h in report.hits:
-                    print(f"  - {h['category']}: {h['text']}")
-            return 0 if report.ok else 2
+        if args.command == "restore":
+            from .ledger_store import restore_file
+
+            out_text, warns = restore_file(
+                args.input,
+                args.ledger,
+                args.output,
+                password=getattr(args, "ledger_password", None),
+            )
+            if args.json:
+                print(
+                    json.dumps(
+                        {"output": str(args.output), "warnings": warns, "ok": True},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                print(f"restored: {args.output}")
+                for w in warns:
+                    print(f"WARNING:  {w}")
+            return 0
+
+        if args.command == "profiles":
+            from .profiles_loader import list_profiles, load_profile
+
+            rows = [load_profile(n).to_dict() for n in list_profiles()]
+            if args.json:
+                print(json.dumps(rows, ensure_ascii=False, indent=2))
+            else:
+                for r in rows:
+                    print(f"{r['name']:<11} mode={r['mode']:<10} alias={r['alias_style']:<7} {r['description']}")
+            return 0
 
         if args.command == "draft-entities":
             from .draft import write_entities_draft

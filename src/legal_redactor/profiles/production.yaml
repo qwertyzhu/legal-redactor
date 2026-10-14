@@ -1,0 +1,11 @@
+name: production
+description: 交法院 / 对方 — 保留当事人与案号，去掉高敏项
+mode: production
+categories: null
+keep_categories: []
+extra_categories: []
+alias_style: generic
+address_granularity: full
+amount_fuzzy: false
+preserve: []
+auto_confident: true

@@ -34,19 +34,20 @@ def _redaction_fontname(text: str) -> str:
     return "helv"
 
 
-def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None) -> None:
+def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, preserve_bookmarks: bool = False) -> None:
     """Drop XMP, bookmarks, form fields, comment annotations and attachments."""
     warn = warnings if warnings is not None else []
     try:
         doc.del_xml_metadata()
     except Exception as exc:  # noqa: BLE001
         warn.append(f"pdf: could not delete XMP metadata ({exc})")
-    try:
-        if doc.get_toc():
-            doc.set_toc([])
-            warn.append("pdf: bookmarks removed (titles may carry names)")
-    except Exception as exc:  # noqa: BLE001
-        warn.append(f"pdf: could not clear bookmarks ({exc})")
+    if not preserve_bookmarks:
+        try:
+            if doc.get_toc():
+                doc.set_toc([])
+                warn.append("pdf: bookmarks removed (titles may carry names)")
+        except Exception as exc:  # noqa: BLE001
+            warn.append(f"pdf: could not clear bookmarks ({exc})")
     removed_annots = removed_widgets = 0
     for page in doc:
         for widget in list(page.widgets() or []):
@@ -74,6 +75,9 @@ def redact_pdf(
     output_path: Path,
     mapping: list[tuple[str, str]],
     warnings: list[str] | None = None,
+    *,
+    preserve_hyperlinks: bool = False,  # unused for pdf text-layer path
+    preserve_bookmarks: bool = False,
 ) -> str:
     doc = fitz.open(str(input_path))
     try:
@@ -116,7 +120,7 @@ def redact_pdf(
             if key in meta:
                 meta[key] = ""
         doc.set_metadata(meta)
-        _clear_pdf_extras(doc, warnings)
+        _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(output_path), deflate=True, garbage=3)

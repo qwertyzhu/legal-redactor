@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.11.0 - 2026-10-14
+
+P1：ledger 加固与还原、脱敏等级配置、审计报告、回归语料、单一入口。叠加在 0.10.9（P0）之上。
+
+- **ledger 默认移出输出目录**：写到 `~/.legal-redactor/ledgers/<hash>/ledger.json`（目录 0700、文件 0600；`LEGAL_REDACTOR_LEDGER_ROOT` 可改根目录），输出旁只留 `*.ledger-path.txt` 指针。`--ledger PATH` 指定位置，`--ledger-beside-output` 恢复旧行为。显式传 `--work-dir`（API 的 `work_dir=`）和批量目录模式仍写在旁边，以兼容 `unify`。
+- **`--ledger-encrypt`**：可选安装 `pip install 'legal-redactor[crypto]'`；口令取 `LEGAL_REDACTOR_LEDGER_PASS` 或 `restore --ledger-password`。只写 `ledger.json.enc`，不留明文。
+- **新命令 `restore`**：用本地 ledger 把在线 AI 回复里的替身还原为原文（txt/md/docx/pdf），替身→原文按最长优先，一个替身对应多个原文时告警。
+- **`--profile`**：内置 `ai` / `production` / `publish`（裁判文书上网式：张某、住址到区县、金额模糊）/ `minimal`（只去证件、手机、邮箱、账号）。`legal-redactor profiles` 列出。`--mode` 照旧可用，等价于同名 profile 的类别。
+- **审计报告**：每次 `redact` 生成 `*.audit.json` / `*.audit.md`：逐条替换的类别、置信度、规则、文档部件、段落号、前后 10 字上下文；残留风险统计（长数字串、书名号、日期、自然语言疑似、低置信结构性）。状态 PASS / WARN / FAIL。
+- **verify 三级**：PASS 退出 0；WARN 默认退出 0、加 `--strict` 退出 1；FAIL 退出 2。`--json` 单文件也可用。目录 verify 自动跳过 ledger / audit 等旁路文件；修复 P0 引入的目录 verify 参数错误。
+- **回归语料**：`tests/corpus/` 起诉状、判决书、合同、律师函、负例（法条、法院、订单号、校验失败代码）；CI 断言召回率 ≥ 0.95、保留率 = 1.0。`evals.json` 扩到 19 条。
+- **单一入口**：`scripts/redact_cli.py` 在包未安装时给出安装命令并以退出码 3 结束；`redact` / `verify` / `restore` / `profiles` 支持 `--json`。
+- **软开关**：`--preserve-hyperlinks`（docx 外链）、`--preserve-bookmarks`（PDF 书签，标题不脱敏）。
+
 ## 0.10.9 - 2026-10-14
 
 P0 硬化：白名单与法条保护、扩充结构性类别、校验位置信度、规则修复、docx/PDF 元数据清理、Skill 精简。
