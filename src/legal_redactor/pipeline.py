@@ -223,6 +223,7 @@ def redact_file(
     preserve_bookmarks: bool = False,
     revisions: str = "accept",
     ocr_images: str = "auto",
+    redact_court_staff: bool | None = None,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -282,6 +283,11 @@ def redact_file(
         alias_style=prof.alias_style if prof else "generic",
         address_granularity=prof.address_granularity if prof else "full",
         amount_fuzzy=prof.amount_fuzzy if prof else True,
+        redact_court_staff=(
+            redact_court_staff
+            if redact_court_staff is not None
+            else (prof.redact_court_staff if prof else False)
+        ),
     )
     mapping = plan.mapping()
     warnings: list[str] = []
@@ -444,6 +450,7 @@ def redact_tree(
     preserve_bookmarks: bool = False,
     revisions: str = "accept",
     ocr_images: str = "auto",
+    redact_court_staff: bool | None = None,
 ) -> BatchRedactResult:
     """Redact every supported file under input_dir into output_dir (flat names).
 
@@ -509,6 +516,7 @@ def redact_tree(
                 preserve_bookmarks=preserve_bookmarks,
                 revisions=revisions,
                 ocr_images=ocr_images,
+                redact_court_staff=redact_court_staff,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues

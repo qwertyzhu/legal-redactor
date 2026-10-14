@@ -181,6 +181,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="docx 修订：accept=接受修订（默认）；reject=拒绝修订；keep-and-redact=保留修订并脱敏 w:ins/w:del 内文字",
     )
     pr.add_argument(
+        "--redact-court-staff",
+        action="store_true",
+        default=None,
+        help="同时替换审判长/审判员/人民陪审员/书记员/法官助理/执行员姓名（默认保留；profile 键 redact_court_staff）",
+    )
+    pr.add_argument(
         "--ocr-images",
         choices=("auto", "on", "off"),
         default="auto",
@@ -425,6 +431,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
             revisions=getattr(args, "revisions", "accept"),
             ocr_images=getattr(args, "ocr_images", "auto"),
+            redact_court_staff=getattr(args, "redact_court_staff", None),
         )
         if getattr(args, "json", False):
             print(
@@ -504,6 +511,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         preserve_bookmarks=bool(getattr(args, "preserve_bookmarks", False)),
         revisions=getattr(args, "revisions", "accept"),
         ocr_images=getattr(args, "ocr_images", "auto"),
+        redact_court_staff=getattr(args, "redact_court_staff", None),
     )
     if getattr(args, "json", False):
         print(

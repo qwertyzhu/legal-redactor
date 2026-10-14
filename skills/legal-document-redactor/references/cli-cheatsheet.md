@@ -21,6 +21,7 @@ legal-redactor redact-scan scan.pdf --mode production -o scan.redacted.pdf
 legal-redactor redact draft.docx --mode ai --revisions keep-and-redact -o out.docx   # accept(默认)|reject|keep-and-redact
 legal-redactor redact contract.pdf --mode ai --ocr-images on -o out.pdf   # 内嵌图片 OCR，需 Tesseract
 legal-redactor seal-draft scan.pdf -o seals.json    # 公章区域草稿，需 [vision]，只出草稿
+legal-redactor redact judgment.docx --mode ai --redact-court-staff -o out.docx   # 法院人员姓名默认保留，此开关改为替换
 legal-redactor doctor                               # Tesseract / OpenCV / NER 可用性
 python3 scripts/self_test.py
 ```

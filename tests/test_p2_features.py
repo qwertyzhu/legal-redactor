@@ -250,3 +250,45 @@ def test_claude_code_frontmatter():
     assert name == "legal-document-redactor"
     assert re.fullmatch(r"[a-z0-9-]{1,64}", name)
     assert 0 < len(desc) <= 1024 and "<" not in desc and ">" not in desc
+
+
+# ---------- court staff preserved by default ----------
+
+_JUDGMENT = "原告：张测伟\n审判长 赵测审\n人民陪审员 钱测陪\n书记员：周测记\n本所受孙测五委托致函。\n"
+
+
+@pytest.mark.parametrize("profile", ["ai", "production", "minimal", "publish"])
+def test_court_staff_kept_by_default(tmp_path: Path, profile):
+    src = tmp_path / "j.txt"
+    src.write_text(_JUDGMENT, encoding="utf-8")
+    res = redact_file(src, mode="ai", profile=profile, output_path=tmp_path / "j.out.txt", auto_confident=True)
+    for name in ("赵测审", "钱测陪", "周测记"):
+        assert name in res.output_text, (profile, name)
+
+
+def test_court_staff_opt_in(tmp_path: Path):
+    src = tmp_path / "j.txt"
+    src.write_text(_JUDGMENT, encoding="utf-8")
+    res = redact_file(
+        src, mode="ai", output_path=tmp_path / "j.out.txt", auto_confident=True, redact_court_staff=True
+    )
+    for name in ("赵测审", "钱测陪", "周测记", "孙测五", "张测伟"):
+        assert name not in res.output_text, name
+    out = tmp_path / "c.out.txt"
+    assert main(["redact", str(src), "--mode", "ai", "--auto-confident", "--redact-court-staff", "-o", str(out)]) in (0, 1)
+    assert "赵测审" not in out.read_text(encoding="utf-8")
+
+
+def test_entrusted_party_still_redacted_in_ai(tmp_path: Path):
+    src = tmp_path / "j.txt"
+    src.write_text(_JUDGMENT, encoding="utf-8")
+    res = redact_file(src, mode="ai", output_path=tmp_path / "j.out.txt", auto_confident=True)
+    assert "孙测五" not in res.output_text and "张测伟" not in res.output_text
+
+
+def test_profile_key_redact_court_staff():
+    from legal_redactor.profiles_loader import _profile_from_dict, load_profile
+
+    for name in ("ai", "production", "minimal", "publish"):
+        assert load_profile(name).redact_court_staff is False
+    assert _profile_from_dict({"redact_court_staff": True}, fallback_name="x").redact_court_staff is True
