@@ -112,6 +112,28 @@ def _has_surname(name: str) -> bool:
     return bool(name) and name[0] in _SURNAMES
 
 
+
+def _court_person_alias(name: str) -> str:
+    for compound in _COMPOUND_SURNAMES:
+        if name.startswith(compound):
+            return f"{compound}某"
+    if name:
+        return f"{name[0]}某"
+    return "某某"
+
+
+def _district_address(addr: str) -> str:
+    """Truncate to 县/区 level (法释〔2016〕19号 style), e.g. 北京市朝阳区."""
+    head = addr[:24]
+    match = re.search(r"^(.{2,20}?(?<!自治)(?:区|县|旗))", head)
+    if match:
+        return match.group(1)
+    match = re.search(r"^(.{2,12}?(?:市|州|盟))", head)
+    if match:
+        return match.group(1)
+    return "某地址"
+
+
 def _amount_alias(raw: str) -> str:
     compact = re.sub(r"[,，\s人民币RMB￥¥]", "", raw)
     wan = "万" in compact
@@ -201,11 +223,20 @@ def build_plan(
     extra_categories: set[str] | None = None,
     auto_confident: bool = False,
     allowlist: set[str] | None = None,
+    only_categories: set[str] | None = None,
+    alias_style: str = "generic",
+    address_granularity: str = "full",
+    amount_fuzzy: bool = True,
 ) -> RedactionPlan:
     """Merge structural detections with optional agent/manual entity list."""
     mode = mode.lower().strip()
+    alias_style = (alias_style or "generic").lower()
+    address_granularity = (address_granularity or "full").lower()
     cats = categories_for_mode(
-        mode, keep_categories=keep_categories, extra_categories=extra_categories
+        mode,
+        keep_categories=keep_categories,
+        extra_categories=extra_categories,
+        only_categories=only_categories,
     )
     preserve_set = {p.strip() for p in (preserve or []) if p and p.strip()}
     allow_set = {a.strip() for a in (allowlist or set()) if a and str(a).strip()}
@@ -236,14 +267,20 @@ def build_plan(
 
         if not replacement:
             if category == "person":
-                replacement = _stable_alias("person", person_i)
-                person_i += 1
+                if alias_style == "court":
+                    replacement = _court_person_alias(original)
+                else:
+                    replacement = _stable_alias("person", person_i)
+                    person_i += 1
             elif category == "organization":
                 replacement = _stable_alias("organization", org_i)
                 org_i += 1
             elif category == "address":
-                replacement = _stable_alias("address", addr_i)
-                addr_i += 1
+                if address_granularity == "district":
+                    replacement = _district_address(original)
+                else:
+                    replacement = _stable_alias("address", addr_i)
+                    addr_i += 1
             elif category == "work_title":
                 replacement = _stable_alias("work_title", work_i)
                 work_i += 1
@@ -313,14 +350,20 @@ def build_plan(
             if suspect.category == "person":
                 if not _has_surname(suspect.text):
                     continue
-                replacement = _stable_alias("person", person_i)
-                person_i += 1
+                if alias_style == "court":
+                    replacement = _court_person_alias(suspect.text)
+                else:
+                    replacement = _stable_alias("person", person_i)
+                    person_i += 1
             elif suspect.category == "organization":
                 replacement = _stable_alias("organization", org_i)
                 org_i += 1
             elif suspect.category == "address" and mode == "ai":
-                replacement = _stable_alias("address", addr_i)
-                addr_i += 1
+                if address_granularity == "district":
+                    replacement = _district_address(suspect.text)
+                else:
+                    replacement = _stable_alias("address", addr_i)
+                    addr_i += 1
             elif suspect.category == "work_title" and mode == "ai":
                 replacement = _stable_alias("work_title", work_i)
                 work_i += 1
@@ -339,7 +382,8 @@ def build_plan(
             already.add(suspect.text)
         if mode == "ai":
             _link_abbreviations(text, plan)
-            _append_amounts(text, plan, preserve_set)
+            if amount_fuzzy:
+                _append_amounts(text, plan, preserve_set)
 
     return plan
 

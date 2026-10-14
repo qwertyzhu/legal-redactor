@@ -255,6 +255,9 @@ def redact_docx(
     output_path: Path,
     mapping: list[tuple[str, str]],
     warnings: list[str] | None = None,
+    *,
+    preserve_hyperlinks: bool = False,
+    preserve_bookmarks: bool = False,  # unused for docx; accepted for API symmetry
 ) -> str:
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -283,7 +286,8 @@ def redact_docx(
                 elif name == "docProps/custom.xml":
                     data = _clean_custom_props(data)
                 elif name.startswith("word/_rels/") and name.endswith(".rels"):
-                    data = _scrub_rels(data)
+                    if not preserve_hyperlinks:
+                        data = _scrub_rels(data)
                 elif name in ("word/settings.xml", "word/people.xml"):
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)

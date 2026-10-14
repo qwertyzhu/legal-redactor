@@ -421,13 +421,24 @@ def categories_for_mode(
     *,
     keep_categories: set[str] | None = None,
     extra_categories: set[str] | None = None,
+    only_categories: set[str] | None = None,
 ) -> set[str]:
     """Which structural categories auto-redact in each mode.
 
     keep_categories: remove from the mode default set (e.g. keep USCC on a filing).
     extra_categories: add beyond the mode default (must be known structural types).
+    only_categories: if set, use this exact set (ignore mode defaults).
     """
     mode = mode.lower().strip()
+    if only_categories is not None:
+        cats = {c.strip().lower() for c in only_categories if c and str(c).strip()}
+        unknown = cats - STRUCTURAL_CATEGORIES
+        if unknown:
+            raise ValueError(
+                f"unknown structural category/ies: {sorted(unknown)}; "
+                f"expected one of {sorted(STRUCTURAL_CATEGORIES)}"
+            )
+        return cats
     if mode == "ai":
         cats = set(STRUCTURAL_CATEGORIES)
     elif mode == "production":
