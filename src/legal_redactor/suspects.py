@@ -18,12 +18,25 @@ _ORG_SUFFIX = (
     r"人民法院|检察院|仲裁委员会|医院|大学|学院|银行股份有限公司|"
     r"支行|分行|中心|研究院|研究所|工厂|合作社|基金会|协会|学会|出版社)"
 )
-_ORG = re.compile(
-    rf"(?<![一-鿿])"
-    rf"([一-鿿A-Za-z0-9（）()]{{2,40}}{_ORG_SUFFIX})"
+_ORG_SUFFIX_RE = re.compile(_ORG_SUFFIX)
+_ORG_NAME_CHAR = re.compile(r"[一-鿿A-Za-z0-9（）()·&]")
+# Longest plausible name part before the suffix. A walk that hits this limit without
+# a boundary is "unanchored": surfaced for review, never auto-replaced.
+_ORG_MAX_HEAD = 30
+# Left boundaries inside an unpunctuated clause, e.g.
+# 原告X公司（以下简称X）与被告Y公司 / 赔偿原告X公司 / 开户行为X银行.
+# The name starts after the last boundary found.
+_ORG_LEFT_CUT = re.compile(
+    r"[（(]以下(?:简称|称)[^）)]{0,20}[）)]"
+    r"|(?:公司|集团|事务所|中心|研究院|研究所|医院|大学|学院|协会|学会|出版社|基金会|合作社|工厂|支行|分行)"
+    r"(?:和|与|及|同)"
+    r"|原审原告|原审被告|原审第三人|被上诉人|上诉人|被申请人|申请执行人|被执行人|申请人|第三人|原告|被告"
+    r"|甲方|乙方|丙方|丁方|开户行为|开户银行|开户行|收款行|收款单位|付款单位|收款人|付款人"
+    r"|与|及"
 )
 _ORG_LEAD = re.compile(
-    r"^(?:(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*|(?:本所|本律师|我所)?(?:接受|受))"
+    r"^(?:(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*|(?:本所|本律师|我所)?(?:接受|受)"
+    r"|[（(][^）)]{0,10}[）)])"
 )
 
 # Role/title anchored natural persons.
@@ -131,6 +144,32 @@ _PERSON_BLOCKLIST = frozenset(
     }
 )
 
+# Common words that follow a role word and start with a surname character
+# (第三人陈述 / 被告明知 / 原告经济损失). Without this they become "names" and get
+# replaced everywhere in the document.
+_PERSON_STOPWORDS = frozenset(
+    {
+        "陈述", "明知", "方面", "平台", "管理", "经营", "经济", "经济损失", "时间", "于是",
+        "应当", "承担", "全部", "安全", "高度", "成立", "关于", "支付", "单方", "常年",
+        "曾经", "曾多次", "向其", "和解", "合理开支", "公开", "公司", "单位", "家庭",
+        "双方", "代表", "工作", "居住", "出庭", "作证",
+    }
+)
+
+# Names in narrative, anchored by a relation word instead of a party role:
+# 证人王丽娟出庭作证 / 其表弟周小川实际运营 / 丈夫刘德胜亦知情.
+_NARRATIVE_ANCHORS = (
+    "证人|案外人|表弟|表哥|表姐|表妹|堂弟|堂兄|堂姐|堂妹|丈夫|妻子|前夫|前妻|"
+    "父亲|母亲|儿子|女儿|哥哥|姐姐|弟弟|妹妹|员工|职工|股东|实际控制人|实际经营者|"
+    "业务员|经办人|朋友|同事"
+)
+_PERSON_NARRATIVE = re.compile(
+    rf"(?P<anchor>{_NARRATIVE_ANCHORS})"
+    rf"(?P<name>[一-鿿]{{2,3}}?)"
+    rf"(?=出庭|作证|证实|陈述|称|系|于|在|与|和|向|的|是|为|将|已|亦|也|曾|按|对|从|把|被|"
+    rf"所|等|及|实际|负责|签|收|[，,。；;、）)\s]|$)"
+)
+
 _WORK_BLOCKLIST = frozenset(
     {
         "合同",
@@ -186,6 +225,47 @@ def _role_hint_for_person(context: str) -> str:
     return "unknown"
 
 
+def _org_candidates(text: str) -> list[tuple[str, int, bool]]:
+    """(name, start, anchored) for every org suffix, walking left to a boundary.
+
+    Walking left from each suffix (instead of one greedy regex from the clause
+    start) keeps 「原告X公司（以下简称X）与被告Y公司」 from becoming one blob that
+    hides both real names.
+    """
+    out: list[tuple[str, int, bool]] = []
+    for m in _ORG_SUFFIX_RE.finditer(text):
+        s = m.start()
+        floor = max(0, s - _ORG_MAX_HEAD)
+        i = s
+        while i > floor and _ORG_NAME_CHAR.match(text[i - 1]):
+            i -= 1
+        anchored = i == 0 or not _ORG_NAME_CHAR.match(text[i - 1])
+        head = text[i:s]
+        cut = 0
+        for c in _ORG_LEFT_CUT.finditer(head):
+            cut = c.end()
+        if cut:
+            head = head[cut:]
+            anchored = True
+        while True:
+            lead = _ORG_LEAD.match(head)
+            if not lead or not lead.end():
+                break
+            head = head[lead.end() :]
+        if len(head) < 2:
+            continue
+        out.append((head + m.group(0), s - len(head), anchored))
+    return out
+
+
+def _person_ok(val: str) -> bool:
+    if not val or val in _PERSON_BLOCKLIST or val.startswith(tuple(_PERSON_STOPWORDS)):
+        return False
+    if "某" in val:  # already an alias (王某 / 某甲)
+        return False
+    return not val.endswith(("公司", "法院", "银行", "事务所"))
+
+
 def detect_suspects(
     text: str,
     *,
@@ -201,15 +281,7 @@ def detect_suspects(
     skip |= {s.strip() for s in (allowlist or []) if s and str(s).strip()}
     candidates: list[Suspect] = []
 
-    for m in _ORG.finditer(text):
-        raw = m.group(1)
-        lead = _ORG_LEAD.match(raw)
-        if lead:
-            val = raw[lead.end() :].strip()
-            start = m.start(1) + lead.end()
-        else:
-            val = raw.strip()
-            start = m.start(1)
+    for val, start, anchored in _org_candidates(text):
         if len(val) < 4:
             continue
         if val in _ORG_BLOCKLIST or val in skip:
@@ -225,7 +297,7 @@ def detect_suspects(
             Suspect(
                 text=val,
                 category="organization",
-                reason="org_suffix",
+                reason="org_suffix" if anchored else "org_suffix_unanchored",
                 start=start,
                 end=start + len(val),
                 role_hint="party",
@@ -235,14 +307,20 @@ def detect_suspects(
     for m in _PERSON.finditer(text):
         val = m.group("name").strip()
         delim = m.group("delim") or ""
-        if val in _PERSON_BLOCKLIST or val in skip:
+        if not _person_ok(val) or val in skip:
             continue
-        if val.endswith(("公司", "法院", "银行", "事务所")):
-            continue
-        # No colon/space delimiter → require surname to avoid 原告提交…
+        # No colon delimiter → require surname to avoid 原告提交…, a clear right
+        # edge (原告张三，男 — not 原告经济损失100000元), and a compound surname
+        # for 4-char names.
         has_delim = bool(delim.strip()) or delim.startswith(("：", ":"))
-        if not has_delim and not _has_surname(val):
-            continue
+        if not has_delim:
+            if not _has_surname(val):
+                continue
+            nxt = text[m.end("name") : m.end("name") + 1]
+            if nxt.isdigit():
+                continue
+            if len(val) == 4 and not val.startswith(_COMPOUND_SURNAMES):
+                continue
         ctx_start = max(0, m.start() - 16)
         context = text[ctx_start : m.end()]
         candidates.append(
@@ -256,11 +334,29 @@ def detect_suspects(
             )
         )
 
+    for m in _PERSON_NARRATIVE.finditer(text):
+        val = m.group("name")
+        if not _person_ok(val) or val in skip or not _has_surname(val):
+            continue
+        if re.search(_NARRATIVE_ANCHORS, val):  # 丈夫和妻子 → not a name
+            continue
+        anchor = m.group("anchor")
+        candidates.append(
+            Suspect(
+                text=val,
+                category="person",
+                reason="relation_anchored",
+                start=m.start("name"),
+                end=m.end("name"),
+                role_hint="third_party" if anchor in ("证人", "案外人") else "other",
+            )
+        )
+
     for m in _ENTRUSTED.finditer(text):
         val = m.group("name").strip()
-        if val in _PERSON_BLOCKLIST or val in skip or not _has_surname(val):
+        if not _person_ok(val) or val in skip or not _has_surname(val):
             continue
-        if val.endswith(("公司", "法院", "银行", "事务所")) or val in {"本人", "当事人"}:
+        if val in {"本人", "当事人"}:
             continue
         candidates.append(
             Suspect(
@@ -311,6 +407,16 @@ def detect_suspects(
                 role_hint="party",
             )
         )
+
+    # An org candidate that merely extends a shorter one with the same ending
+    # (本合同由X有限公司 vs X有限公司) carries clause text, not a longer name.
+    orgs = {s.text for s in candidates if s.category == "organization"}
+    candidates = [
+        s
+        for s in candidates
+        if s.category != "organization"
+        or not any(o != s.text and s.text.endswith(o) for o in orgs)
+    ]
 
     # De-dupe by text; prefer longer strings; drop substring overlaps.
     candidates.sort(key=lambda s: (-len(s.text), s.start))

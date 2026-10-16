@@ -94,6 +94,26 @@
       "id": "preserve-hyperlinks",
       "prompt": "Redact a docx containing an infringing-URL hyperlink as evidence with --preserve-hyperlinks.",
       "expected": "external hyperlink targets kept"
+    },
+    {
+      "id": "judgment-sentence-orgs",
+      "prompt": "In ai mode with --auto-confident, redact a judgment whose body says 原告X有限公司（以下简称X公司）与被告Y有限公司（以下简称Y公司）… and 被告Y有限公司于本判决生效之日起十日内赔偿原告X有限公司经济损失.",
+      "expected": "both full names and both unquoted short names replaced; the operative clause text (于本判决生效之日起十日内赔偿原告 / 经济损失) unchanged"
+    },
+    {
+      "id": "narrative-names-and-false-names",
+      "prompt": "Redact 证人王测娟出庭作证称…其表弟周测川实际运营。第三人陈述，被告明知… in ai mode with --auto-confident.",
+      "expected": "王测娟 and 周测川 replaced; 陈述 / 明知 / 经济损失 never treated as names"
+    },
+    {
+      "id": "verify-strict-lists-leftover-names",
+      "prompt": "Run verify --mode ai --strict on an ai output that still contains a party company name.",
+      "expected": "exit 1 (WARN) with the company listed as nl_residual; exit 0 once it is in --allowlist or replaced"
+    },
+    {
+      "id": "docx-split-run-formatting",
+      "prompt": "Redact a docx where Word split a name across runs next to a bold label (被告：| 陈 | 测国).",
+      "expected": "name replaced; 被告： stays bold, the rest of the paragraph does not become bold"
     }
   ]
 }

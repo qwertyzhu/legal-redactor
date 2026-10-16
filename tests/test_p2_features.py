@@ -113,13 +113,14 @@ def test_pdf_image_warns_without_ocr(tmp_path: Path, monkeypatch):
 
 
 def _docx_with_image(path: Path, png: bytes):
-    docx_io.create_sample_docx(path, "原告：张测伟")
-    tmp = path.with_suffix(".tmp")
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w") as zout:
+    # Build from a separate source file and write `path` once: renaming over a
+    # just-written .docx trips Windows AV file locks (PermissionError).
+    src = path.with_name(path.stem + ".src.docx")
+    docx_io.create_sample_docx(src, "原告：张测伟")
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(path, "w") as zout:
         for it in zin.infolist():
             zout.writestr(it, zin.read(it.filename))
         zout.writestr("word/media/image1.png", png)
-    tmp.replace(path)
 
 
 @needs_ocr
@@ -172,7 +173,8 @@ W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _revision_docx(path: Path):
-    docx_io.create_sample_docx(path, "placeholder")
+    src = path.with_name(path.stem + ".src.docx")
+    docx_io.create_sample_docx(src, "placeholder")
     body = (
         f'<w:document xmlns:w="{W}"><w:body><w:p>'
         '<w:r><w:t xml:space="preserve">联系电话 </w:t></w:r>'
@@ -180,12 +182,10 @@ def _revision_docx(path: Path):
         '<w:ins w:id="2" w:author="律师甲"><w:r><w:t>13800138000</w:t></w:r></w:ins>'
         "</w:p></w:body></w:document>"
     )
-    tmp = path.with_suffix(".tmp")
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w") as zout:
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(path, "w") as zout:
         for it in zin.infolist():
             data = body.encode() if it.filename == "word/document.xml" else zin.read(it.filename)
             zout.writestr(it, data)
-    tmp.replace(path)
 
 
 def _doc_xml(p: Path) -> str:

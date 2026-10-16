@@ -58,8 +58,19 @@ original 必须是原文中**逐字出现**的字符串，不要改写、不要�
 def extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
-        from docx import Document
-        return "\n".join(p.text for p in Document(str(path)).paragraphs if p.text.strip())
+        # Same extractor as the CLI: tables, headers/footers, footnotes, comments.
+        # python-docx .paragraphs alone misses the party table of most contracts.
+        try:
+            from legal_redactor.formats import docx_io
+            return docx_io.extract_text(path)
+        except ImportError:
+            from docx import Document
+            doc = Document(str(path))
+            parts = [p.text for p in doc.paragraphs]
+            for table in doc.tables:
+                for row in table.rows:
+                    parts.extend(cell.text for cell in row.cells)
+            return "\n".join(t for t in parts if t.strip())
     if suffix == ".pdf":
         import pymupdf
         text = "\n".join(page.get_text() for page in pymupdf.open(str(path)))
@@ -121,20 +132,28 @@ def main() -> None:
     ap.add_argument("--model", default="qwen3.5:latest", help="Ollama 模型（默认 qwen3.5:latest）")
     ap.add_argument("--base-url", default="http://localhost:11434")
     ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--retries", type=int, default=2, help="单块返回非法 JSON 时的重试次数（默认 2）")
     ap.add_argument("--yes", action="store_true", help="不再提醒「草稿需确认」（确认后直接用）")
     args = ap.parse_args()
 
     text = extract_text(args.input)
     chunks = chunk_text(text)
     merged: dict[str, dict] = {}
+    failed: list[int] = []
     for i, chunk in enumerate(chunks, 1):
         print(f"[{i}/{len(chunks)}] 识别中（{len(chunk)} 字）...", file=sys.stderr)
-        try:
-            result = call_ollama(args.base_url, args.model, PROMPT % chunk, args.timeout)
-        except urllib.error.URLError as e:
-            sys.exit(f"错误：连不上 Ollama（{args.base_url}）：{e}\n先运行 ollama serve，并 ollama pull {args.model}")
-        except (json.JSONDecodeError, KeyError):
-            print(f"  警告：第 {i} 块返回了非法 JSON，已跳过该块", file=sys.stderr)
+        result = None
+        for attempt in range(args.retries + 1):
+            try:
+                result = call_ollama(args.base_url, args.model, PROMPT % chunk, args.timeout)
+                break
+            except urllib.error.URLError as e:
+                sys.exit(f"错误：连不上 Ollama（{args.base_url}）：{e}\n先运行 ollama serve，并 ollama pull {args.model}")
+            except (json.JSONDecodeError, KeyError):
+                # 模型偶发输出坏 JSON，属抖动，重试即可
+                print(f"  第 {i} 块返回非法 JSON（第 {attempt + 1} 次）", file=sys.stderr)
+        if result is None:
+            failed.append(i)
             continue
         for ent in result.get("entities", []):
             original_raw = (ent.get("original") or "").strip()
@@ -151,6 +170,14 @@ def main() -> None:
             })
 
     out = {"entities": sorted(merged.values(), key=lambda e: e["original"])}
+    if failed:
+        # 漏掉一整块 = 这块里的人名全部不会被替换。不写正式输出，避免被当成完整草稿使用。
+        partial = args.output.with_name(args.output.stem + ".partial.json")
+        out["incomplete"] = True
+        out["failed_chunks"] = failed
+        partial.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        sys.exit(f"错误：第 {failed} 块重试后仍失败，草稿不完整，已另存 {partial}（不可直接用于脱敏）。"
+                 "换模型（--model）或加大 --retries 后重跑。")
     args.output.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"识别 {len(out['entities'])} 个实体 → {args.output}", file=sys.stderr)
     if not args.yes:

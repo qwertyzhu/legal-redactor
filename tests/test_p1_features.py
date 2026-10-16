@@ -76,8 +76,8 @@ def test_restore_roundtrip_text(tmp_path: Path):
 
 def test_restore_warns_on_ambiguous_tokens():
     ledger = {"entities": [
-        {"original": "甲公司全称", "replacement": "某单位A"},
-        {"original": "甲公司", "replacement": "某单位A"},
+        {"original": "甲公司全称", "replacement": "某单位A", "category": "organization"},
+        {"original": "甲公司", "replacement": "某单位A", "category": "organization"},
     ]}
     out, warns = restore_text("某单位A违约", ledger)
     assert out == "甲公司全称违约"
