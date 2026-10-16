@@ -234,6 +234,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="输入为目录时，包含子目录中的支持文件",
     )
+    pv.add_argument(
+        "--allowlist",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="FILE",
+        help="与 redact 相同的白名单：ai 模式人名/单位残留检查跳过这些字符串",
+    )
+    pv.add_argument(
+        "--preserve",
+        action="append",
+        default=[],
+        help="与 redact 相同的 --preserve（ai 模式残留检查跳过）",
+    )
+    pv.add_argument(
+        "--redact-court-staff",
+        action="store_true",
+        help="与 redact 相同：法院人员姓名也算残留",
+    )
     pv.add_argument("--json", action="store_true", help="打印机器可读 JSON")
 
     prr = sub.add_parser(
@@ -469,7 +488,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         if batch.consistency_path:
             print(f"consistency: {batch.consistency_path}")
         for result in batch.results:
-            status = "PASS" if result.ok else "FAIL"
+            status = result.status
             print(
                 f"  [{status}] {result.input_path.name} -> {result.output_path.name} "
                 f"replaced={len(result.plan.entities)}"
@@ -545,6 +564,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"suspects:    {result.suspects_path} ({len(result.suspects)})")
     print(f"replaced:    {len(result.plan.entities)}")
     print(f"scan:        {result.residual.summary}")
+    for h in result.residual.hits:
+        print(f"  - {h['category']}: {h['text']}")
+    for h in result.residual.warnings[:20]:
+        print(f"  ? {h['category']}: {h['text']} ({h.get('notes', '')})")
     print(f"status:      {result.status}")
     if result.audit_md_path:
         print(f"audit:       {result.audit_md_path}")
@@ -558,8 +581,9 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             print(f"  … {len(result.suspects) - 20} more in suspects file")
     if not result.ok and not args.allow_residual:
         print(
-            "ERROR: residual structural PII remains. "
-            "Add entities or fix mappings; use --allow-residual to override.",
+            "ERROR: residual PII remains (structural, or a planned replacement "
+            "missing from the output). Add entities or fix mappings; "
+            "use --allow-residual to override.",
             file=sys.stderr,
         )
         return 2
@@ -703,6 +727,7 @@ def main(argv: list[str] | None = None) -> int:
             keep = _parse_category_list(_split_cats(args.keep_categories))
             extra = _parse_category_list(_split_cats(args.extra_categories))
             strict = bool(getattr(args, "strict", False))
+            staff = bool(getattr(args, "redact_court_staff", False))
             if src.is_dir():
                 payload = verify_tree(
                     src,
@@ -711,6 +736,8 @@ def main(argv: list[str] | None = None) -> int:
                     extra_categories=extra,
                     recursive=args.recursive,
                     only_categories=only,
+                    redact_court_staff=staff,
+                    allowlist_files=list(args.allowlist or []),
                 )
                 if args.json:
                     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -726,6 +753,8 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"    - {h['category']}: {h['text']}")
                 status = payload["status"]
             else:
+                from .pipeline import resolve_allowlist
+
                 text = _extract_any(src)
                 report = scan_residual(
                     text,
@@ -733,6 +762,10 @@ def main(argv: list[str] | None = None) -> int:
                     keep_categories=keep,
                     extra_categories=extra,
                     only_categories=only,
+                    nl=True,
+                    allowlist=resolve_allowlist(src, list(args.allowlist or [])),
+                    known={p.strip() for p in (args.preserve or []) if p.strip()},
+                    redact_court_staff=staff,
                 )
                 if args.json:
                     print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -28,25 +30,54 @@ import urllib.request
 PREFER = ["qwen3.5", "qwen3", "qwen2.5", "gemma4", "gemma3", "glm", "minicpm", "deepseek", "llama"]
 
 
+def _mem_bytes() -> int:
+    """Physical RAM on macOS / Windows / Linux; 0 if unknown."""
+    if sys.platform == "darwin":
+        out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout
+        return int(out.strip() or 0)
+    if sys.platform == "win32":
+        import ctypes
+
+        class MemStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        st = MemStatus()
+        st.dwLength = ctypes.sizeof(MemStatus)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
+        return int(st.ullTotalPhys)
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+
 def device_info() -> dict:
-    mem_bytes = 0
-    chip = "unknown"
     try:
-        mem_bytes = int(subprocess.run(["sysctl", "-n", "hw.memsize"],
-                                       capture_output=True, text=True).stdout.strip())
-        chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                              capture_output=True, text=True).stdout.strip()
+        mem_bytes = _mem_bytes()
     except Exception:
-        pass
-    return {"ram_gb": round(mem_bytes / 1024**3), "chip": chip}
+        mem_bytes = 0
+    chip = platform.processor() or platform.machine() or "unknown"
+    if sys.platform == "darwin":
+        try:
+            chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                  capture_output=True, text=True).stdout.strip() or chip
+        except Exception:
+            pass
+    # None = unknown; must not be reported as "内存不足"
+    return {"ram_gb": round(mem_bytes / 1024**3) if mem_bytes else None, "chip": chip}
 
 
-def recommend_model(ram_gb: int) -> dict:
-    if ram_gb >= 32:
+def recommend_model(ram_gb: int | None) -> dict:
+    if ram_gb is None:
+        return {"tier": "未知", "model": "qwen3.5:latest",
+                "note": "未能检测内存；16GB 以上可用此模型，否则走在线路径"}
+    # OS-reported RAM is a little under nominal (32GB → 31): compare with slack.
+    if ram_gb >= 30:
         return {"tier": "12-14B", "model": "gemma4:12b", "note": "内存充裕，实体识别更稳"}
-    if ram_gb >= 16:
+    if ram_gb >= 15:
         return {"tier": "7-8B", "model": "qwen3.5:latest", "note": "中文实体识别实测够用，性价比最高"}
-    if ram_gb >= 8:
+    if ram_gb >= 7:
         return {"tier": "4B", "model": "qwen3:4b", "note": "勉强可用，召回偏低，verify 后必须人工兜底；更建议在线路径"}
     return {"tier": "不推荐", "model": None, "note": "内存不足，请走在线路径（Agent 识别）"}
 

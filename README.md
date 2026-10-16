@@ -207,11 +207,11 @@ python3 skills/legal-document-redactor/scripts/self_test.py
 - 整方脱敏依赖已确认的 `party-spec` 标识与人工复核区域；漏列名称、签名或公章区域即可能漏遮
 - 公章不能只依赖 OCR 文字框，必须覆盖完整外圈、名称、编号和中心图案，并逐页复核
 - 未选中的一方默认完整保留；只有显式使用 `--also-redact-structural-all` 才会额外遮挡所有各方的结构性号码
-- 自然语言姓名需写入并确认 `entities.json`；suspects 只是提示
+- 自然语言姓名靠规则识别（角色词、关系词、公司后缀），没有锚点的人名、APP/产品名仍会漏；`ai` 模式的 `verify` 会把输出里残留的疑似人名/单位/地址列为 WARN，需写入 `entities.json` 重跑
 - 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
-- DOCX：单 run 内替换尽量保留加粗/斜体；跨 run 实体仍会折叠段落
+- DOCX：实体被 Word 拆成多个 run 时也逐 run 原位替换，其余文字保留各自格式；实体跨制表符/换行/修订边界时才折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
-- 目录 `verify` 会跳过 ledger / audit 等旁路文件；退出码 0=PASS、2=FAIL，WARN 默认 0、`--strict` 时 1
+- 目录 `verify` 会跳过 ledger / audit 等旁路文件；退出码 0=PASS、2=FAIL，WARN 默认 0、`--strict` 时 1（交付前用 `--strict`）
 - 不是法律意见，不能替代律所保密流程
 
 ## 安全

@@ -40,10 +40,14 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 ## 校验与交付
 
 ```bash
-legal-redactor verify OUTPUT.docx --mode ai && echo PASS || echo FAIL
+legal-redactor verify OUTPUT.docx --mode ai --strict
 ```
 
-`verify` 的 mode/profile、keep/extra 必须与 `redact` 一致。退出码：0=PASS（WARN 也为 0，加 `--strict` 时 WARN=1）、2=FAIL。WARN 时打开 `*.audit.md` 看低置信项和残留风险，逐条问用户。
+`verify` 的 mode/profile、keep/extra、allowlist/preserve 必须与 `redact` 一致。退出码：0=PASS、1=WARN（仅 `--strict`；不加时 WARN 也是 0，**不要**用不带 `--strict` 的退出码判断能否交付）、2=FAIL。
+
+- **FAIL**：`- 类别: 原文` 是确定泄漏（结构性号码，或 `unreplaced_entity`＝计划替换的原文仍在输出里）。修好重跑，不能交付。
+- **WARN**：`? 类别: 原文 (nl_residual:…)` 是 `ai` 输出里**仍在**的疑似人名/单位/地址（`redact` 结束时也会打印同一清单）。该脱的写进 `entities.json`，该留的写进 `--allowlist`，重跑直到 `--strict` 通过；`?` 后为低置信号码的（如 Luhn 不过的长数字），逐条问用户。
+- 只读这份清单和 `*.audit.md`，不必通读全文；清单为空也不等于没有漏网的无锚点人名（见不可妥协第 4 条）。
 
 在线 AI 回复里带着替身时，用本地 ledger 还原（ledger 永不外传）：
 
@@ -56,7 +60,7 @@ legal-redactor restore AI_REPLY.md --ledger LEDGER_PATH -o AI_REPLY.restored.md
 交付清单：
 
 - [ ] 模式与去向一致；格式与输入相同
-- [ ] 残留扫描 PASS（低置信命中在 suspects，需人工看）
+- [ ] `verify --strict` 退出码 0（或 WARN 项已逐条与用户确认）
 - [ ] 抽查当事人姓名（按预期保留或去掉）；法条/法院未被误脱
 - [ ] ledger 未上传任何地方
 - [ ] 反推三问：无残留可识别信息？上下文组合反推不出当事人？未过度脱敏？
