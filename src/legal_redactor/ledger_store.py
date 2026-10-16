@@ -158,23 +158,36 @@ def _read_encrypted(path: Path, password: str | None = None) -> bytes:
     return fernet.decrypt(token)
 
 
+_ALIAS_CATEGORIES = frozenset({"person", "organization", "work_title"})
+
+
 def reverse_mapping(entities: list[dict[str, Any]]) -> tuple[list[tuple[str, str]], list[str]]:
     """replacement→original, longest first. Warn when one token maps to many originals."""
     warnings_out: list[str] = []
     by_repl: dict[str, list[str]] = {}
+    cats_by_repl: dict[str, set[str]] = {}
     for row in entities:
         original = str(row.get("original") or "").strip()
         replacement = str(row.get("replacement") or "").strip()
         if not original or not replacement or original == replacement:
             continue
         by_repl.setdefault(replacement, []).append(original)
+        cats_by_repl.setdefault(replacement, set()).add(str(row.get("category") or ""))
     pairs: list[tuple[str, str]] = []
     for repl, originals in by_repl.items():
         uniq = list(dict.fromkeys(originals))
         if len(uniq) > 1:
-            warnings_out.append(
-                f"ambiguous restoration token {repl!r} → {uniq!r}; using first"
-            )
+            cats = cats_by_repl.get(repl, set())
+            if len(cats) == 1 and cats <= _ALIAS_CATEGORIES:
+                # 某单位A ← full name + 以下简称: one entity, restore the first (full) name.
+                warnings_out.append(f"ambiguous restoration token {repl!r} → {uniq!r}; using first")
+            else:
+                # Bucket placeholders (数十万元 / 区县地址 / [已脱敏]) cover different
+                # values; guessing would put a wrong amount or address into the reply.
+                warnings_out.append(
+                    f"ambiguous restoration token {repl!r} → {uniq!r}; NOT restored, fill in by hand"
+                )
+                continue
         pairs.append((repl, uniq[0]))
     pairs.sort(key=lambda p: len(p[0]), reverse=True)
     return pairs, warnings_out
@@ -232,6 +245,7 @@ def restore_file(
     # Extra text-level pass for anything mapping missed in structured formats
     restored, more = restore_text(text, ledger)
     if restored != text and suffix in {".txt", ".md", ".markdown", ".csv", ".json", ""}:
-        output_path.write_text(restored, encoding="utf-8")
+        with open(output_path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(restored)
         text = restored
-    return text, warns + more
+    return text, list(dict.fromkeys(warns + more))

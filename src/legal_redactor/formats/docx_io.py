@@ -15,7 +15,7 @@ from pathlib import Path
 from docx import Document
 from lxml import etree
 
-from ..entities import apply_mapping_to_text
+from ..entities import apply_mapping_to_text, find_mapping_spans
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -106,10 +106,20 @@ def _revision_owner(node: etree._Element) -> etree._Element | None:
     return None
 
 
+def _own_iter(p: etree._Element):
+    """Descendants of p, skipping paragraphs nested in text boxes (visited on their own)."""
+    for node in p.iter():
+        if node is p:
+            continue
+        nearest = next((a for a in node.iterancestors() if _local(a.tag) == "p"), None)
+        if nearest is p:
+            yield node
+
+
 def _paragraph_text(p: etree._Element) -> str:
     parts: list[str] = []
     owner: object = False
-    for node in p.iter():
+    for node in _own_iter(p):
         if _local(node.tag) in ("t", "delText"):
             cur = _revision_owner(node)
             # keep-and-redact: deleted & inserted text must not glue together
@@ -131,7 +141,7 @@ def _preserve_space(t: etree._Element, text: str) -> None:
 
 def _set_paragraph_text(p: etree._Element, new_text: str) -> None:
     """Collapse paragraph visible text into the first w:t, keeping its run props."""
-    t_nodes = [n for n in p.iter() if _local(n.tag) == "t"]
+    t_nodes = [n for n in _own_iter(p) if _local(n.tag) == "t"]
     if not t_nodes:
         r = etree.SubElement(p, f"{W}r")
         t = etree.SubElement(r, f"{W}t")
@@ -146,8 +156,70 @@ def _set_paragraph_text(p: etree._Element, new_text: str) -> None:
         t.text = ""
 
 
+def _segments(p: etree._Element) -> list[list[etree._Element]]:
+    """Text nodes grouped the way _paragraph_text joins them: a new group at every
+    tab/br and every change of tracked-change owner."""
+    groups: list[list[etree._Element]] = []
+    cur: list[etree._Element] = []
+    owner: object = False
+    for node in _own_iter(p):
+        tag = _local(node.tag)
+        if tag in ("t", "delText"):
+            o = _revision_owner(node)
+            if owner is not False and o is not owner and cur:
+                groups.append(cur)
+                cur = []
+            owner = o
+            cur.append(node)
+        elif tag in ("tab", "br") and cur:
+            groups.append(cur)
+            cur = []
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _replace_across_runs(nodes: list[etree._Element], mapping: list[tuple[str, str]]) -> None:
+    """Replace entities even when Word split them over runs (陈|建国, 138|12345678).
+
+    The replacement goes into the run where the entity starts, so it keeps that
+    run's formatting; the rest of the entity is cut from the following runs.
+    Every other character keeps its own run and formatting.
+    """
+    texts = [n.text or "" for n in nodes]
+    offsets: list[int] = []
+    pos = 0
+    for t in texts:
+        offsets.append(pos)
+        pos += len(t)
+    spans = find_mapping_spans("".join(texts), mapping)
+    if not spans:
+        return
+
+    def node_at(char: int) -> int:
+        i = 0
+        while i + 1 < len(offsets) and offsets[i + 1] <= char:
+            i += 1
+        return i
+
+    for start, end, replacement in reversed(spans):
+        i, j = node_at(start), node_at(end - 1)
+        a, b = start - offsets[i], end - offsets[j]
+        if i == j:
+            texts[i] = texts[i][:a] + replacement + texts[i][b:]
+            continue
+        texts[i] = texts[i][:a] + replacement
+        for k in range(i + 1, j):
+            texts[k] = ""
+        texts[j] = texts[j][b:]
+    for node, new in zip(nodes, texts):
+        if (node.text or "") != new:
+            node.text = new
+            _preserve_space(node, new)
+
+
 def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
-    """Apply mapping; prefer per-run edits so mid-paragraph formatting survives."""
+    """Apply mapping; edit runs in place so mid-paragraph formatting survives."""
     original = _paragraph_text(p)
     if not original:
         return original
@@ -155,15 +227,11 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
     if updated == original:
         return original
 
-    t_nodes = [n for n in p.iter() if _local(n.tag) in ("t", "delText")]
-    has_revision = any(_local(n.tag) in ("ins", "del") for n in p.iter())
+    t_nodes = [n for n in _own_iter(p) if _local(n.tag) in ("t", "delText")]
+    has_revision = any(_local(n.tag) in ("ins", "del") for n in _own_iter(p))
     if t_nodes:
-        for t in t_nodes:
-            old = t.text or ""
-            new = apply_mapping_to_text(old, mapping)
-            if new != old:
-                t.text = new
-                _preserve_space(t, new)
+        for group in _segments(p):
+            _replace_across_runs(group, mapping)
         after = _paragraph_text(p)
         if after == updated:
             return updated
@@ -364,7 +432,7 @@ def _media_warnings(
     if ocr_images == "off" or not ocr_available():
         why = "--ocr-images off" if ocr_images == "off" else "Tesseract not installed"
         if ocr_images == "on" and why != "--ocr-images off":
-            raise RuntimeError("--ocr-images on requires Tesseract (chi_sim) — see references/ocr.md")
+            raise RuntimeError("--ocr-images on requires Tesseract (chi_sim) — see skills/legal-document-redactor/references/scanned-pdf.md")
         with zipfile.ZipFile(path) as z:
             media = [n for n in z.namelist() if n.startswith("word/media/")]
         return [

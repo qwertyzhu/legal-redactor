@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -81,7 +82,13 @@ _SURNAMES = set(
     "蒯相查后荆红游竺权逯盖益桓公"
 )
 _COMPOUND_SURNAMES = ("欧阳", "司马", "上官", "诸葛", "司徒", "宇文", "长孙", "慕容", "东方", "皇甫", "令狐")
-_ABBR = re.compile(r"(?:[（(]\s*)?以下简称\s*[“\"「『]([^”\"」』）)\n]{2,12})[”\"」』]")
+# Contracts quote the short name (以下简称“星河公司”); judgments usually don't
+# (以下简称星河公司). Both must link to the full name's alias.
+_ABBR = re.compile(
+    r"(?:[（(]\s*)?以下(?:简称|称)\s*[“\"「『]?"
+    r"([^“”\"「」『』（）()\n，,。；;]{2,12}?)"
+    r"[”\"」』]?\s*(?=[）)，,；;。])"
+)
 _ABBR_BLOCK = {"甲方", "乙方", "丙方", "原告", "被告", "本公司", "我方", "对方", "双方", "许可方", "被许可方"}
 _AMOUNT = re.compile(
     r"(?<!\d)(?:人民币|RMB|[￥¥])?\s*(?:(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)\s*(?:万元|元)"
@@ -347,6 +354,9 @@ def build_plan(
             if suspect.role_hint == "court_staff" and not redact_court_staff:
                 # Court personnel names are public in judgments; keep by default.
                 continue
+            if suspect.reason == "org_suffix_unanchored":
+                # No left boundary found: likely clause text, not a name. Review only.
+                continue
             if mode == "production" and not (
                 suspect.category == "person" and suspect.role_hint == "third_party"
             ):
@@ -389,26 +399,65 @@ def build_plan(
             if amount_fuzzy:
                 _append_amounts(text, plan, preserve_set)
 
+    if alias_style == "court":
+        _number_court_aliases(text, plan)
     return plan
+
+
+def _number_court_aliases(text: str, plan: RedactionPlan) -> None:
+    """张三、张四 must not both become 张某 (法释〔2016〕19号第九条第二款: 加阿拉伯数字区分)."""
+    groups: dict[str, list[EntityRecord]] = {}
+    for e in plan.entities:
+        if e.category == "person" and e.replacement == _court_person_alias(e.original):
+            groups.setdefault(e.replacement, []).append(e)
+    for base, records in groups.items():
+        names = list(dict.fromkeys(r.original for r in records))
+        if len(names) < 2:
+            continue
+        names.sort(key=lambda n: text.find(n) if n in text else len(text))
+        for r in records:
+            r.replacement = f"{base}{names.index(r.original) + 1}"
 
 
 _TOKEN_SPLIT = re.compile(r"(\s+)")
 
 
+def find_mapping_spans(
+    text: str, mapping: list[tuple[str, str]]
+) -> list[tuple[int, int, str]]:
+    """Non-overlapping (start, end, replacement) spans, mapping order wins.
+
+    mapping is longest-first, so a longer original claims its span before a
+    shorter one inside it; replacements are never re-scanned.
+    """
+    # Claimed spans are disjoint and kept sorted, so only the one with the largest
+    # start < end can overlap a new [pos, end).
+    starts: list[int] = []
+    claimed: list[tuple[int, int, str]] = []
+    for original, replacement in mapping:
+        if not original:
+            continue
+        pos = text.find(original)
+        while pos >= 0:
+            end = pos + len(original)
+            i = bisect.bisect_left(starts, end)
+            if i and claimed[i - 1][1] > pos:
+                pos = text.find(original, pos + 1)
+                continue
+            starts.insert(i, pos)
+            claimed.insert(i, (pos, end, replacement))
+            pos = text.find(original, end)
+    return claimed
+
+
 def apply_mapping_to_text(text: str, mapping: list[tuple[str, str]]) -> str:
     if not text or not mapping:
         return text
-    # Non-overlapping sequential replace using a marker-free approach:
-    # sort by length already done; replace left-to-right with a temporary sentinel map
-    # to avoid double-redaction of replacements that look like sources.
-    out = text
-    sentinels: list[tuple[str, str]] = []
-    for i, (original, replacement) in enumerate(mapping):
-        if not original or original not in out:
-            continue
-        token = f"⟦R{i}⟧"
-        out = out.replace(original, token)
-        sentinels.append((token, replacement))
-    for token, replacement in sentinels:
-        out = out.replace(token, replacement)
-    return out
+    parts: list[str] = []
+    last = 0
+    for start, end, replacement in find_mapping_spans(text, mapping):
+        parts.append(text[last:start])
+        parts.append(replacement)
+        last = end
+    parts.append(text[last:])
+    return "".join(parts)

@@ -32,6 +32,71 @@ class ResidualReport:
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+NL_RESIDUAL_CATEGORIES = frozenset({"person", "organization", "address"})
+NL_NOTE = "nl_residual"
+
+
+def nl_residual(
+    text: str,
+    *,
+    allowlist: set[str] | None = None,
+    known: set[str] | None = None,
+    redact_court_staff: bool = False,
+) -> list[dict[str, Any]]:
+    """Name/org/address candidates still present in redacted output (ai mode).
+
+    Heuristic, so reported as WARN — but it is the only check that sees a party
+    name the structural scan cannot.
+    """
+    from .suspects import detect_suspects
+
+    out: list[dict[str, Any]] = []
+    for s in detect_suspects(text, known=known, allowlist=allowlist):
+        if s.category not in NL_RESIDUAL_CATEGORIES:
+            continue
+        if s.role_hint == "court_staff" and not redact_court_staff:
+            continue
+        if "某" in s.text or "[" in s.text:  # our own aliases / placeholders
+            continue
+        out.append(
+            {
+                "category": s.category,
+                "text": s.text,
+                "start": s.start,
+                "end": s.end,
+                "notes": f"{NL_NOTE}:{s.reason}",
+            }
+        )
+    return out
+
+
+def unreplaced_originals(
+    output_text: str, mapping: list[tuple[str, str]], *, join_lines: bool = False
+) -> list[str]:
+    """Planned originals that survived into the output — a definite leak.
+
+    join_lines: PDF text extraction breaks a wrapped entity with a newline.
+    """
+    hay = output_text.replace("\n", "") if join_lines else output_text
+    replacements = "\n".join(r for _, r in mapping)
+    return [o for o, _ in mapping if o and o in hay and o not in replacements]
+
+
+def add_unreplaced(report: ResidualReport, leftovers: list[str]) -> ResidualReport:
+    if not leftovers:
+        return report
+    report.hits.extend(
+        {"category": "unreplaced_entity", "text": o, "start": -1, "end": -1} for o in leftovers
+    )
+    report.ok = False
+    report.status = "FAIL"
+    report.summary = (
+        f"residual scan FAILED for mode={report.mode}: "
+        f"{len(leftovers)} planned replacement(s) still present in output"
+    )
+    return report
+
+
 def scan_residual(
     text: str,
     mode: str,
@@ -39,7 +104,12 @@ def scan_residual(
     keep_categories: set[str] | None = None,
     extra_categories: set[str] | None = None,
     only_categories: set[str] | None = None,
+    nl: bool = False,
+    allowlist: set[str] | None = None,
+    known: set[str] | None = None,
+    redact_court_staff: bool = False,
 ) -> ResidualReport:
+    """Structural residual scan; nl=True also lists leftover names in ai mode."""
     cats = categories_for_mode(
         mode,
         keep_categories=keep_categories,
@@ -54,6 +124,11 @@ def scan_residual(
         for h in all_hits
         if not h.auto_replace
     ]
+    # production keeps party names by design; only ai promises to remove them.
+    if nl and mode.lower().strip() == "ai":
+        low += nl_residual(
+            text, allowlist=allowlist, known=known, redact_court_staff=redact_court_staff
+        )
     serializable = [
         {"category": h.category, "text": h.text, "start": h.start, "end": h.end} for h in hits
     ]
@@ -66,10 +141,13 @@ def scan_residual(
         summary = f"residual scan FAILED for mode={mode}: {detail}"
         status = "FAIL"
     elif low:
-        summary = (
-            f"residual scan WARN for mode={mode}: "
-            f"{len(low)} low-confidence value(s) left for manual review"
-        )
+        n_nl = sum(1 for w in low if str(w.get("notes", "")).startswith(NL_NOTE))
+        bits = []
+        if len(low) - n_nl:
+            bits.append(f"{len(low) - n_nl} low-confidence structural value(s)")
+        if n_nl:
+            bits.append(f"{n_nl} name/org/address candidate(s) still in output")
+        summary = f"residual scan WARN for mode={mode}: {'; '.join(bits)} — review manually"
         status = "WARN"
     else:
         summary = f"residual scan passed for mode={mode}"

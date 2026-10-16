@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,13 @@ FICTION_PARAS = [
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, **kw)
+    # Children print UTF-8; decoding with the console code page (GBK on Chinese
+    # Windows) crashes the reader thread and leaves stdout=None.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=600, env=env, **kw,
+    )
 
 
 def docx_text(path: Path) -> str:
@@ -66,6 +73,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="skill 安装自检 / 回归测试（虚构数据）")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     s = Suite()
     cli = shutil.which("legal-redactor")
@@ -135,6 +144,29 @@ def main() -> None:
         ok1 = run([cli, "verify", str(w / "t5.docx"), "--mode", "ai"]).returncode == 0
         ok2 = run([cli, "verify", str(src), "--mode", "ai"]).returncode != 0
         s.check("T6 verify 退出码（脱敏品过 / 原文不过）", ok1 and ok2)
+
+        # T6b: 判决书正文句式——当事人全称、无引号简称、证人姓名、对公账号不得残留，
+        # 判项原文不得被吞；verify --strict 必须通过
+        jd = w / "judgment.txt"
+        jd.write_text(
+            "原告：星测影视文化传媒有限公司，住所地北京市朝阳区测试路1号。\n"
+            "被告：杭州云测网络科技有限公司，住所地浙江省杭州市余杭区测试路2号。\n"
+            "原告星测影视文化传媒有限公司（以下简称星测公司）与被告杭州云测网络科技有限公司"
+            "（以下简称云测公司）侵害作品信息网络传播权纠纷一案。\n"
+            "证人王测娟出庭作证称，其表弟周测川实际运营。云测公司账号0200004509200123456。\n"
+            "被告杭州云测网络科技有限公司于本判决生效之日起十日内赔偿原告星测影视文化传媒有限公司经济损失。\n",
+            encoding="utf-8",
+        )
+        out = w / "judgment.out.txt"
+        r = run([cli, "redact", str(jd), "--mode", "ai", "--auto-confident", "-o", str(out)])
+        text = out.read_text(encoding="utf-8") if out.exists() else ""
+        leaked = [x for x in ("星测影视", "云测网络", "星测公司", "云测公司", "王测娟", "周测川",
+                              "0200004509200123456") if x in text]
+        kept = "于本判决生效之日起十日内赔偿原告" in text and "经济损失" in text
+        strict = run([cli, "verify", str(out), "--mode", "ai", "--strict"]).returncode == 0
+        s.check("T6b 判决书句式（无残留、判项完整、verify --strict 过）",
+                r.returncode == 0 and not leaked and kept and strict,
+                f"残留 {leaked}" if leaked else ("判项被改" if not kept else ""))
 
         # T7: ollama_setup 可运行、JSON 可解析
         r = run([PY, str(SKILL_DIR / "scripts" / "ollama_setup.py"), "--json"])

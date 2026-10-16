@@ -5,8 +5,8 @@ legal-redactor --version
 legal-redactor redact contract.docx --mode ai --auto-confident -o out.docx
 legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
 legal-redactor redact contract.docx --mode ai --allowlist allow.txt -o out.docx
-legal-redactor verify out.docx --mode ai            # 0=PASS/WARN, 2=FAIL
-legal-redactor verify out.docx --mode ai --strict   # WARN → 1
+legal-redactor verify out.docx --mode ai --strict   # 交付前用这条：0=PASS, 1=WARN, 2=FAIL
+legal-redactor verify out.docx --mode ai            # 不加 --strict 时 WARN 也是 0
 legal-redactor redact contract.docx --profile publish -o out.docx
 legal-redactor redact contract.docx --profile minimal -o out.docx
 legal-redactor profiles

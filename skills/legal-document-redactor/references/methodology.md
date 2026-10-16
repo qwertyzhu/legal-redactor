@@ -44,7 +44,7 @@ If a court form **requires** an ID number, do not use this tool to invent blanks
 | `--extra-categories CAT[,CAT…]` | Auto-redact beyond mode default (e.g. strip `case_number` in production) |
 | `--preserve TEXT` | Leave one exact string unchanged (any category) |
 
-Known structural categories: `id_card`, `mobile`, `landline`, `email`, `bank_account`, `case_number`, `uscc`.
+Known structural categories: `id_card`, `mobile`, `landline`, `email`, `bank_account`, `case_number`, `uscc`, `passport`, `hk_mo_permit`, `plate`, `property_cert`, `wechat_qq`, `ip`, `birth_date`.
 
 ## Process split
 
@@ -54,7 +54,7 @@ Known structural categories: `id_card`, `mobile`, `landline`, `email`, `bank_acc
 
 ## What residual scan proves
 
-It proves that configured **structural** patterns for the mode are gone from extractable text.
+It proves that configured **structural** patterns for the mode are gone from extractable text, and that every planned replacement (ledger original) is actually gone from the output (`unreplaced_entity` → FAIL). In `ai` mode it also lists role/relation-anchored names, org names and labelled addresses still present (WARN).
 
 It does **not** prove:
 
@@ -66,7 +66,7 @@ It does **not** prove:
 
 | Input | Output | Engine notes |
 |---|---|---|
-| `.docx` | `.docx` | Paragraph + table + header/footer text; run styling simplified on rewrite |
+| `.docx` | `.docx` | Paragraph + table + header/footer text; entities replaced inside their runs, formatting kept (a paragraph collapses only when an entity crosses a tab, line break or tracked change) |
 | `.pdf` | `.pdf` | Text-layer only; search + redaction annots via PyMuPDF |
 | `.txt` / `.md` | same | UTF-8 rewrite |
 

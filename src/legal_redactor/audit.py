@@ -11,7 +11,7 @@ from typing import Any
 from .entities import RedactionPlan
 from .patterns import detect_structural
 from .suspects import detect_suspects
-from .verify import ResidualReport
+from .verify import NL_NOTE, ResidualReport
 
 _DIGIT_RUN = re.compile(r"(?<!\d)\d{10,}(?!\d)")
 _BOOK = re.compile(r"《[^》\n]{1,40}》")
@@ -208,14 +208,15 @@ def decide_status(
     if residual.hits:
         return "FAIL", residual.summary
     warn_bits: list[str] = []
-    if residual.warnings or deferred_count:
-        warn_bits.append(
-            f"{len(residual.warnings) or deferred_count} low-confidence structural value(s)"
-        )
-    if risks.get("quasi_identifier_hint"):
+    nl_left = [w for w in residual.warnings if str(w.get("notes", "")).startswith(NL_NOTE)]
+    low_struct = len(residual.warnings) - len(nl_left)
+    if low_struct or deferred_count:
+        warn_bits.append(f"{low_struct or deferred_count} low-confidence structural value(s)")
+    # Name checks only mean something in ai mode; production keeps parties on purpose.
+    if nl_left:
+        warn_bits.append(f"{len(nl_left)} name/org/address candidate(s) still in output")
+    if nl_left and risks.get("quasi_identifier_hint"):
         warn_bits.append("possible quasi-identifier combo (date + NL suspect)")
-    if risks.get("nl_suspects_remaining"):
-        warn_bits.append(f"{len(risks['nl_suspects_remaining'])} NL suspect(s) remain")
     if risks.get("long_digit_strings"):
         warn_bits.append(f"{len(risks['long_digit_strings'])} long digit string(s)")
     if warn_bits:
