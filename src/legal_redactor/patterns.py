@@ -33,8 +33,12 @@ _ID18_SPACED = re.compile(
     r"(?<!\d)[1-9]\d{5}[\s-]?(?:19|20)\d{2}[\s-]?(?:0[1-9]|1[0-2])[\s-]?"
     r"(?:0[1-9]|[12]\d|3[01])[\s-]?\d{3}[\s-]?[\dXx](?!\d)"
 )
+# Colon optional (账号6222… / 账号为…); \s* also spans the cell break of a
+# two-column table (收款账户 | 0200…). Corporate accounts carry no Luhn digit and
+# run 8–22 digits, so a label is what makes them high-confidence.
 _LABELED_ACCOUNT = re.compile(
-    r"(?:账号|帐号|账户|卡号|银行账号|收款账户)\s*[：:]\s*([0-9][0-9 \u3000-]{8,32}[0-9])"
+    r"(?:账号|帐号|账户|卡号|银行账号|收款账户|开户账号|对公账户)"
+    r"\s*(?:[：:]|为|是)?\s*([0-9][0-9 \u3000-]{6,32}[0-9])"
 )
 # Simple landline: 0xx-xxxxxxx or 0xx xxxxxxxx
 _LANDLINE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
@@ -238,7 +242,7 @@ def detect_structural(text: str) -> list[PatternHit]:
     for m in _LABELED_ACCOUNT.finditer(text):
         raw = m.group(1)
         compact = re.sub(r"[\s\u3000-]", "", raw)
-        if not (10 <= len(compact) <= 22) or not compact.isdigit():
+        if not (8 <= len(compact) <= 22) or not compact.isdigit():
             continue
         if re.fullmatch(
             r"[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]",

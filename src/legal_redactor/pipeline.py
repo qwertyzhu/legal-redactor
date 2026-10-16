@@ -19,7 +19,7 @@ from .profiles_loader import Profile, resolve_profile
 from .formats import docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
 from .suspects import Suspect, detect_suspects
-from .verify import ResidualReport, scan_residual
+from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".docx", ".pdf"}
@@ -304,12 +304,27 @@ def redact_file(
             mode, keep_categories=keep, extra_categories=extra, only_categories=only
         ),
     )
+    staff = (
+        redact_court_staff
+        if redact_court_staff is not None
+        else (prof.redact_court_staff if prof else False)
+    )
     residual = scan_residual(
         output_text,
         mode=mode,
         keep_categories=keep,
         extra_categories=extra,
         only_categories=only,
+        nl=True,
+        allowlist=allowlist,
+        known={p.strip() for p in (preserve or []) if p and p.strip()},
+        redact_court_staff=staff,
+    )
+    add_unreplaced(
+        residual,
+        unreplaced_originals(
+            output_text, mapping, join_lines=input_path.suffix.lower() == ".pdf"
+        ),
     )
 
     known = {e.original for e in plan.entities}
@@ -556,6 +571,7 @@ def verify_tree(
     Ledger / audit / residual sidecars are skipped (they carry originals by design).
     """
     keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
+    allow = resolve_allowlist(input_dir, _ignored.get("allowlist_files"))
     rows: list[dict[str, Any]] = []
     sidecar_suffixes = (
         ".ledger.json",
@@ -577,6 +593,9 @@ def verify_tree(
             keep_categories=keep,
             extra_categories=extra,
             only_categories=only_categories,
+            nl=True,
+            allowlist=allow,
+            redact_court_staff=bool(_ignored.get("redact_court_staff")),
         )
         rows.append(
             {
