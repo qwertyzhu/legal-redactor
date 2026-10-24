@@ -61,6 +61,12 @@ _CASE_NO = re.compile(
 _USCC = re.compile(
     r"(?<![A-Z0-9])[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}(?![A-Z0-9])"
 )
+# OCR often inserts spaces inside a labelled taxpayer / USCC number.
+_LABELED_USCC = re.compile(
+    r"(?:统一社会信用代码|纳税人识别号|社会信用代码)"
+    r"\s*[：:]\s*"
+    r"([0-9A-Za-z](?:[\s\u3000]*[0-9A-Za-z]){16,17})"
+)
 
 # Passport / travel permit — only with label prefix
 _LABELED_PASSPORT = re.compile(
@@ -226,7 +232,9 @@ def detect_structural(text: str) -> list[PatternHit]:
         if val.isdigit():
             continue
         ok = _uscc_checksum_ok(val)
-        labeled = "信用代码" in text[max(0, m.start() - 12) : m.start()]
+        labeled = "信用代码" in text[max(0, m.start() - 12) : m.start()] or "纳税人识别号" in text[
+            max(0, m.start() - 12) : m.start()
+        ]
         candidates.append(
             PatternHit(
                 "uscc",
@@ -234,9 +242,28 @@ def detect_structural(text: str) -> list[PatternHit]:
                 m.start(),
                 m.end(),
                 confidence="high" if ok else "medium",
-                # checksum fail and no 信用代码 label → suspects only
+                # checksum fail and no label → suspects only
                 auto_replace=ok or labeled,
                 notes="" if ok else ("uscc_checksum_fail_labeled" if labeled else "uscc_checksum_fail"),
+            )
+        )
+
+    for m in _LABELED_USCC.finditer(text):
+        raw = m.group(1)
+        compact = re.sub(r"[\s\u3000]", "", raw).upper()
+        if compact.isdigit() or not (17 <= len(compact) <= 18):
+            continue
+        ok = len(compact) == 18 and _uscc_checksum_ok(compact)
+        start = m.start(1)
+        candidates.append(
+            PatternHit(
+                "uscc",
+                raw,
+                start,
+                start + len(raw),
+                confidence="high" if ok else "medium",
+                auto_replace=True,
+                notes="" if ok else "uscc_checksum_fail_labeled",
             )
         )
 

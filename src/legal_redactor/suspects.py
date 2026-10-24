@@ -31,8 +31,21 @@ _ORG_LEFT_CUT = re.compile(
     r"|(?:公司|集团|事务所|中心|研究院|研究所|医院|大学|学院|协会|学会|出版社|基金会|合作社|工厂|支行|分行)"
     r"(?:和|与|及|同)"
     r"|原审原告|原审被告|原审第三人|被上诉人|上诉人|被申请人|申请执行人|被执行人|申请人|第三人|原告|被告"
-    r"|甲方|乙方|丙方|丁方|开户行为|开户银行|开户行|收款行|收款单位|付款单位|收款人|付款人"
+    r"|甲方|乙方|丙方|丁方|被授权方|被许可方|授权方|许可方|受让方|转让方|委托|聘请"
+    r"|开户行为|开户银行|开户行|开户名称|公司名称|收款行|收款单位|付款单位|收款人|付款人"
     r"|与|及"
+)
+# 人民法院 / 律师事务所 / 出版社 也是条款用语。头里带这些字就不是名称。
+_INSTITUTIONAL_SUFFIX = (
+    "人民法院",
+    "检察院",
+    "仲裁委员会",
+    "律师事务所",
+    "事务所",
+    "出版社",
+)
+_CLAUSE_IN_HEAD = re.compile(
+    r"[的向其与及或]|协议|签署|任一|均可|合作|披露|授予|根据|可以|应当"
 )
 _ORG_LEAD = re.compile(
     r"^(?:(?:开户行|收款行|开户银行|甲方|乙方|丙方)[：:\s]*|(?:本所|本律师|我所)?(?:接受|受)"
@@ -55,7 +68,7 @@ _ENTRUSTED = re.compile(
 _PERSON = re.compile(
     rf"(?:{_PERSON_ROLES})"
     rf"(?:[（(][^）)\n]{{0,20}}[）)])?"
-    rf"(?P<delim>[：:]\s*|\s*)"
+    rf"(?P<delim>[：:]\s*[，,、]\s*|[：:]\s*|\s*)"
     rf"(?P<name>[·一-鿿]{{2,4}})"
     rf"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|电子|邮箱|住址|住所|$))"
 )
@@ -254,7 +267,10 @@ def _org_candidates(text: str) -> list[tuple[str, int, bool]]:
             head = head[lead.end() :]
         if len(head) < 2:
             continue
-        out.append((head + m.group(0), s - len(head), anchored))
+        suffix = m.group(0)
+        if suffix.endswith(_INSTITUTIONAL_SUFFIX) and _CLAUSE_IN_HEAD.search(head):
+            continue
+        out.append((head + suffix, s - len(head), anchored))
     return out
 
 

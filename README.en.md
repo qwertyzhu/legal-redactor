@@ -112,10 +112,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
 ```
 
-CLI-only from the **latest** GitHub Release wheel (v0.14.0 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
+CLI-only from the **latest** GitHub Release wheel (v0.14.1 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.0/legal_redactor-0.14.0-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.1/legal_redactor-0.14.1-py3-none-any.whl
 ```
 
 **Upgrade rule**: update the skill bundle and the Python package together. CHANGELOG entries marked "skill only" need no wheel upgrade; entries marked "fix (package)" (e.g. v0.10.7 fixing label-adjacent email misses) **require** the new wheel. After installing, run the self-check:
