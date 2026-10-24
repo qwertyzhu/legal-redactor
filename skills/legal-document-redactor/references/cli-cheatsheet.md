@@ -18,7 +18,8 @@ legal-redactor redact contract.docx --mode production --preserve-hyperlinks --pr
 legal-redactor redact ./inbox/ --mode ai --unify -o ./outbox/
 legal-redactor draft-entities contract.docx -o entities.draft.json
 legal-redactor ocr scan.pdf -o workdir/
-legal-redactor redact-scan scan.pdf --mode production -o scan.redacted.pdf
+legal-redactor redact workdir/ocr.normalized.md --mode ai --auto-confident -o workdir/ai.md   # 扫描件走这条；无文字层 PDF 直接 redact 会被拒绝
+legal-redactor redact-scan scan.pdf --mode production -o scan.redacted.pdf   # 只涂证件号和电话，不能代替上面这条
 legal-redactor redact draft.docx --mode ai --revisions keep-and-redact -o out.docx   # accept(默认)|reject|keep-and-redact
 legal-redactor redact contract.pdf --mode ai --ocr-images on -o out.pdf   # 内嵌图片 OCR，需 Tesseract
 legal-redactor seal-draft scan.pdf -o seals.json    # 公章区域草稿，需 [vision]，只出草稿

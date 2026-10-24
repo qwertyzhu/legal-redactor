@@ -393,6 +393,9 @@ def detect_suspects(
         following = text[m.end() : m.end() + 12]
         if is_statute_title(full, following=following):
             continue
+        # 《许可协议》《借款合同》是文书名称，不是作品。
+        if val.endswith(("协议", "合同")):
+            continue
         if full in skip:
             continue
         candidates.append(

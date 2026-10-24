@@ -24,6 +24,16 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 出证把 `ai` 换成 `production`。只有这条没接住的名字，再补 `entities.json`。
 
+扫描件 PDF 没有文字层时，不要对 PDF 跑上面这条，也不要把原 PDF 交给模型。`redact` 会直接拒绝。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
+
+```bash
+legal-redactor ocr scan.pdf -o workdir/
+legal-redactor redact workdir/ocr.normalized.md --mode ai --auto-confident -o workdir/ai.md
+legal-redactor verify workdir/ai.md --mode ai --strict
+```
+
+`ocr` 打印的 `uncovered:` 是几乎没读出中文的页，等于没处理。给模型只交 `ai.md`，并说明这些页码。`verify` PASS 只说明已识别的文字过了。细节见 [references/scanned-pdf.md](references/scanned-pdf.md)。
+
 可选：
 
 - `--profile publish` — 公众号 / 对外改写（全体自然人张某、地址到县区、金额模糊）。这不是裁判文书上网

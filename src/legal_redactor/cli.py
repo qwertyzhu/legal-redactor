@@ -890,12 +890,18 @@ def main(argv: list[str] | None = None) -> int:
                 tesseract_cmd=args.tesseract,
                 tessdata_dir=args.tessdata,
             )
+            uncovered = [p.page for p in result.pages if p.uncovered]
             print(f"pages:      {len(result.pages)}")
             print(f"raw:        {result.raw_path}")
             print(f"normalized: {result.normalized_path}")
             print(f"meta:       {result.meta_path}")
             print(f"chars:      {len(result.text_normalized)}")
-            print("next: legal-redactor redact <normalized.md> --mode production -o out.md")
+            print(f"uncovered:  {', '.join(str(n) for n in uncovered) or 'none'}")
+            print("next: legal-redactor redact <normalized.md> --mode ai --auto-confident -o ai.md")
+            if uncovered:
+                print(
+                    "note: uncovered pages were not read. Send only the redacted text, not the PDF."
+                )
             return 0
 
         if args.command == "redact-scan":
