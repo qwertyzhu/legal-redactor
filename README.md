@@ -122,10 +122,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.14.0）：
+只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.14.1）：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.0/legal_redactor-0.14.0-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.1/legal_redactor-0.14.1-py3-none-any.whl
 ```
 
 **升级规则**：Skill 包和 Python 包要**一起换**。CHANGELOG 标注「仅 Skill」的版本可以不升 wheel；标注「修复（包）」的版本（如 v0.10.7 修复中文标签紧贴邮箱的漏检）**必须换 wheel**，只换 Skill 文件无效。装完跑一遍自检确认就绪：
