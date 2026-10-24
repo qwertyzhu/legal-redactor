@@ -18,16 +18,21 @@ Chinese litigation files are often phone/Quark scans with **no text layer**.
 set TESSDATA_PREFIX=C:\path\to\tessdata
 
 legal-redactor ocr scan.pdf -o workdir/
-legal-redactor redact workdir/ocr.normalized.md --mode production --entities entities.json -o workdir/out.md
+legal-redactor redact workdir/ocr.normalized.md --mode ai --auto-confident -o workdir/ai.md
+legal-redactor verify workdir/ai.md --mode ai --strict
 ```
+
+给法院的文字副本把 `ai` 换成 `production`。`redact` 遇到没有文字层的 PDF 会拒绝，避免对空文字层报 PASS。
 
 `ocr` writes:
 
-- `ocr.md` — raw page text  
-- `ocr.normalized.md` — CJK inter-character spaces collapsed (needed for entity replace)  
-- `ocr_meta.json` — page stats only  
+- `ocr.md` — raw page text
+- `ocr.normalized.md` — CJK inter-character spaces collapsed (needed for entity replace)
+- `ocr_meta.json` — page stats, including `uncovered_pages`
 
-Then use the normal dual-mode pipeline on the markdown.
+`uncovered:` lists pages whose OCR text is almost not Chinese. Those pages were not read. Whatever landed in the markdown does not stand in for them. A passing `verify` covers only recognized text. Give a model only the redacted markdown and name the uncovered pages. Never send the original PDF.
+
+`redact-scan` is not a substitute for this path. It blacks structural numbers only. Names and seals stay on the image.
 
 ## B. Visual black boxes on the scan (`redact-scan`)
 
@@ -39,7 +44,7 @@ Behavior:
 
 - Renders each page → Tesseract word boxes → matches structural patterns  
 - Categories follow mode / `--keep-categories` / `--extra-categories`  
-- Default `production`: black **id / mobile / landline / email / bank / uscc**; **does not** black party names  
+- Default `production`: black **id / mobile / landline / email / bank / uscc**; **does not** black party names, signatures, or seals. Not an input for an online model.  
 - Writes `*.bbox_hits.json` (**local only** — contains matched strings)
 
 ## C. Whole-party visual redaction

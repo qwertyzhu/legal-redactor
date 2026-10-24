@@ -228,6 +228,16 @@ def redact_file(
     input_path = Path(input_path)
     if not input_path.is_file():
         raise FileNotFoundError(input_path)
+    if input_path.suffix.lower() == ".pdf":
+        from .ocr_engine import pdf_has_text_layer
+
+        # Default of 20 treats a one-line phone as "no text layer" and blocks
+        # metadata cleanup. Refuse only when extractable text is empty.
+        if not pdf_has_text_layer(input_path, min_chars=1):
+            raise ValueError(
+                "这份 PDF 没有文字层。给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
+                "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
+            )
 
     prof: Profile | None
     if isinstance(profile, Profile):

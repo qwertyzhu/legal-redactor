@@ -88,6 +88,7 @@ class OcrPageResult:
     page: int
     text: str
     char_count: int
+    uncovered: bool = False
 
 
 @dataclass
@@ -107,10 +108,24 @@ class OcrResult:
             "total_chars_raw": len(self.text_raw),
             "total_chars_normalized": len(self.text_normalized),
             "per_page_chars": [p.char_count for p in self.pages],
+            "uncovered_pages": [p.page for p in self.pages if p.uncovered],
             "raw_path": str(self.raw_path) if self.raw_path else None,
             "normalized_path": str(self.normalized_path) if self.normalized_path else None,
             "meta_path": str(self.meta_path) if self.meta_path else None,
         }
+
+
+def page_is_uncovered(text: str) -> bool:
+    """A page the OCR text cannot stand in for.
+
+    Too little Chinese, or Chinese is only a small share of the page, means the
+    scan was not read. Those pages stay in the original PDF.
+    """
+    compact = re.sub(r"\s+", "", collapse_cjk_spaces(text))
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", compact))
+    if cjk < 40:
+        return True
+    return cjk / max(len(compact), 1) < 0.35
 
 
 def pdf_has_text_layer(path: Path, *, min_chars: int = 20) -> bool:
@@ -197,7 +212,14 @@ def ocr_pdf(
                     lang=lang,
                     psm=psm,
                 )
-                page_results.append(OcrPageResult(page=i + 1, text=text, char_count=len(text)))
+                page_results.append(
+                    OcrPageResult(
+                        page=i + 1,
+                        text=text,
+                        char_count=len(text),
+                        uncovered=page_is_uncovered(text),
+                    )
+                )
     finally:
         doc.close()
 
