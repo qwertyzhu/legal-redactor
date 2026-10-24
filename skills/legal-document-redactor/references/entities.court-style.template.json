@@ -1,5 +1,5 @@
 {
-  "_comment": "裁判文书上网式隐名模板（法释〔2016〕19号风格）。复制后改名 entities.json 并删掉本注释。适用：公开传播、公众号案例、普法文章。全部样例为虚构。",
+  "_comment": "对外改写用的张某模板，配合 --profile publish。不是裁判文书上网；上网用 --profile judgment-online，第八条人员写 role=article8。复制后改名 entities.json 并删掉本注释。全部样例为虚构。",
   "entities": [
     {
       "original": "张测三",

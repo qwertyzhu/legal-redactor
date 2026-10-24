@@ -7,8 +7,8 @@ keep_categories: []
 extra_categories: []
 alias_style: generic
 address_granularity: full
-# 法院人员（审判长/审判员/陪审员/书记员/法官助理/执行员）姓名默认保留
-redact_court_staff: false
+# 给在线模型时，审判人员姓名加上法院、案由即可在裁判文书网定位判决
+redact_court_staff: true
 amount_fuzzy: true
 preserve: []
 auto_confident: true

@@ -257,7 +257,7 @@ def test_claude_code_frontmatter():
 _JUDGMENT = "原告：张测伟\n审判长 赵测审\n人民陪审员 钱测陪\n书记员：周测记\n本所受孙测五委托致函。\n"
 
 
-@pytest.mark.parametrize("profile", ["ai", "production", "minimal", "publish"])
+@pytest.mark.parametrize("profile", ["production", "minimal", "publish", "judgment-online"])
 def test_court_staff_kept_by_default(tmp_path: Path, profile):
     src = tmp_path / "j.txt"
     src.write_text(_JUDGMENT, encoding="utf-8")
@@ -289,6 +289,7 @@ def test_entrusted_party_still_redacted_in_ai(tmp_path: Path):
 def test_profile_key_redact_court_staff():
     from legal_redactor.profiles_loader import _profile_from_dict, load_profile
 
-    for name in ("ai", "production", "minimal", "publish"):
+    assert load_profile("ai").redact_court_staff is True
+    for name in ("production", "minimal", "publish", "judgment-online"):
         assert load_profile(name).redact_court_staff is False
     assert _profile_from_dict({"redact_court_staff": True}, fallback_name="x").redact_court_staff is True

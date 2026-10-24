@@ -116,7 +116,7 @@ def test_ledger_encrypt_without_password_errors(tmp_path: Path):
 # 9. profiles ----------------------------------------------------------------
 
 def test_builtin_profiles_present():
-    assert {"ai", "production", "publish", "minimal"} <= set(list_profiles())
+    assert {"ai", "production", "publish", "judgment-online", "minimal"} <= set(list_profiles())
     assert load_profile("publish").alias_style == "court"
     assert load_profile("minimal").effective_categories() == {"id_card", "mobile", "email", "bank_account"}
 

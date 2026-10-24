@@ -53,7 +53,17 @@
     {
       "id": "publish-profile",
       "prompt": "Use --profile publish on a complaint for a public case write-up.",
-      "expected": "person aliases in 张某 style; addresses truncated to 县/区; amounts fuzzed"
+      "expected": "public rewrite, not a court-publication copy: person aliases in 张某 style; addresses truncated to 县/区; amounts fuzzed; judge names kept"
+    },
+    {
+      "id": "ai-redacts-court-staff",
+      "prompt": "Redact a judgment with --mode ai. The caption contains 审判长 赵测审.",
+      "expected": "赵测审 replaced. production, publish and judgment-online keep that name"
+    },
+    {
+      "id": "judgment-online-profile",
+      "prompt": "Use --profile judgment-online on a copyright judgment. A minor is listed in entities.json with role article8. The text also has a labelled address, a mobile, a USCC, a birth date and the presiding judge.",
+      "expected": "party name, birth date, USCC and judge kept; address truncated to district; mobile removed; article8 person becomes 张某; an ordinary party is not renamed"
     },
     {
       "id": "minimal-profile",

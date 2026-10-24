@@ -1,4 +1,4 @@
-"""Named redaction profiles (ai / production / publish / minimal)."""
+"""Named redaction profiles (ai / production / publish / judgment-online / minimal)."""
 
 from __future__ import annotations
 
@@ -20,8 +20,10 @@ class Profile:
     extra_categories: set[str] = field(default_factory=set)
     alias_style: str = "generic"  # generic | court
     address_granularity: str = "full"  # full | district
+    truncate_addresses: bool = False  # production 下也把带标签地址按 granularity 替换
+    redact_third_party: bool = True  # production 下是否自动替换证人等第三人
     amount_fuzzy: bool = True
-    redact_court_staff: bool = False  # 审判长/书记员等法院人员姓名默认保留
+    redact_court_staff: bool = False  # 未写该键时保留；ai.yaml 写 true
     preserve: list[str] = field(default_factory=list)
     auto_confident: bool = False
 
@@ -48,6 +50,8 @@ class Profile:
             "extra_categories": sorted(self.extra_categories),
             "alias_style": self.alias_style,
             "address_granularity": self.address_granularity,
+            "truncate_addresses": self.truncate_addresses,
+            "redact_third_party": self.redact_third_party,
             "amount_fuzzy": self.amount_fuzzy,
             "redact_court_staff": self.redact_court_staff,
             "preserve": list(self.preserve),
@@ -118,6 +122,8 @@ def _profile_from_dict(data: dict[str, Any], *, fallback_name: str) -> Profile:
         extra_categories=extra,
         alias_style=str(data.get("alias_style") or "generic").lower(),
         address_granularity=str(data.get("address_granularity") or "full").lower(),
+        truncate_addresses=bool(data.get("truncate_addresses", False)),
+        redact_third_party=bool(data.get("redact_third_party", True)),
         amount_fuzzy=bool(data.get("amount_fuzzy", True)),
         redact_court_staff=bool(data.get("redact_court_staff", False)),
         preserve=preserve,

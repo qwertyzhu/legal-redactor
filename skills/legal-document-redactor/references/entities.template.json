@@ -8,6 +8,12 @@
       "notes": "production + role=party 且无 replacement → 保留；ai 模式会替换"
     },
     {
+      "original": "（第八条人员姓名）",
+      "category": "person",
+      "role": "article8",
+      "notes": "仅 judgment-online：家事继承当事人、刑案被害人/证人/鉴定人、未成年人。不写 replacement，按第九条生成张某"
+    },
+    {
       "original": "（单位全称）",
       "category": "organization",
       "role": "party"
