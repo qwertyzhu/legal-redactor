@@ -59,7 +59,7 @@ def _build_parser() -> argparse.ArgumentParser:
             sp.add_argument(
                 "--profile",
                 default=None,
-                help="脱敏等级配置：ai | production | publish | minimal（覆盖 --mode）",
+                help="脱敏等级配置：ai | production | publish | judgment-online | minimal（覆盖 --mode）",
             )
         sp.add_argument(
             "--entities",
@@ -184,7 +184,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--redact-court-staff",
         action="store_true",
         default=None,
-        help="同时替换审判长/审判员/人民陪审员/书记员/法官助理/执行员姓名（默认保留；profile 键 redact_court_staff）",
+        help="替换审判长/审判员/人民陪审员/书记员/法官助理/执行员姓名（ai 默认替换；production、publish、judgment-online、minimal 默认保留）",
     )
     pr.add_argument(
         "--ocr-images",
@@ -251,7 +251,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument(
         "--redact-court-staff",
         action="store_true",
-        help="与 redact 相同：法院人员姓名也算残留",
+        default=None,
+        help="与 redact 相同：法院人员姓名也算残留（不传时跟随 profile；--mode ai 默认算）",
     )
     pv.add_argument("--json", action="store_true", help="打印机器可读 JSON")
 
@@ -714,6 +715,7 @@ def main(argv: list[str] | None = None) -> int:
 
             vmode = args.mode
             only = None
+            prof = None
             if getattr(args, "profile", None):
                 from .profiles_loader import load_profile
 
@@ -726,8 +728,17 @@ def main(argv: list[str] | None = None) -> int:
             src = Path(args.input)
             keep = _parse_category_list(_split_cats(args.keep_categories))
             extra = _parse_category_list(_split_cats(args.extra_categories))
+            if prof is not None and only is None:
+                keep |= prof.keep_categories
+                extra |= prof.extra_categories
             strict = bool(getattr(args, "strict", False))
-            staff = bool(getattr(args, "redact_court_staff", False))
+            staff_flag = getattr(args, "redact_court_staff", None)
+            if staff_flag:
+                staff = True
+            elif prof is not None:
+                staff = prof.redact_court_staff
+            else:
+                staff = vmode == "ai"
             if src.is_dir():
                 payload = verify_tree(
                     src,
@@ -812,7 +823,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(rows, ensure_ascii=False, indent=2))
             else:
                 for r in rows:
-                    print(f"{r['name']:<11} mode={r['mode']:<10} alias={r['alias_style']:<7} {r['description']}")
+                    print(f"{r['name']:<16} mode={r['mode']:<10} alias={r['alias_style']:<7} {r['description']}")
             return 0
 
         if args.command == "draft-entities":

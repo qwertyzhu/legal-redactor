@@ -20,10 +20,14 @@
 
 | 模式 | 去向 | 默认行为 |
 |---|---|---|
-| `ai` | 在线模型、可外传笔记、公开样例 | 激进：姓名/单位/案号/证件/手机/邮箱/账号/信用代码 + entities 清单 |
-| `production` | 法院 / 对方当事人 | 保留当事人与案号；去掉证件号、手机、邮箱、银行账号、信用代码；可标记第三人 |
+| `ai` | 在线模型、可外传笔记 | 激进去标识，审判人员姓名一并去掉 |
+| `production` | 法院 / 对方当事人 | 保留当事人与案号；去掉证件号、手机、邮箱、银行账号、信用代码 |
+| `publish` | 公众号 / 对外改写 | 全体自然人写成张某，地址到县区，金额模糊。不是裁判文书上网 |
+| `judgment-online` | 裁判文书上网 | 法释〔2016〕19号：保留当事人、出生日期、案号、信用代码、律师信息和审判人员；地址收到县区；只有 entities 里 `role=article8` 的人写成张某 |
 
-姓名、单位、作品名等由 Agent（或你）写入 `entities.json`；CLI 做确定性替换与结构性残留扫描。
+高置信姓名和单位用 `--auto-confident` 一次扫完。没接住的再补 `entities.json`。
+
+Skill 全文在 [skills/legal-document-redactor/SKILL.md](skills/legal-document-redactor/SKILL.md)。把这个文件的 GitHub 地址发给别人即可：`https://github.com/qwertyzhu/legal-redactor/blob/main/skills/legal-document-redactor/SKILL.md`
 
 ### 整方遮甲方 / 乙方
 
@@ -118,10 +122,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI，装**最新** GitHub Release 的 wheel（以 v0.10.7 为例，安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对最新版本号）：
+只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.14.0）：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.7/legal_redactor-0.10.7-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.0/legal_redactor-0.14.0-py3-none-any.whl
 ```
 
 **升级规则**：Skill 包和 Python 包要**一起换**。CHANGELOG 标注「仅 Skill」的版本可以不升 wheel；标注「修复（包）」的版本（如 v0.10.7 修复中文标签紧贴邮箱的漏检）**必须换 wheel**，只换 Skill 文件无效。装完跑一遍自检确认就绪：

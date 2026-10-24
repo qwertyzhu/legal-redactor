@@ -111,9 +111,12 @@ def test_ai_verify_lists_names_left_in_output():
     assert scan_residual(out, mode="production", nl=True).status == "PASS"
 
 
-def test_court_staff_not_flagged_by_default():
-    r = scan_residual("审判长 赵测审\n书记员 钱测记", mode="ai", nl=True)
+def test_court_staff_not_flagged_when_kept():
+    r = scan_residual("审判长 赵测审\n书记员 钱测记", mode="production", nl=True)
     assert r.status == "PASS"
+    assert scan_residual(
+        "审判长 赵测审\n书记员 钱测记", mode="ai", nl=True, redact_court_staff=True
+    ).status == "WARN"
 
 
 def test_unreplaced_original_is_fail():

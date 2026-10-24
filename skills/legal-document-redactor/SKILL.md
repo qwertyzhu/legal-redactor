@@ -26,13 +26,15 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 可选：
 
-- `--profile publish` — 公开传播 / 裁判文书上网式（张某、住址到区县、金额模糊）；`--profile minimal` 只去证件手机邮箱账号；`legal-redactor profiles` 列出全部
+- `--profile publish` — 公众号 / 对外改写（全体自然人张某、地址到县区、金额模糊）。这不是裁判文书上网
+- `--profile judgment-online` — 裁判文书上网（法释〔2016〕19号）：保留当事人、出生日期、案号、统一社会信用代码、律师姓名和执业证号、审判人员；地址收到县区。第八条人员在 entities.json 写 `"role": "article8"`，不写 replacement
+- `--profile minimal` 只去证件手机邮箱账号；`legal-redactor profiles` 列出全部
 - `--allowlist FILE` / 项目内 `.redactor/allow.txt` — 必须原样保留（法院、法条、当事人自定义）
 - `--keep-categories` / `--extra-categories` — 结构性类别微调
 - `--preserve "原文"` — 单段保留
 - 整方遮挡扫描件：见 [references/party-redaction.md](references/party-redaction.md)
 - 扫描件 OCR / 涂黑：见 [references/scanned-pdf.md](references/scanned-pdf.md)
-- 审判长/审判员/人民陪审员/书记员/法官助理/执行员姓名默认保留；确需去掉加 `--redact-court-staff`。
+- 审判人员姓名：`ai` 默认替换（审判人员 + 法院 + 案由可以定位判决）。`production`、`publish`、`judgment-online` 默认保留。`ai` 里要留某一个人，用 `--preserve` 或 allowlist。
 - docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
@@ -66,6 +68,13 @@ legal-redactor restore AI_REPLY.md --ledger LEDGER_PATH -o AI_REPLY.restored.md
 - [ ] 反推三问：无残留可识别信息？上下文组合反推不出当事人？未过度脱敏？
 
 旁路产物：`*.audit.md` / `*.audit.json`、`*.residual.json`、`*.suspects.json`、`*.summary.md` 在输出旁；ledger 默认在 `~/.legal-redactor/ledgers/<hash>/`（0600），输出旁只留 `*.ledger-path.txt` 指针。高敏事项加 `--ledger-encrypt`（口令放 `LEGAL_REDACTOR_LEDGER_PASS`）。
+
+## 去向再核对
+
+`verify --strict` 通过之后仍要看去向：
+
+- 给在线模型：无书名号的作品名或系列名，APP、网站、店铺、开发者主体，账号昵称和 UID，侵权链接。这几类写进 `entities.json` 再跑。交法院时作品名和链接留着，它们是证据。
+- 上网稿用 `judgment-online`。第八条只包括家事与继承的当事人、刑事案件被害人及其法定代理人、证人、鉴定人、未成年人及其法定代理人。工具不判断案由。
 
 ## 不可妥协
 

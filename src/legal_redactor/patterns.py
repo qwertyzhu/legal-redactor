@@ -49,6 +49,8 @@ _EMAIL = re.compile(
 )
 # Bank card-ish 16-19 digits (exclude IDs already matched by length context later)
 _BANK = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
+# 律师执业证号常为 17 位，紧挨标签时不是银行账号（法释〔2016〕19号第十一条保留）
+_LICENSE_LABEL = re.compile(r"(?:执业证号|执业证|律师证号)\s*[：: ]?\s*$")
 # PRC case number, e.g. （2024）京73民初1234号
 _CASE_NO = re.compile(
     r"[（(]\d{4}[）)][^（）()\n]{0,20}?"
@@ -267,6 +269,8 @@ def detect_structural(text: str) -> list[PatternHit]:
 
     for m in _BANK.finditer(text):
         val = m.group(0)
+        if _LICENSE_LABEL.search(text[max(0, m.start() - 12) : m.start()]):
+            continue
         if any(not (m.end() <= a or m.start() >= b) for a, b in labeled_bank_spans):
             continue
         if len(val) == 18 and re.fullmatch(

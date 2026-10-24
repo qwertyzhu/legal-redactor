@@ -270,6 +270,11 @@ def redact_file(
     if prof is not None and prof.categories is None:
         keep |= prof.keep_categories
         extra |= prof.extra_categories
+    staff = (
+        redact_court_staff
+        if redact_court_staff is not None
+        else (prof.redact_court_staff if prof else (mode == "ai"))
+    )
     plan = build_plan(
         source_text,
         mode=mode,
@@ -283,11 +288,9 @@ def redact_file(
         alias_style=prof.alias_style if prof else "generic",
         address_granularity=prof.address_granularity if prof else "full",
         amount_fuzzy=prof.amount_fuzzy if prof else True,
-        redact_court_staff=(
-            redact_court_staff
-            if redact_court_staff is not None
-            else (prof.redact_court_staff if prof else False)
-        ),
+        redact_court_staff=staff,
+        truncate_addresses=bool(prof.truncate_addresses) if prof else False,
+        redact_third_party=prof.redact_third_party if prof else True,
     )
     mapping = plan.mapping()
     warnings: list[str] = []
@@ -303,11 +306,6 @@ def redact_file(
         image_categories=categories_for_mode(
             mode, keep_categories=keep, extra_categories=extra, only_categories=only
         ),
-    )
-    staff = (
-        redact_court_staff
-        if redact_court_staff is not None
-        else (prof.redact_court_staff if prof else False)
     )
     residual = scan_residual(
         output_text,

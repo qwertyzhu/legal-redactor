@@ -18,10 +18,14 @@ Built for lawyers who need (1) a privacy-safe copy before pasting into online AI
 
 | Mode | Destination | Default behavior |
 |---|---|---|
-| `ai` | Online models, shareable notes, public fixtures | Aggressive: names, orgs, case numbers, IDs, phones, emails, accounts, USCC + agent-listed entities |
-| `production` | Court / opposing party | Keep parties & case numbers; strip IDs, phones, emails, bank accounts, USCC; optional third-party entities |
+| `ai` | Online models, shareable notes | Aggressive de-identification, including court-staff names |
+| `production` | Court / opposing party | Keep parties and case numbers; strip IDs, phones, emails, bank accounts, USCC |
+| `publish` | Public write-up | Every natural person becomes 张某; addresses stop at district; amounts are fuzzed. Not a court-publication copy |
+| `judgment-online` | Judgment publication under SPC Interpretation No. 19 [2016] | Keep parties, birth dates, case numbers, USCC, counsel and court staff; truncate labelled addresses to district; only entities with `role=article8` become 张某 |
 
-Agent (or you) supplies person/org/work-title entities. The CLI applies replacements deterministically and residual-scans structural PII.
+High-confidence names and organizations are caught by `--auto-confident`. Add `entities.json` only for what that pass misses.
+
+Skill text: [skills/legal-document-redactor/SKILL.md](skills/legal-document-redactor/SKILL.md). Share `https://github.com/qwertyzhu/legal-redactor/blob/main/skills/legal-document-redactor/SKILL.md`.
 
 ### Hide Party A, Party B, or both
 
@@ -108,10 +112,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
 ```
 
-CLI-only from the **latest** GitHub Release wheel (v0.10.7 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
+CLI-only from the **latest** GitHub Release wheel (v0.14.0 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.10.7/legal_redactor-0.10.7-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.14.0/legal_redactor-0.14.0-py3-none-any.whl
 ```
 
 **Upgrade rule**: update the skill bundle and the Python package together. CHANGELOG entries marked "skill only" need no wheel upgrade; entries marked "fix (package)" (e.g. v0.10.7 fixing label-adjacent email misses) **require** the new wheel. After installing, run the self-check:
@@ -216,7 +220,7 @@ Details: [skills/legal-document-redactor/references/methodology.md](skills/legal
 - Whole-party redaction depends on confirmed `party-spec` identifiers and reviewed regions; an omitted name, signature, or seal region can remain visible
 - A seal cannot rely on OCR text boxes alone: cover its complete outer ring, entity name, number, and center mark, then review every page
 - An unselected party is preserved by default; only `--also-redact-structural-all` additionally covers structural identifiers for every party
-- Natural-language names need confirmed `entities.json`; suspects are hints only
+- High-confidence names are applied by `--auto-confident`; unconfirmed suspects stay in the sidecar until written into `entities.json`
 - Multi-doc AI upload: prefer `redact DIR --unify` so aliases stay stable
 - DOCX: entities split across runs are replaced in place, keeping every other run's formatting; only an entity crossing a tab/line break/tracked-change boundary collapses the paragraph
 - Natural-language names are rule-based (role words, relation words, company suffixes); unanchored names and app/product names can still slip through. In `ai` mode, `verify` lists name/org/address candidates left in the output as WARN — use `--strict` before delivery

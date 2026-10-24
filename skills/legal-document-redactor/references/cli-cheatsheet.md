@@ -7,7 +7,8 @@ legal-redactor redact contract.docx --mode production --keep-categories uscc -o 
 legal-redactor redact contract.docx --mode ai --allowlist allow.txt -o out.docx
 legal-redactor verify out.docx --mode ai --strict   # 交付前用这条：0=PASS, 1=WARN, 2=FAIL
 legal-redactor verify out.docx --mode ai            # 不加 --strict 时 WARN 也是 0
-legal-redactor redact contract.docx --profile publish -o out.docx
+legal-redactor redact contract.docx --profile publish -o out.docx          # 对外改写，不是上网
+legal-redactor redact judgment.docx --profile judgment-online -o out.docx  # 上网；第八条人员 role=article8
 legal-redactor redact contract.docx --profile minimal -o out.docx
 legal-redactor profiles
 legal-redactor redact contract.docx --mode ai --ledger-encrypt -o out.docx   # 需 LEGAL_REDACTOR_LEDGER_PASS

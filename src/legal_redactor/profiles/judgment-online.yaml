@@ -1,0 +1,17 @@
+name: judgment-online
+description: 裁判文书上网（法释〔2016〕19号）— 保留当事人、出生日期、案号、信用代码和律师信息；地址收到县区；第八条人员写 role=article8
+mode: production
+categories: null
+keep_categories:
+  - uscc
+extra_categories: []
+alias_style: generic
+address_granularity: district
+# 带标签的地址收到县/区。当事人姓名不自动隐名。
+truncate_addresses: true
+# 证人不是第八条的隐名对象；要隐名的人由 entities role=article8 指定。
+redact_third_party: false
+redact_court_staff: false
+amount_fuzzy: false
+preserve: []
+auto_confident: true

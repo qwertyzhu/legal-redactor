@@ -235,6 +235,8 @@ def build_plan(
     address_granularity: str = "full",
     amount_fuzzy: bool = True,
     redact_court_staff: bool = False,
+    truncate_addresses: bool = False,
+    redact_third_party: bool = True,
 ) -> RedactionPlan:
     """Merge structural detections with optional agent/manual entity list."""
     mode = mode.lower().strip()
@@ -264,7 +266,12 @@ def build_plan(
         role = str(raw.get("role") or "unknown").strip().lower()
         replacement = str(raw.get("replacement") or "").strip()
 
-        if mode == "production" and role == "party" and category in {
+        if role == "article8" and category == "person" and not replacement:
+            # 法释〔2016〕19号第八条人员。不判断案由，由 entities 指定。
+            replacement = _court_person_alias(original)
+        elif role == "article8" and not replacement:
+            continue
+        elif mode == "production" and role == "party" and category in {
             "person",
             "organization",
             "address",
@@ -275,7 +282,7 @@ def build_plan(
 
         if not replacement:
             if category == "person":
-                if alias_style == "court":
+                if alias_style == "court" or role == "article8":
                     replacement = _court_person_alias(original)
                 else:
                     replacement = _stable_alias("person", person_i)
@@ -357,10 +364,15 @@ def build_plan(
             if suspect.reason == "org_suffix_unanchored":
                 # No left boundary found: likely clause text, not a name. Review only.
                 continue
-            if mode == "production" and not (
-                suspect.category == "person" and suspect.role_hint == "third_party"
-            ):
-                continue
+            if mode == "production":
+                third = (
+                    suspect.category == "person"
+                    and suspect.role_hint == "third_party"
+                    and redact_third_party
+                )
+                address = suspect.category == "address" and truncate_addresses
+                if not third and not address:
+                    continue
             if suspect.category == "person":
                 if not _has_surname(suspect.text):
                     continue
@@ -372,7 +384,7 @@ def build_plan(
             elif suspect.category == "organization":
                 replacement = _stable_alias("organization", org_i)
                 org_i += 1
-            elif suspect.category == "address" and mode == "ai":
+            elif suspect.category == "address" and (mode == "ai" or truncate_addresses):
                 if address_granularity == "district":
                     replacement = _district_address(suspect.text)
                 else:
@@ -399,7 +411,9 @@ def build_plan(
             if amount_fuzzy:
                 _append_amounts(text, plan, preserve_set)
 
-    if alias_style == "court":
+    if alias_style == "court" or any(
+        e.role == "article8" and e.category == "person" for e in plan.entities
+    ):
         _number_court_aliases(text, plan)
     return plan
 
