@@ -24,6 +24,20 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 出证把 `ai` 换成 `production`。只有这条没接住的名字，再补 `entities.json`。
 
+## 网页版模式 (Web UI)
+
+如果习惯在浏览器中可视化拖拽文件操作，或处理 PDF / Word：
+
+```bash
+legal-redactor web
+```
+
+- 自动打开 `http://127.0.0.1:8765`，100% 本地运算 (127.0.0.1)，零数据外发
+- 主打 **PDF（自动识别矢量文字层 / 扫描件图片，支持视觉涂黑）** 与 **Word (.docx)**
+- 支持拖拽上传、即时预检、模式选择、下载脱敏文档、审计报告与账本
+- 内置**纯文本即时洗稿**与**AI 回答当事人反向还原**
+- 免安装 Python 场景可直接双击项目内 `docs/index.html` 打开纯前端离线版
+
 扫描件 PDF 没有文字层时，不要对 PDF 跑上面这条，也不要把原 PDF 交给模型。`redact` 会直接拒绝。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
 
 ```bash

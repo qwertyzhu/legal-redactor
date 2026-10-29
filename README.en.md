@@ -72,6 +72,20 @@ python scripts/run_demo.py --clean
 
 `run_demo.py` redacts the in-repo fictional contract in **both** modes and writes same-format `md` / `docx` / `pdf` under `demo-output/`. It must print that every residual scan passed. Re-run with `--clean` any time; the result is deterministic.
 
+### Web UI Mode (Local-First, PDF / Word / Text)
+
+If you prefer a visual, drag-and-drop web interface in your browser:
+
+```console
+legal-redactor web
+```
+
+- Automatically opens `http://127.0.0.1:8765`, 100% local operation with zero network requests.
+- Focused on **PDF (auto-detects text layer vs scanned images; supports visual cover-up)** and **Word (.docx)**.
+- One-click downloads for redacted documents, audit reports (`.audit.md`), and ledger mappings (`.ledger.json`).
+- Built-in quick text redaction and reverse restoration for AI replies.
+- Zero-install standalone offline mode available by opening `docs/index.html` directly in any web browser.
+
 ## Fictional before / after
 
 The sample party is **郝测一** and the sample mobile is **13900001111** (fully fictional).

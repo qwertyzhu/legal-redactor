@@ -74,6 +74,20 @@ python scripts/run_demo.py --clean
 
 `run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
 
+### 网页版模式（Local-First Web UI，支持 PDF / Word / 文本）
+
+如果习惯在浏览器中可视化拖拽文件操作，只需在终端敲一条命令：
+
+```console
+legal-redactor web
+```
+
+- 自动打开 `http://127.0.0.1:8765`，**100% 本地运算，绝无网络外发**
+- **主打 PDF**（自动识别矢量文字层；扫描件图片自动切换至基于 OCR 坐标的视觉涂黑模式）与 **Word (.docx)** 原位高保真脱敏
+- 一键下载脱敏文档、本地审计报告 (`.audit.md`) 与还原账本 (`.ledger.json`)
+- 内置**纯文本即时洗稿**与**大模型答复当事人反向还原**
+- 免安装 Python 的场景，可直接双击项目内的 `docs/index.html`（或访问 GitHub Pages）在纯浏览器端离线脱敏纯文本
+
 不想先手写 `entities.json` 时，用一条命令扫完高置信姓名和单位（模型不必通读全文）：
 
 ```console
