@@ -388,6 +388,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pdoc = sub.add_parser("doctor", help="检查可选组件：Tesseract / OpenCV / NER")
     pdoc.add_argument("--json", action="store_true")
 
+    pweb = sub.add_parser("web", help="启动本地网页版模式 (Local-First Web UI)")
+    pweb.add_argument("--port", type=int, default=8765, help="本地服务端口 (默认 8765)")
+    pweb.add_argument("--host", default="127.0.0.1", help="绑定地址 (默认 127.0.0.1)")
+    pweb.add_argument("--no-browser", action="store_true", help="启动时不自动打开浏览器")
+
     return p
 
 
@@ -647,6 +652,11 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "doctor":
             return _cmd_doctor(args)
+
+        if args.command == "web":
+            from .web import run_server
+
+            return run_server(host=args.host, port=args.port, open_browser=not args.no_browser)
 
         if args.command == "scan":
             args.mode, _scan_profile = _resolve_mode_profile(args)

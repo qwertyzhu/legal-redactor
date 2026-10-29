@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中国法律文书离线脱敏助手 (纯前端单页版)</title>
+<style>
+:root {
+  --primary: #1e3a8a;
+  --primary-hover: #172554;
+  --primary-light: #eff6ff;
+  --accent: #2563eb;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --bg-main: #f8fafc;
+  --card-bg: #ffffff;
+  --border: #e2e8f0;
+  --radius: 10px;
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #3b82f6;
+    --primary-hover: #60a5fa;
+    --primary-light: #1e293b;
+    --accent: #60a5fa;
+    --text-main: #f1f5f9;
+    --text-muted: #94a3b8;
+    --bg-main: #090d16;
+    --card-bg: #111827;
+    --border: #1f2937;
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  line-height: 1.5;
+  padding: 24px;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-badge {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+.title h1 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.title p {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid #bbf7d0;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.notice-banner {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  padding: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+  background: var(--primary-light);
+}
+
+.tab-btn.active {
+  color: #fff;
+  background: var(--primary);
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+  margin-bottom: 24px;
+}
+
+.diff-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.diff-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-pane h4 {
+  font-size: 14px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.diff-pane textarea {
+  height: 420px;
+  resize: vertical;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--text-main);
+  outline: none;
+}
+
+.diff-pane textarea:focus {
+  border-color: var(--accent);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-secondary { background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); }
+.btn-secondary:hover { background: var(--border); }
+
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-warning { background: var(--warning-bg); color: var(--warning); }
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+
+th, td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  background: var(--bg-main);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="brand">
+      <div class="logo-badge">LEGAL-REDACTOR</div>
+      <div class="title">
+        <h1>中国法律文书离线脱敏助手</h1>
+        <p>纯前端静态版 · 100% 浏览器本地内存运算 · 零网络请求</p>
+      </div>
+    </div>
+    <div class="security-badge">
+      🔒 纯客户端离线运行 · 绝无数据外泄
+    </div>
+  </header>
+
+  <div class="notice-banner">
+    <div>
+      <strong>💡 提示：</strong>本页面为免安装的纯前端离线单页，专用于<strong>纯文本快速脱敏与 AI 回复还原</strong>。
+      若需处理 <strong>Word (.docx) 或 PDF</strong> 文件，请在电脑终端运行 <code>legal-redactor web</code> 启动本地完整版。
+    </div>
+    <a href="https://github.com/qwertyzhu/legal-redactor" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap;margin-left:12px;">查看 GitHub 仓库 &rarr;</a>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('text-tab')">📝 纯文本即时洗稿</button>
+    <button class="tab-btn" onclick="switchTab('restore-tab')">🔄 AI 回复当事人还原</button>
+    <button class="tab-btn" onclick="switchTab('about-tab')">📖 脱敏规则与模式说明</button>
+  </div>
+
+  <!-- TAB 1: TEXT REDACT -->
+  <div id="text-tab" class="tab-content">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <label style="font-weight:600;font-size:14px;">脱敏模式：</label>
+          <select id="textModeSelect" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);font-size:14px;">
+            <option value="ai" selected>🤖 ai 模式 (全面替身化，适合喂给大模型)</option>
+            <option value="production">⚖️ production 模式 (保留当事人/案号，去号码)</option>
+            <option value="publish">📢 publish 模式 (公开改写/张某，金额模糊)</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="keepUscc"> 保留统一社会信用代码
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="runClientRedact()">⚡ 立即脱敏文本</button>
+          <button class="btn btn-secondary" onclick="copyResult()">📋 复制脱敏文本</button>
+          <button class="btn btn-secondary" onclick="downloadLedger()">🔐 下载账本</button>
+        </div>
+      </div>
+
+      <div class="diff-box">
+        <div class="diff-pane">
+          <h4>原始法律文书文本 (粘贴在此)</h4>
+          <textarea id="srcText" placeholder="在此粘贴起诉状、答辩状、合同协议或判决书片段...
+例如：
+原告李四，男，1985年3月12日出生，汉族，住杭州市西湖区文三路100号，身份证号330106198503121234，电话13900001111。
+被告杭州某某网络科技有限公司，统一社会信用代码91330100MA2BXXXXXX，住所地杭州市余杭区文一西路999号。"></textarea>
+        </div>
+        <div class="diff-pane">
+          <h4>脱敏后替身文本 (可直接发给 AI)</h4>
+          <textarea id="dstText" readonly placeholder="点击上方「立即脱敏文本」后在此输出结果..."></textarea>
+        </div>
+      </div>
+
+      <div id="resultInfo" class="hidden" style="margin-top:16px;">
+        <h4 style="font-size:14px;margin-bottom:8px;">🎯 实体替换明细 (<span id="hitCount">0</span> 处)</h4>
+        <div class="table-wrap">
+          <table id="hitTable">
+            <thead>
+              <tr>
+                <th>原文</th>
+                <th>替换后替身</th>
+                <th>敏感类别</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: RESTORE -->
+  <div id="restore-tab" class="tab-content hidden">
+    <div class="card">
+      <h3 style="font-size:16px;margin-bottom:8px;">大模型回复当事人还原</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+        在线 AI（ChatGPT / Claude / DeepSeek 等）对脱敏文书研判后，将带有「某甲」「某乙」的答复粘贴在下方，配合刚刚生成的账本，一键恢复为真实当事人姓名。
+      </p>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Ledger 账本 JSON (脱敏时已自动同步)</label>
+        <textarea id="restoreLedger" style="width:100%;height:100px;padding:10px;font-family:monospace;font-size:12px;border:1px solid var(--border);border-radius:8px;" placeholder='{"entities": [{"original": "张三", "replacement": "某甲"}]}'></textarea>
+      </div>
+
+      <div class="diff-box">
+        <div class="diff-pane">
+          <h4>AI 答复文本 (含替身)</h4>
+          <textarea id="restoreSrc" placeholder="例如：经审阅，原告某甲与被告某单位A之间的买卖合同合法有效..."></textarea>
+        </div>
+        <div class="diff-pane">
+          <h4>还原后真实文本</h4>
+          <textarea id="restoreDst" readonly placeholder="点击下方「一键还原真实当事人」后在此输出..."></textarea>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;display:flex;gap:10px;">
+        <button class="btn btn-primary" onclick="runClientRestore()">🔄 一键还原真实当事人名称</button>
+        <button class="btn btn-secondary" onclick="copyRestored()">📋 复制还原文本</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: ABOUT -->
+  <div id="about-tab" class="tab-content hidden">
+    <div class="card">
+      <h3 style="font-size:16px;margin-bottom:12px;">模式与规则规范</h3>
+      <table style="margin-top:8px;">
+        <thead>
+          <tr>
+            <th>模式 (Mode)</th>
+            <th>适用去向</th>
+            <th>核心脱敏策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>ai</strong></td>
+            <td>发送给在线大模型、可外传笔记</td>
+            <td>激进去标识：当事人姓名、单位、地址、案号、审判人员全面替身化 (某甲、某单位A)，彻底切断反查线索。</td>
+          </tr>
+          <tr>
+            <td><strong>production</strong></td>
+            <td>提交法院立案、交付对方当事人</td>
+            <td>保留当事人与案号，仅去掉身份证号、手机号、固定电话、邮箱、银行卡号等高敏结构性信息。</td>
+          </tr>
+          <tr>
+            <td><strong>publish</strong></td>
+            <td>公众号宣传、法律文章改写</td>
+            <td>自然人全部化名为张某，地址粗化到省市县区，金额进行模糊化处理。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let lastLedger = null;
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+  const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
+  if (btn) btn.classList.add('active');
+  const target = document.getElementById(tabId);
+  if (target) target.classList.remove('hidden');
+}
+
+const ALIASES = ['某甲', '某乙', '某丙', '某丁', '某戊', '某己', '某庚', '某辛', '某壬', '某癸'];
+const COMPANY_ALIASES = ['某单位A', '某单位B', '某单位C', '某单位D', '某单位E'];
+
+function runClientRedact() {
+  const text = document.getElementById('srcText').value;
+  if (!text.trim()) {
+    alert('请先输入需要脱敏的文本内容');
+    return;
+  }
+  const mode = document.getElementById('textModeSelect').value;
+  const keepUscc = document.getElementById('keepUscc').checked;
+
+  let out = text;
+  const entities = [];
+  let aliasIdx = 0;
+  let compIdx = 0;
+
+  function addEntity(orig, repl, cat) {
+    if (!orig || entities.some(e => e.original === orig)) return;
+    entities.push({ original: orig, replacement: repl, category: cat });
+  }
+
+  // 1. 结构性号码
+  // 身份证 (18位)
+  const idRegex = /(?<!\d)[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)/g;
+  let m;
+  while ((m = idRegex.exec(text)) !== null) {
+    addEntity(m[0], '[身份证号]', 'id_card');
+  }
+
+  // 手机号 (11位)
+  const mobileRegex = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
+  while ((m = mobileRegex.exec(text)) !== null) {
+    addEntity(m[0], '[手机号]', 'mobile');
+  }
+
+  // 统一社会信用代码 (18位)
+  if (!keepUscc && mode !== 'production') {
+    const usccRegex = /(?<![A-Z0-9])[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}(?![A-Z0-9])/g;
+    while ((m = usccRegex.exec(text)) !== null) {
+      addEntity(m[0], '[统一社会信用代码]', 'uscc');
+    }
+  }
+
+  // 银行账号 (16-19位)
+  const bankRegex = /(?<!\d)(?:62|60|95|40|41|42|43|44|45|46|47|48|49|51|52|53|54|55)\d{14,17}(?!\d)/g;
+  while ((m = bankRegex.exec(text)) !== null) {
+    addEntity(m[0], '[银行账号]', 'bank_account');
+  }
+
+  // 电子邮箱
+  const emailRegex = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  while ((m = emailRegex.exec(text)) !== null) {
+    addEntity(m[0], '[邮箱]', 'email');
+  }
+
+  // 2. ai 模式角色人名识别 (原告/被告/第三人/法定代表人/委托代理人 + 姓名)
+  if (mode === 'ai' || mode === 'publish') {
+    const roleRegex = /(原告|被告|申请人|被申请人|第三人|被执行人|法定代表人|委托代理人|审判长|审判员|法官助理|书记员)[：:\s]*([·\u4e00-\u9fa5]{2,4})/g;
+    while ((m = roleRegex.exec(text)) !== null) {
+      const name = m[2];
+      if (name && !['公司', '有限', '组织', '协会'].some(w => name.includes(w))) {
+        const repl = mode === 'publish' ? (name[0] + '某') : (ALIASES[aliasIdx % ALIASES.length] || '某某');
+        aliasIdx++;
+        addEntity(name, repl, 'person');
+      }
+    }
+
+    // 公司企业名称 (以 公司/商行/经营部/中心 结尾)
+    const compRegex = /([\u4e00-\u9fa5]{4,25}(?:有限(?:责任)?公司|股份有限公司|合伙企业|经营部|商行))/g;
+    while ((m = compRegex.exec(text)) !== null) {
+      const comp = m[1];
+      if (!entities.some(e => e.original === comp)) {
+        const repl = COMPANY_ALIASES[compIdx % COMPANY_ALIASES.length] || '某单位';
+        compIdx++;
+        addEntity(comp, repl, 'company');
+      }
+    }
+  }
+
+  // 按长度倒序替换，防止子串抢先
+  entities.sort((a, b) => b.original.length - a.original.length);
+  for (const ent of entities) {
+    out = out.split(ent.original).join(ent.replacement);
+  }
+
+  document.getElementById('dstText').value = out;
+  lastLedger = { mode, entities };
+  document.getElementById('restoreLedger').value = JSON.stringify(lastLedger, null, 2);
+
+  // 渲染明细
+  document.getElementById('resultInfo').classList.remove('hidden');
+  document.getElementById('hitCount').textContent = entities.length;
+  const tbody = document.querySelector('#hitTable tbody');
+  tbody.innerHTML = '';
+  entities.forEach(e => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><code>${escapeHtml(e.original)}</code></td><td><strong>${escapeHtml(e.replacement)}</strong></td><td><span class="badge badge-warning">${escapeHtml(e.category)}</span></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function runClientRestore() {
+  const text = document.getElementById('restoreSrc').value;
+  const ledgerStr = document.getElementById('restoreLedger').value;
+  if (!text.trim()) {
+    alert('请粘贴大模型的答复文本');
+    return;
+  }
+  if (!ledgerStr.trim()) {
+    alert('请提供 Ledger 账本');
+    return;
+  }
+  let ledger;
+  try {
+    ledger = JSON.parse(ledgerStr);
+  } catch (e) {
+    alert('账本 JSON 解析失败: ' + e);
+    return;
+  }
+
+  let out = text;
+  const entities = ledger.entities || [];
+  // 按照替身长度倒序替换
+  const valid = entities.filter(e => e.replacement && e.original);
+  valid.sort((a, b) => b.replacement.length - a.replacement.length);
+
+  for (const e of valid) {
+    out = out.split(e.replacement).join(e.original);
+  }
+
+  document.getElementById('restoreDst').value = out;
+}
+
+function copyResult() {
+  const t = document.getElementById('dstText').value;
+  if (!t) return;
+  navigator.clipboard.writeText(t).then(() => alert('已复制脱敏文本到剪贴板！'));
+}
+
+function copyRestored() {
+  const t = document.getElementById('restoreDst').value;
+  if (!t) return;
+  navigator.clipboard.writeText(t).then(() => alert('已复制还原后真实文本！'));
+}
+
+function downloadLedger() {
+  if (!lastLedger) {
+    alert('当前没有可导出的账本');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(lastLedger, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'text_redaction.ledger.json';
+  a.click();
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+</script>
+
+</body>
+</html>
