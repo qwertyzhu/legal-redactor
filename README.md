@@ -77,7 +77,10 @@ python scripts/run_demo.py --clean
 ### 网页版模式（Local-First Web UI & 纯单页 HTML 版）
 
 #### 方式一：极简免安装纯 HTML 版（推荐）
-免安装 Python 的极简场景，可直接双击根目录的 `legal-redactor.html`（或 `docs/index.html`，亦可通过 GitHub Pages 在线加载）：
+免安装 Python 的极简场景，有两种极致便捷的使用方式：
+1. **在线免安装直开**：直接访问 **[GitHub Pages 在线脱敏页面](https://qwertyzhu.github.io/legal-redactor/)**（纯前端本地内存运算，文档数据绝不离开浏览器）
+2. **离线单文件下载**：在 **[GitHub Releases 资产列表](https://github.com/qwertyzhu/legal-redactor/releases)** 直接下载 `legal-redactor.html` 存到电脑，双击即用，断网亦可运行
+
 - **零后端依赖**：单个独立 HTML 文件，双击直接在浏览器打开，100% 本地内存执行，绝不向外上传文档
 - **多格式本地处理**：直接在浏览器内部脱敏 **PDF**（基于 pdf.js 与 pdf-lib 文本图层覆墨覆盖）、**Word (.docx)**（基于 JSZip XML 解析重构）及纯文本
 - **AI 智能指令对话框**：页面内自带自然语言对话框，可直接提具体脱敏诉求（如「只脱敏手机号与身份证」、「隐藏当事人姓名」），支持对接本机 Ollama（默认 `http://localhost:11434`）或在线模型 API 自动提取实体

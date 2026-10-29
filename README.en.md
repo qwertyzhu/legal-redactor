@@ -75,9 +75,12 @@ python scripts/run_demo.py --clean
 ### Web UI & Standalone HTML Modes
 
 #### Option 1: Standalone Pure HTML (Recommended, Zero Backend)
-Simply open `legal-redactor.html` (or `docs/index.html` / GitHub Pages) in any browser:
-- **Zero-Backend**: 100% in-browser memory execution; document contents never leave your machine.
-- **Client-side PDF & Word Redaction**: Redacts PDF (via pdf-lib / pdf.js text masking) and DOCX (via JSZip XML reconstruction) without Python or any server.
+Zero-install, client-side redaction available via two ways:
+1. **Online Web App**: Visit **[GitHub Pages Live App](https://qwertyzhu.github.io/legal-redactor/)** (100% in-browser memory execution; document contents never leave your machine).
+2. **Offline Download**: Download `legal-redactor.html` directly from **[GitHub Releases Assets](https://github.com/qwertyzhu/legal-redactor/releases)** and double-click to open offline.
+
+- **Zero-Backend**: No server, no Python, 100% in-browser memory execution.
+- **Client-side PDF & Word Redaction**: Redacts PDF (via pdf-lib / pdf.js text masking) and DOCX (via JSZip XML reconstruction) without any backend.
 - **Interactive AI Prompt Box**: Input specific redaction requirements directly in natural language (e.g. "Only redact phone numbers and amounts", "Mask all party names"), supporting local Ollama (`http://localhost:11434`) or custom OpenAI API.
 - **Designed by**: lawyer朱思浩
 
