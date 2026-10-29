@@ -74,19 +74,25 @@ python scripts/run_demo.py --clean
 
 `run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
 
-### 网页版模式（Local-First Web UI，支持 PDF / Word / 文本）
+### 网页版模式（Local-First Web UI & 纯单页 HTML 版）
 
-如果习惯在浏览器中可视化拖拽文件操作，只需在终端敲一条命令：
+#### 方式一：极简免安装纯 HTML 版（推荐）
+免安装 Python 的极简场景，可直接双击根目录的 `legal-redactor.html`（或 `docs/index.html`，亦可通过 GitHub Pages 在线加载）：
+- **零后端依赖**：单个独立 HTML 文件，双击直接在浏览器打开，100% 本地内存执行，绝不向外上传文档
+- **多格式本地处理**：直接在浏览器内部脱敏 **PDF**（基于 pdf.js 与 pdf-lib 文本图层覆墨覆盖）、**Word (.docx)**（基于 JSZip XML 解析重构）及纯文本
+- **AI 智能指令对话框**：页面内自带自然语言对话框，可直接提具体脱敏诉求（如「只脱敏手机号与身份证」、「隐藏当事人姓名」），支持对接本机 Ollama（默认 `http://localhost:11434`）或在线模型 API 自动提取实体
+- **一键下载脱敏文件与审计清单**
+- **架构与设计**：Designed by lawyer朱思浩
 
+#### 方式二：Python 本地 Web 服务（含高精度 OCR 与视觉印章涂黑）
+如果本地已配置 Python 环境并需要深度处理包含扫描件的复杂案卷：
 ```console
 legal-redactor web
 ```
+- 自动启动本地轻量服务 `http://127.0.0.1:8765`
+- 自动识别 PDF 矢量文字层与纯图片扫描件，支持基于 Tesseract OCR 坐标精准视觉涂黑与印章红墨遮挡
+- 支持一键导出还原账本 (`.ledger.json`) 与 AI 答复当事人反向还原
 
-- 自动打开 `http://127.0.0.1:8765`，**100% 本地运算，绝无网络外发**
-- **主打 PDF**（自动识别矢量文字层；扫描件图片自动切换至基于 OCR 坐标的视觉涂黑模式）与 **Word (.docx)** 原位高保真脱敏
-- 一键下载脱敏文档、本地审计报告 (`.audit.md`) 与还原账本 (`.ledger.json`)
-- 内置**纯文本即时洗稿**与**大模型答复当事人反向还原**
-- 免安装 Python 的场景，可直接双击项目内的 `docs/index.html`（或访问 GitHub Pages）在纯浏览器端离线脱敏纯文本
 
 不想先手写 `entities.json` 时，用一条命令扫完高置信姓名和单位（模型不必通读全文）：
 
