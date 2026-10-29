@@ -65,6 +65,8 @@ header {
   margin-bottom: 20px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .brand {
@@ -92,6 +94,12 @@ header {
   color: var(--text-muted);
 }
 
+.header-badges {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .security-badge {
   display: inline-flex;
   align-items: center;
@@ -105,17 +113,23 @@ header {
   font-weight: 600;
 }
 
-.notice-banner {
-  background: var(--primary-light);
-  border: 1px solid #bfdbfe;
-  color: #1e40af;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  font-size: 13.5px;
-  margin-bottom: 20px;
-  display: flex;
-  justify-content: space-between;
+.model-config-badge {
+  display: inline-flex;
   align-items: center;
+  gap: 6px;
+  background: var(--bg-main);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.model-config-badge:hover {
+  background: var(--primary-light);
+  border-color: var(--accent);
 }
 
 .tabs {
@@ -288,9 +302,9 @@ header {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 11px 22px;
+  padding: 10px 20px;
   border-radius: 8px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   border: none;
@@ -302,7 +316,7 @@ header {
 .btn-primary:hover { background: var(--primary-hover); }
 .btn-secondary { background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); }
 .btn-secondary:hover { background: var(--border); }
-.btn-block { width: 100%; margin-top: 20px; }
+.btn-block { width: 100%; margin-top: 20px; padding: 13px; font-size: 16px; }
 
 .alert {
   padding: 14px 16px;
@@ -367,6 +381,130 @@ th {
   line-height: 1.6;
 }
 
+/* AI 指令对话框组件样式 */
+.ai-dialog-card {
+  margin-top: 20px;
+  background: linear-gradient(180deg, var(--primary-light) 0%, var(--card-bg) 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.ai-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.ai-dialog-header h3 {
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--primary);
+}
+
+.chat-history {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-msg {
+  display: flex;
+  gap: 8px;
+  max-width: 90%;
+}
+.chat-msg.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+.chat-msg.assistant {
+  align-self: flex-start;
+}
+.chat-bubble {
+  padding: 8px 12px;
+  border-radius: 8px;
+  line-height: 1.45;
+}
+.chat-msg.user .chat-bubble {
+  background: var(--primary);
+  color: #fff;
+}
+.chat-msg.assistant .chat-bubble {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-input-row input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+}
+.chat-input-row input:focus {
+  border-color: var(--accent);
+}
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chip {
+  background: var(--card-bg);
+  border: 1px solid #bfdbfe;
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chip:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+/* 模态弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 520px;
+  width: 90%;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.2);
+}
+
 .spinner {
   display: inline-block;
   width: 16px;
@@ -395,16 +533,15 @@ th {
         <p>纯 HTML 单页版 · 浏览器内存直跑 · 零后端 · 零网络上传</p>
       </div>
     </div>
-    <div class="security-badge">
-      🔒 100% 浏览器客户端运行 · 案卷数据绝不离机
+    <div class="header-badges">
+      <div id="modelConfigBtn" class="model-config-badge" onclick="openModelModal()">
+        ⚙️ 模型: <span id="modelBadgeLabel">本地 Ollama (qwen2.5)</span>
+      </div>
+      <div class="security-badge">
+        🔒 100% 客户端本地运行
+      </div>
     </div>
   </header>
-
-  <div class="notice-banner">
-    <div>
-      <strong>✨ 纯本地单页运行：</strong>直接双击打开本 HTML 文件即可使用。无论 <strong>PDF</strong> 还是 <strong>Word (.docx)</strong>，全部在你的浏览器内存中解析与脱敏，<strong>完全不需要打开终端或配置任何后台环境</strong>。
-    </div>
-  </div>
 
   <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('file-tab')">📄 文档脱敏 (PDF & Word)</button>
@@ -440,6 +577,35 @@ th {
         </div>
       </div>
 
+      <!-- AI 自然语言指令对话框 -->
+      <div class="ai-dialog-card">
+        <div class="ai-dialog-header">
+          <h3>💬 AI 指令对话助手 (用自然语言提具体要求)</h3>
+          <span style="font-size:12px;color:var(--text-muted);" id="chatModelStatusText">由本地 Ollama 驱动</span>
+        </div>
+        <div id="chatHistory" class="chat-history">
+          <div class="chat-msg assistant">
+            <div class="chat-bubble">
+              👋 你好！你可以随时用自然语言告诉我你的具体脱敏要求，例如：<br>
+              • <em>“把案外人李某某也脱敏掉，化名为某证人”</em><br>
+              • <em>“保留合同里的借款金额 50 万元及年利率 12%，不要脱敏”</em><br>
+              • <em>“涉案作品《流浪地球》替身为《涉案作品》”</em><br>
+              我会自动分析并更新下方的替换表和保留名单。
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="chatInput" placeholder="在此输入你的个性化脱敏指令... (按 Enter 发送)" onkeydown="if(event.key==='Enter') sendChatInstruction()">
+          <button id="chatSendBtn" class="btn btn-primary" onclick="sendChatInstruction()">发送指令</button>
+        </div>
+        <div class="chips-row">
+          <span class="chip" onclick="applyQuickPrompt('保留文书中的所有借款金额与利息比例，不要脱敏')">💰 保留借款金额与利息</span>
+          <span class="chip" onclick="applyQuickPrompt('将审判长、审判员、法官助理、书记员姓名全部脱敏')">⚖️ 隐去审判人员姓名</span>
+          <span class="chip" onclick="applyQuickPrompt('将涉案作品名称全部化名为《涉案作品》')">🎬 涉案作品名替身化</span>
+          <span class="chip" onclick="applyQuickPrompt('通读文书正文，找出所有隐藏在事实陈述中的自然人姓名与特定单位，加入脱敏')">🔍 深度扫描隐藏人名与商号</span>
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="form-group">
           <label>脱敏去向与模式 (Mode)</label>
@@ -469,19 +635,19 @@ th {
       </div>
 
       <div class="collapsible-header" onclick="toggleAdvanced('fileAdvanced')">
-        <span>⚙️ 自定义实体补录与白名单 (点击展开)</span>
+        <span>⚙️ 自定义实体补录与白名单 (由 AI 指令自动维护，点击可手动查阅)</span>
         <span id="fileAdvancedArrow">▼</span>
       </div>
 
       <div id="fileAdvanced" class="hidden" style="margin-top:12px;">
         <div class="grid-2">
           <div class="form-group">
-            <label>自定义实体补录 (JSON 格式，可选)</label>
+            <label>自定义实体补录 (JSON 格式)</label>
             <textarea id="fileEntitiesJson" rows="4" placeholder='[{"original": "张三", "replacement": "某甲", "category": "person"}]'></textarea>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">未被自动识别的特定当事人、品牌、简称可在此补齐。</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">你在上方对话框发指令后，AI 会自动帮你把实体填入此处。</div>
           </div>
           <div class="form-group">
-            <label>原样保留白名单 (每行一个词，可选)</label>
+            <label>原样保留白名单 (每行一个词)</label>
             <textarea id="fileAllowlist" rows="4" placeholder="浙江省高级人民法院&#10;最高人民法院&#10;著作权法"></textarea>
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">白名单中的词项在任何模式下均原样保留不被脱敏。</div>
           </div>
@@ -652,6 +818,58 @@ th {
 
 </div>
 
+<!-- 模态弹窗：AI 模型配置 -->
+<div id="modelModal" class="modal-overlay hidden" onclick="if(event.target===this) closeModelModal()">
+  <div class="modal-content">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="font-size:16px;">⚙️ 智能实体抽取模型配置</h3>
+      <button class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" onclick="closeModelModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label>模型通道类型</label>
+      <select id="cfgProvider" onchange="handleProviderChange()">
+        <option value="ollama" selected>🟢 本地 Ollama (推荐 · 100% 本地运算，数据绝不出机)</option>
+        <option value="openai">🟡 在线 API (DeepSeek / 硅基流动 / 兼容 OpenAI)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>服务 API 地址 (Base URL)</label>
+      <input type="text" id="cfgEndpoint" class="form-control" value="http://localhost:11434">
+      <div id="endpointHelp" style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+        本地 Ollama 默认地址为 <code>http://localhost:11434</code>。
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>模型名称 (Model)</label>
+      <input type="text" id="cfgModel" class="form-control" value="qwen2.5:7b">
+      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+        Ollama 推荐如 <code>qwen2.5:7b</code> 或 <code>qwen2.5:14b</code>；DeepSeek 为 <code>deepseek-chat</code>。
+      </div>
+    </div>
+
+    <div class="form-group" id="cfgApiKeyGroup" style="display:none;">
+      <label>API Key (密钥)</label>
+      <input type="password" id="cfgApiKey" class="form-control" placeholder="sk-...">
+      <div style="font-size:12px;color:var(--warning);margin-top:4px;">
+        ⚠️ 警示：使用在线 API 会将提示词与文档片段发送至第三方云端，涉密案卷请务必选择本地 Ollama！
+      </div>
+    </div>
+
+    <div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;">
+      <button class="btn btn-secondary" onclick="testModelConnection()">🔌 测试连接</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="closeModelModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveModelConfig()">保存配置</button>
+      </div>
+    </div>
+
+    <div id="modelTestResult" style="margin-top:12px;font-size:13px;"></div>
+  </div>
+</div>
+
 <script>
 // PDF.js worker 配置
 if (window.pdfjsLib) {
@@ -667,6 +885,303 @@ let currentArrayBuffer = null;
 let currentPlan = null;
 let currentAuditMd = '';
 let currentLedgerJson = null;
+
+// 模型配置管理 (localStorage)
+const DEFAULT_MODEL_CONFIG = {
+  provider: 'ollama',
+  endpoint: 'http://localhost:11434',
+  model: 'qwen2.5:7b',
+  apiKey: ''
+};
+
+function getModelConfig() {
+  try {
+    const raw = localStorage.getItem('legal_redactor_model_cfg');
+    if (raw) return { ...DEFAULT_MODEL_CONFIG, ...JSON.parse(raw) };
+  } catch(e) {}
+  return DEFAULT_MODEL_CONFIG;
+}
+
+function updateModelBadgeUI() {
+  const cfg = getModelConfig();
+  const label = document.getElementById('modelBadgeLabel');
+  const chatLabel = document.getElementById('chatModelStatusText');
+  if (cfg.provider === 'ollama') {
+    label.textContent = `🟢 本地 Ollama (${cfg.model})`;
+    chatLabel.textContent = `由本地 Ollama (${cfg.model}) 驱动 · 100% 本地运算`;
+  } else {
+    label.textContent = `🟡 在线 API (${cfg.model})`;
+    chatLabel.textContent = `由在线模型 (${cfg.model}) 驱动`;
+  }
+}
+
+function openModelModal() {
+  const cfg = getModelConfig();
+  document.getElementById('cfgProvider').value = cfg.provider;
+  document.getElementById('cfgEndpoint').value = cfg.endpoint;
+  document.getElementById('cfgModel').value = cfg.model;
+  document.getElementById('cfgApiKey').value = cfg.apiKey || '';
+  handleProviderChange();
+  document.getElementById('modelTestResult').innerHTML = '';
+  document.getElementById('modelModal').classList.remove('hidden');
+}
+
+function closeModelModal() {
+  document.getElementById('modelModal').classList.add('hidden');
+}
+
+function handleProviderChange() {
+  const prov = document.getElementById('cfgProvider').value;
+  const keyGroup = document.getElementById('cfgApiKeyGroup');
+  const ep = document.getElementById('cfgEndpoint');
+  const epHelp = document.getElementById('endpointHelp');
+  const model = document.getElementById('cfgModel');
+
+  if (prov === 'ollama') {
+    keyGroup.style.display = 'none';
+    if (ep.value.includes('api.deepseek') || ep.value.includes('api.openai')) {
+      ep.value = 'http://localhost:11434';
+      model.value = 'qwen2.5:7b';
+    }
+    epHelp.innerHTML = '本地 Ollama 默认地址为 <code>http://localhost:11434</code>。';
+  } else {
+    keyGroup.style.display = 'block';
+    if (ep.value.includes('localhost') || ep.value.includes('127.0.0.1')) {
+      ep.value = 'https://api.deepseek.com/v1';
+      model.value = 'deepseek-chat';
+    }
+    epHelp.innerHTML = '兼容 OpenAI 的 API 地址，如 <code>https://api.deepseek.com/v1</code>。';
+  }
+}
+
+async function testModelConnection() {
+  const resEl = document.getElementById('modelTestResult');
+  resEl.innerHTML = '<span class="spinner" style="border-top-color:var(--accent);"></span> 正在测试连接...';
+
+  const prov = document.getElementById('cfgProvider').value;
+  const endpoint = document.getElementById('cfgEndpoint').value.trim();
+  const model = document.getElementById('cfgModel').value.trim();
+  const apiKey = document.getElementById('cfgApiKey').value.trim();
+
+  try {
+    if (prov === 'ollama') {
+      const res = await fetch(`${endpoint.replace(/\/+$/, '')}/api/tags`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const models = (data.models || []).map(m => m.name);
+      resEl.innerHTML = `<span style="color:var(--success);">✅ 连接成功！检测到本地已有模型: ${models.slice(0, 3).join(', ') || '已就绪'}</span>`;
+    } else {
+      const res = await fetch(`${endpoint.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 5
+        })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      resEl.innerHTML = `<span style="color:var(--success);">✅ 在线 API 连接成功，模型正常响应！</span>`;
+    }
+  } catch(err) {
+    resEl.innerHTML = `<span style="color:var(--danger);">❌ 连接失败: ${escapeHtml(err.message)}<br><small style="color:var(--text-muted);">注：若本地 Ollama 报错跨域，启动时需设 OLLAMA_ORIGINS="*"</small></span>`;
+  }
+}
+
+function saveModelConfig() {
+  const cfg = {
+    provider: document.getElementById('cfgProvider').value,
+    endpoint: document.getElementById('cfgEndpoint').value.trim(),
+    model: document.getElementById('cfgModel').value.trim(),
+    apiKey: document.getElementById('cfgApiKey').value.trim()
+  };
+  localStorage.setItem('legal_redactor_model_cfg', JSON.stringify(cfg));
+  updateModelBadgeUI();
+  closeModelModal();
+}
+
+// AI 对话交互逻辑
+async function sendChatInstruction() {
+  const inputEl = document.getElementById('chatInput');
+  const prompt = inputEl.value.trim();
+  if (!prompt) return;
+
+  inputEl.value = '';
+  appendChatBubble('user', prompt);
+
+  const sendBtn = document.getElementById('chatSendBtn');
+  sendBtn.disabled = true;
+  const loadingBubble = appendChatBubble('assistant', '<span class="spinner" style="border-top-color:var(--primary);"></span> 正在解析指令并匹配文书实体...');
+
+  // 提取当前文书文字片段作为上下文
+  let textSnippet = '';
+  if (currentFile && currentArrayBuffer) {
+    const ext = currentFile.name.split('.').pop().toLowerCase();
+    if (ext === 'docx') {
+      try {
+        const zip = await JSZip.loadAsync(currentArrayBuffer);
+        const xml = await zip.file("word/document.xml").async("string");
+        textSnippet = xml.replace(/<[^>]+>/g, ' ').slice(0, 1500);
+      } catch(e) {}
+    } else if (ext === 'pdf') {
+      try {
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(currentArrayBuffer.slice(0)) }).promise;
+        for (let i = 1; i <= Math.min(pdf.numPages, 2); i++) {
+          const page = await pdf.getPage(i);
+          const tc = await page.getTextContent();
+          textSnippet += tc.items.map(it => it.str).join(' ') + ' ';
+        }
+        textSnippet = textSnippet.slice(0, 1500);
+      } catch(e) {}
+    } else {
+      textSnippet = new TextDecoder('utf-8').decode(currentArrayBuffer).slice(0, 1500);
+    }
+  } else {
+    textSnippet = document.getElementById('textSourceInput').value.slice(0, 1500);
+  }
+
+  try {
+    const cfg = getModelConfig();
+    const systemPrompt = `你是一名资深中国法律文书脱敏助手。律师向你提出了具体的文书脱敏要求，请根据指令和文书片段抽取出需要调整的实体、替身以及保留白名单。
+请且仅以纯 JSON 对象返回，禁止任何 Markdown 格式或额外文字，格式规范如下：
+{
+  "reply": "向律师汇报你的处理结果（2句话，亲切干练）",
+  "add_entities": [
+    {"original": "需脱敏原文", "replacement": "替换后替身", "category": "person/company/work/other"}
+  ],
+  "preserve_terms": ["需原样保留不脱敏的词句或金额"],
+  "toggle_flags": {
+    "keep_uscc": true或false(若提到保留统一代码/税号时设为true),
+    "redact_staff": true或false(若提到隐去法官/法官助理/书记员时设为true)
+  }
+}`;
+
+    const userContent = `【律师指令】: ${prompt}\n\n【文书参考内容】:\n${textSnippet || '（用户尚未上传具体文书，请根据通用中国民事起诉状/合同上下文推断实体要求）'}`;
+
+    let jsonStr = '';
+    if (cfg.provider === 'ollama') {
+      const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          stream: false,
+          format: 'json'
+        })
+      });
+      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+      const data = await res.json();
+      jsonStr = data.message?.content || '{}';
+    } else {
+      const res = await fetch(`${cfg.endpoint.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cfg.apiKey}`
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+          ],
+          response_format: { type: 'json_object' }
+        })
+      });
+      if (!res.ok) throw new Error(`API HTTP ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      jsonStr = data.choices?.[0]?.message?.content || '{}';
+    }
+
+    // 清理可能的 markdown 代码块包装
+    jsonStr = jsonStr.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+    const result = JSON.parse(jsonStr);
+
+    // 自动应用实体与白名单
+    applyModelParsedResult(result);
+
+    // 渲染助手答复
+    let replyHtml = `<div>${escapeHtml(result.reply || '已成功解析并为你更新脱敏计划！')}</div>`;
+    if (result.add_entities && result.add_entities.length > 0) {
+      replyHtml += `<div style="margin-top:6px;font-size:12px;color:var(--text-muted);">已添加实体: ` +
+        result.add_entities.map(e => `<strong>${escapeHtml(e.original)} ➔ ${escapeHtml(e.replacement)}</strong>`).join('、') + `</div>`;
+    }
+    if (result.preserve_terms && result.preserve_terms.length > 0) {
+      replyHtml += `<div style="margin-top:4px;font-size:12px;color:var(--success);">已加入保留名单: ` +
+        result.preserve_terms.map(p => `<code>${escapeHtml(p)}</code>`).join('、') + `</div>`;
+    }
+    replyHtml += `<div style="margin-top:8px;font-size:12px;color:var(--primary);font-weight:600;">✨ 规则已生效，现在点击下方「立即开始脱敏处理」即可导出！</div>`;
+
+    loadingBubble.innerHTML = replyHtml;
+  } catch(err) {
+    console.error(err);
+    loadingBubble.innerHTML = `<span style="color:var(--danger);">⚠️ 指令调用遇到问题: ${escapeHtml(err.message)}</span><br><small style="color:var(--text-muted);">提示：若为本地 Ollama，请确认本机 <code>ollama serve</code> 已启动并支持跨域；或点击右上角「⚙️ 模型」切换为在线 API。</small>`;
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+function applyModelParsedResult(result) {
+  // 1. 添加实体
+  if (result.add_entities && result.add_entities.length > 0) {
+    const el = document.getElementById('fileEntitiesJson');
+    let existing = [];
+    try {
+      if (el.value.trim()) existing = JSON.parse(el.value.trim());
+    } catch(e) {}
+    for (const ent of result.add_entities) {
+      if (!existing.some(e => e.original === ent.original)) {
+        existing.push(ent);
+      }
+    }
+    el.value = JSON.stringify(existing, null, 2);
+  }
+
+  // 2. 添加保留项
+  if (result.preserve_terms && result.preserve_terms.length > 0) {
+    const el = document.getElementById('fileAllowlist');
+    const lines = el.value.split('\n').map(s => s.trim()).filter(Boolean);
+    for (const p of result.preserve_terms) {
+      if (!lines.includes(p)) lines.push(p);
+    }
+    el.value = lines.join('\n');
+  }
+
+  // 3. 切换开关
+  if (result.toggle_flags) {
+    if (typeof result.toggle_flags.keep_uscc === 'boolean') {
+      document.getElementById('fileKeepUscc').checked = result.toggle_flags.keep_uscc;
+    }
+    if (typeof result.toggle_flags.redact_staff === 'boolean') {
+      document.getElementById('fileRedactCourtStaff').checked = result.toggle_flags.redact_staff;
+    }
+  }
+}
+
+function appendChatBubble(role, content) {
+  const container = document.getElementById('chatHistory');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `chat-msg ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  bubble.innerHTML = content;
+  msgDiv.appendChild(bubble);
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+function applyQuickPrompt(text) {
+  document.getElementById('chatInput').value = text;
+  sendChatInstruction();
+}
 
 function switchTab(tabId) {
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -764,6 +1279,8 @@ async function handleFileSelect(file) {
 
   document.getElementById('fileStartBtn').disabled = false;
   document.getElementById('fileStartBtn').innerHTML = '<span>立即开始脱敏处理</span>';
+
+  appendChatBubble('assistant', `📄 已接收文档：<strong>${escapeHtml(file.name)}</strong> (${formatSize(file.size)})。你可以直接在下方提出任何个性化要求，或者直接点击「开始脱敏」。`);
 }
 
 function resetFile() {
@@ -1239,6 +1756,11 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+// 初始化加载模型配置状态
+window.addEventListener('DOMContentLoaded', () => {
+  updateModelBadgeUI();
+});
 </script>
 
 </body>
