@@ -72,19 +72,22 @@ python scripts/run_demo.py --clean
 
 `run_demo.py` redacts the in-repo fictional contract in **both** modes and writes same-format `md` / `docx` / `pdf` under `demo-output/`. It must print that every residual scan passed. Re-run with `--clean` any time; the result is deterministic.
 
-### Web UI Mode (Local-First, PDF / Word / Text)
+### Web UI & Standalone HTML Modes
 
-If you prefer a visual, drag-and-drop web interface in your browser:
+#### Option 1: Standalone Pure HTML (Recommended, Zero Backend)
+Simply open `legal-redactor.html` (or `docs/index.html` / GitHub Pages) in any browser:
+- **Zero-Backend**: 100% in-browser memory execution; document contents never leave your machine.
+- **Client-side PDF & Word Redaction**: Redacts PDF (via pdf-lib / pdf.js text masking) and DOCX (via JSZip XML reconstruction) without Python or any server.
+- **Interactive AI Prompt Box**: Input specific redaction requirements directly in natural language (e.g. "Only redact phone numbers and amounts", "Mask all party names"), supporting local Ollama (`http://localhost:11434`) or custom OpenAI API.
+- **Designed by**: lawyer朱思浩
 
+#### Option 2: Local Python Web Server (`legal-redactor web`)
 ```console
 legal-redactor web
 ```
-
-- Automatically opens `http://127.0.0.1:8765`, 100% local operation with zero network requests.
-- Focused on **PDF (auto-detects text layer vs scanned images; supports visual cover-up)** and **Word (.docx)**.
+- Opens `http://127.0.0.1:8765`, 100% local operation with zero network requests.
+- Full server capabilities including Tesseract OCR for scanned PDF pages and OpenCV seal detection.
 - One-click downloads for redacted documents, audit reports (`.audit.md`), and ledger mappings (`.ledger.json`).
-- Built-in quick text redaction and reverse restoration for AI replies.
-- Zero-install standalone offline mode available by opening `docs/index.html` directly in any web browser.
 
 ## Fictional before / after
 

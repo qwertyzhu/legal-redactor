@@ -3,17 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>中国法律文书本地脱敏助手 (纯前端单页版)</title>
+<title>中国法律文书本地脱敏助手 · By lawyer朱思浩</title>
 <!-- 纯客户端执行核心库：通过 CDN 自动加载并由浏览器永久缓存，100% 运行于本地内存，文档数据绝不离开本机 -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 :root {
-  --primary: #1e3a8a;
-  --primary-hover: #172554;
+  --primary: #1e40af;
+  --primary-hover: #1e3a8a;
+  --primary-gradient: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
   --primary-light: #eff6ff;
   --accent: #2563eb;
+  --accent-glow: rgba(37, 99, 235, 0.15);
   --success: #16a34a;
   --success-bg: #f0fdf4;
   --warning: #d97706;
@@ -25,22 +27,29 @@
   --bg-main: #f8fafc;
   --card-bg: #ffffff;
   --border: #e2e8f0;
-  --radius: 10px;
-  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --border-focus: #3b82f6;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.03);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --primary: #3b82f6;
     --primary-hover: #60a5fa;
+    --primary-gradient: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
     --primary-light: #1e293b;
     --accent: #60a5fa;
-    --text-main: #f1f5f9;
+    --accent-glow: rgba(96, 165, 250, 0.2);
+    --text-main: #f8fafc;
     --text-muted: #94a3b8;
-    --bg-main: #090d16;
+    --bg-main: #0b0f19;
     --card-bg: #111827;
     --border: #1f2937;
-    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 20px -3px rgb(0 0 0 / 0.5);
   }
 }
 
@@ -49,49 +58,70 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   background-color: var(--bg-main);
   color: var(--text-main);
-  line-height: 1.5;
-  padding: 24px;
+  line-height: 1.55;
+  padding: 24px 16px 48px;
+  -webkit-font-smoothing: antialiased;
 }
 
 .container {
-  max-width: 1080px;
+  max-width: 1040px;
   margin: 0 auto;
 }
 
+/* Header */
 header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .logo-badge {
-  background: var(--primary);
+  background: var(--primary-gradient);
   color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 6px 12px;
-  border-radius: 8px;
+  font-weight: 800;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.8px;
+  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .title h1 {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.author-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.2px;
 }
 
 .title p {
   font-size: 13px;
   color: var(--text-muted);
+  margin-top: 3px;
 }
 
 .header-badges {
@@ -107,94 +137,110 @@ header {
   background: var(--success-bg);
   color: var(--success);
   border: 1px solid #bbf7d0;
-  padding: 6px 14px;
+  padding: 7px 14px;
   border-radius: 9999px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .model-config-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-main);
+  background: var(--card-bg);
   color: var(--text-main);
   border: 1px solid var(--border);
-  padding: 6px 14px;
+  padding: 7px 14px;
   border-radius: 9999px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
 }
 .model-config-badge:hover {
   background: var(--primary-light);
   border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
+/* Tabs */
 .tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 22px;
+  background: var(--card-bg);
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 .tab-btn {
+  flex: 1;
   background: none;
   border: none;
-  padding: 10px 18px;
-  font-size: 15px;
+  padding: 10px 14px;
+  font-size: 14.5px;
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   transition: all 0.2s;
+  text-align: center;
 }
 
 .tab-btn:hover {
   color: var(--text-main);
-  background: var(--primary-light);
+  background: var(--bg-main);
 }
 
 .tab-btn.active {
   color: #fff;
-  background: var(--primary);
+  background: var(--primary-gradient);
+  box-shadow: 0 2px 6px var(--accent-glow);
 }
 
+/* Card */
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: 26px;
   box-shadow: var(--shadow);
   margin-bottom: 24px;
 }
 
+/* Dropzone */
 .dropzone {
   border: 2px dashed var(--accent);
   border-radius: var(--radius);
-  background: var(--primary-light);
-  padding: 36px 20px;
+  background: linear-gradient(180deg, #f0f7ff 0%, #ffffff 100%);
+  padding: 42px 20px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.dropzone.dragover {
+.dropzone:hover, .dropzone.dragover {
   border-color: var(--primary);
-  background: #dbeafe;
+  background: #e0f2fe;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px var(--accent-glow);
 }
 
 .dropzone-icon {
-  font-size: 40px;
+  font-size: 44px;
   margin-bottom: 12px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.06));
 }
 
 .dropzone-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 16.5px;
+  font-weight: 700;
   margin-bottom: 6px;
+  color: var(--text-main);
 }
 
 .dropzone-sub {
@@ -208,9 +254,9 @@ header {
   justify-content: space-between;
   background: var(--bg-main);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-top: 16px;
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  margin-top: 18px;
 }
 
 .file-meta {
@@ -222,24 +268,24 @@ header {
 
 .badge {
   display: inline-block;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
 }
 
-.badge-pdf { background: #fee2e2; color: #dc2626; }
-.badge-docx { background: #dbeafe; color: #2563eb; }
-.badge-txt { background: #f3f4f6; color: #4b5563; }
-.badge-success { background: var(--success-bg); color: var(--success); }
-.badge-warning { background: var(--warning-bg); color: var(--warning); }
-.badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-pdf { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
+.badge-docx { background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe; }
+.badge-txt { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.badge-success { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }
+.badge-warning { background: var(--warning-bg); color: var(--warning); border: 1px solid #fde68a; }
+.badge-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid #fecaca; }
 
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
+  gap: 18px;
+  margin-top: 18px;
 }
 
 .form-group {
@@ -248,32 +294,34 @@ header {
 
 .form-group label {
   display: block;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   margin-bottom: 6px;
+  color: var(--text-main);
 }
 
 .form-control, select, textarea {
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--card-bg);
   color: var(--text-main);
   font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
 }
 
 .form-control:focus, select:focus, textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .checkbox-label {
@@ -282,18 +330,19 @@ header {
   gap: 6px;
   font-size: 13px;
   cursor: pointer;
+  user-select: none;
 }
 
 .collapsible-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--accent);
   cursor: pointer;
-  padding: 10px 0;
-  margin-top: 12px;
+  padding: 12px 0 6px;
+  margin-top: 16px;
   border-top: 1px dashed var(--border);
 }
 
@@ -302,8 +351,8 @@ header {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 20px;
-  border-radius: 8px;
+  padding: 11px 22px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -312,20 +361,46 @@ header {
   text-decoration: none;
 }
 
-.btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover { background: var(--primary-hover); }
-.btn-secondary { background: var(--bg-main); border: 1px solid var(--border); color: var(--text-main); }
-.btn-secondary:hover { background: var(--border); }
-.btn-block { width: 100%; margin-top: 20px; padding: 13px; font-size: 16px; }
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--primary-gradient);
+  color: #fff;
+  box-shadow: 0 2px 6px var(--accent-glow);
+}
+.btn-primary:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.btn-secondary {
+  background: var(--bg-main);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+}
+.btn-secondary:hover {
+  background: var(--border);
+}
+
+.btn-block {
+  width: 100%;
+  margin-top: 24px;
+  padding: 14px;
+  font-size: 16px;
+  border-radius: var(--radius);
+}
 
 .alert {
-  padding: 14px 16px;
-  border-radius: 8px;
-  font-size: 14px;
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
   margin-top: 16px;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
+  line-height: 1.5;
 }
 .alert-warning { background: var(--warning-bg); color: #92400e; border: 1px solid #fde68a; }
 .alert-danger { background: var(--danger-bg); color: #991b1b; border: 1px solid #fecaca; }
@@ -335,7 +410,7 @@ header {
   overflow-x: auto;
   margin-top: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 table {
@@ -346,7 +421,7 @@ table {
 }
 
 th, td {
-  padding: 10px 14px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -359,7 +434,7 @@ th {
 .diff-box {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 18px;
 }
 
 .diff-pane {
@@ -368,33 +443,35 @@ th {
 }
 
 .diff-pane h4 {
-  font-size: 14px;
+  font-size: 13.5px;
   margin-bottom: 8px;
   color: var(--text-muted);
+  font-weight: 600;
 }
 
 .diff-pane textarea {
-  height: 380px;
+  height: 400px;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
   line-height: 1.6;
 }
 
-/* AI 指令对话框组件样式 */
+/* AI 指令对话框组件 */
 .ai-dialog-card {
-  margin-top: 20px;
-  background: linear-gradient(180deg, var(--primary-light) 0%, var(--card-bg) 100%);
+  margin-top: 22px;
+  background: linear-gradient(180deg, #f0f7ff 0%, #ffffff 100%);
   border: 1px solid #bfdbfe;
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 18px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.04);
 }
 
 .ai-dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .ai-dialog-header h3 {
@@ -403,13 +480,14 @@ th {
   align-items: center;
   gap: 8px;
   color: var(--primary);
+  font-weight: 700;
 }
 
 .chat-history {
   background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: var(--radius-sm);
+  padding: 14px;
   max-height: 240px;
   overflow-y: auto;
   font-size: 13.5px;
@@ -431,12 +509,13 @@ th {
   align-self: flex-start;
 }
 .chat-bubble {
-  padding: 8px 12px;
-  border-radius: 8px;
-  line-height: 1.45;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+  box-shadow: var(--shadow-sm);
 }
 .chat-msg.user .chat-bubble {
-  background: var(--primary);
+  background: var(--primary-gradient);
   color: #fff;
 }
 .chat-msg.assistant .chat-bubble {
@@ -448,49 +527,56 @@ th {
 .chat-input-row {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .chat-input-row input {
   flex: 1;
-  padding: 10px 12px;
+  padding: 11px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
   outline: none;
+  background: #fff;
+  transition: all 0.2s;
 }
 .chat-input-row input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 .chips-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .chip {
-  background: var(--card-bg);
+  background: #fff;
   border: 1px solid #bfdbfe;
   color: var(--accent);
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 9999px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
 }
 .chip:hover {
   background: var(--primary);
   color: #fff;
   border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px var(--accent-glow);
 }
 
-/* 模态弹窗样式 */
+/* Modal */
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -499,10 +585,41 @@ th {
 .modal-content {
   background: var(--card-bg);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: 26px;
   max-width: 520px;
   width: 90%;
-  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.2);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+
+/* Footer */
+footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.footer-author a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.footer-author a:hover {
+  text-decoration: underline;
 }
 
 .spinner {
@@ -529,7 +646,10 @@ th {
     <div class="brand">
       <div class="logo-badge">LEGAL-REDACTOR</div>
       <div class="title">
-        <h1>中国法律文书本地脱敏助手</h1>
+        <h1>
+          中国法律文书本地脱敏助手
+          <span class="author-pill">Designed by lawyer朱思浩</span>
+        </h1>
         <p>纯 HTML 单页版 · 浏览器内存直跑 · 零后端 · 零网络上传</p>
       </div>
     </div>
@@ -816,13 +936,27 @@ th {
     </div>
   </div>
 
+  <!-- Footer with lawyer signature -->
+  <footer>
+    <div class="footer-author">
+      <span>中国法律文书本地脱敏助手</span>
+      <span>·</span>
+      <span>架构与设计：<a href="https://github.com/qwertyzhu/legal-redactor" target="_blank">lawyer朱思浩</a></span>
+    </div>
+    <div>
+      <span>100% Local-First（数据绝不离机）</span>
+      <span>·</span>
+      <span>Apache-2.0 License</span>
+    </div>
+  </footer>
+
 </div>
 
 <!-- 模态弹窗：AI 模型配置 -->
 <div id="modelModal" class="modal-overlay hidden" onclick="if(event.target===this) closeModelModal()">
   <div class="modal-content">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="font-size:16px;">⚙️ 智能实体抽取模型配置</h3>
+      <h3 style="font-size:16px;font-weight:700;">⚙️ 智能实体抽取模型配置</h3>
       <button class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" onclick="closeModelModal()">✕</button>
     </div>
 
@@ -858,7 +992,7 @@ th {
       </div>
     </div>
 
-    <div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;">
+    <div style="margin-top:22px;display:flex;justify-content:space-between;align-items:center;">
       <button class="btn btn-secondary" onclick="testModelConnection()">🔌 测试连接</button>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary" onclick="closeModelModal()">取消</button>
@@ -1622,6 +1756,7 @@ function generateAuditMarkdown(inName, outName, mode, plan) {
     `- **原始文书**: ${inName}\n` +
     `- **脱敏文书**: ${outName}\n` +
     `- **脱敏模式**: ${mode}\n` +
+    `- **架构设计**: lawyer朱思浩\n` +
     `- **处理时间**: ${new Date().toLocaleString()}\n` +
     `- **脱敏项数**: ${plan.length} 处\n\n` +
     `## 替换对照清单\n\n` +

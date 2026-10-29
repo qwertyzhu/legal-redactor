@@ -616,7 +616,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>中国法律文书本地脱敏助手 · 网页版</title>
+<title>中国法律文书本地脱敏助手 · By lawyer朱思浩</title>
 <style>
 :root {
   --primary: #1e3a8a;
@@ -695,6 +695,21 @@ header {
 .title h1 {
   font-size: 20px;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.author-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.2px;
 }
 
 .title p {
@@ -999,6 +1014,36 @@ th {
   to { transform: rotate(360deg); }
 }
 
+/* Footer */
+footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.footer-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.footer-author a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.footer-author a:hover {
+  text-decoration: underline;
+}
+
 .hidden { display: none !important; }
 </style>
 </head>
@@ -1009,7 +1054,10 @@ th {
     <div class="brand">
       <div class="logo-badge">LEGAL-REDACTOR</div>
       <div class="title">
-        <h1>中国法律文书本地脱敏助手</h1>
+        <h1>
+          中国法律文书本地脱敏助手
+          <span class="author-pill">Designed by lawyer朱思浩</span>
+        </h1>
         <p>PDF (文字层 / 扫描件) · Word (.docx) · 文本 · 100% 离线脱敏与反查防护</p>
       </div>
     </div>
@@ -1291,6 +1339,20 @@ th {
       </div>
     </div>
   </div>
+
+  <!-- Footer with lawyer signature -->
+  <footer>
+    <div class="footer-author">
+      <span>中国法律文书本地脱敏助手</span>
+      <span>·</span>
+      <span>架构与设计：<a href="https://github.com/qwertyzhu/legal-redactor" target="_blank">lawyer朱思浩</a></span>
+    </div>
+    <div>
+      <span>100% Local-First（数据绝不离机）</span>
+      <span>·</span>
+      <span>Apache-2.0 License</span>
+    </div>
+  </footer>
 
 </div>
 
