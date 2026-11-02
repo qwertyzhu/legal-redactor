@@ -169,7 +169,29 @@ _PERSON_STOPWORDS = frozenset(
     }
 )
 
-# Names in narrative, anchored by a relation word instead of a party role:
+# Colon required. These words also appear in statutes and argument (作者认为、权利人主张).
+_LABELED_PERSON = re.compile(
+    r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)"
+    r"\s*[：:]\s*"
+    r"(?P<name>[·一-鿿]{2,4})"
+    r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))"
+)
+_LABELED_LATIN = re.compile(
+    r"(?:法定代表人|授权代表|姓名|著作权人|权利人|制片人|导演|编剧)"
+    r"\s*[：:]\s*"
+    r"(?P<name>[A-Z][a-z]+(?:[·\s-][A-Z][a-z]+){0,3})"
+)
+_LABELED_WORK = re.compile(
+    r"(?:作品名称|作品名|剧名|片名|节目名称|软件名称|游戏名称|系列名称)"
+    r"\s*[：:]\s*"
+    r"(?P<title>[^\n，,。；;：:]{1,40})"
+)
+_LABELED_ACCOUNT = re.compile(
+    r"(?:抖音号|快手号|视频号|微博号|哔哩哔哩|B站UID|UID|uid|账号昵称|用户名|昵称)"
+    r"\s*[：:]\s*"
+    r"(?P<name>[A-Za-z0-9_\-]{2,32}|[一-鿿A-Za-z0-9_\-]{2,20})"
+)
+_ACCOUNT_EMPTY = frozenset({"无", "暂无", "不详", "未知", "同上"})
 # 证人王丽娟出庭作证 / 其表弟周小川实际运营 / 丈夫刘德胜亦知情.
 _NARRATIVE_ANCHORS = (
     "证人|案外人|表弟|表哥|表姐|表妹|堂弟|堂兄|堂姐|堂妹|丈夫|妻子|前夫|前妻|"
@@ -382,6 +404,68 @@ def detect_suspects(
                 start=m.start("name"),
                 end=m.end("name"),
                 role_hint="party",
+            )
+        )
+
+    for m in _LABELED_PERSON.finditer(text):
+        val = m.group("name").strip()
+        if not _person_ok(val) or val in skip or not _has_surname(val):
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="person",
+                reason="labeled_person",
+                start=m.start("name"),
+                end=m.end("name"),
+                role_hint="party",
+            )
+        )
+
+    for m in _LABELED_LATIN.finditer(text):
+        val = re.sub(r"\s+", " ", m.group("name").strip())
+        if len(val) < 2 or val in skip:
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="person",
+                reason="latin_labeled",
+                start=m.start("name"),
+                end=m.end("name"),
+                role_hint="party",
+            )
+        )
+
+    for m in _LABELED_WORK.finditer(text):
+        val = m.group("title").strip().strip("《》「」\"“”")
+        if len(val) < 2 or val in _WORK_BLOCKLIST or val in skip or val.endswith(("协议", "合同")):
+            continue
+        if is_statute_title(f"《{val}》", following=text[m.end() : m.end() + 12]):
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="work_title",
+                reason="labeled_work",
+                start=m.start("title"),
+                end=m.end("title"),
+                role_hint="other",
+            )
+        )
+
+    for m in _LABELED_ACCOUNT.finditer(text):
+        val = m.group("name").strip()
+        if val in _ACCOUNT_EMPTY or val in skip or len(val) < 2:
+            continue
+        candidates.append(
+            Suspect(
+                text=val,
+                category="account",
+                reason="labeled_account",
+                start=m.start("name"),
+                end=m.end("name"),
+                role_hint="other",
             )
         )
 

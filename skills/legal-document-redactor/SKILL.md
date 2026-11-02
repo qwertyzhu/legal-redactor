@@ -5,7 +5,15 @@ description: "Local-first Chinese legal document redaction (脱敏/去标识/匿
 
 # 法律文书脱敏
 
-本地 CLI 做**确定性替换**；Agent 只补自然语言实体。不要先通读全文手写实体表。
+本地一次扫完。模型不要打开原文，不要通读文书，不要先写实体表。
+
+```bash
+legal-redactor redact INPUT.docx --mode ai -o OUTPUT.docx
+```
+
+`--mode ai` 已经会自动替换带标签的姓名、单位、住址、书名号作品、作品名称、剧名、昵称和抖音号。出证把 `ai` 换成 `production`，当事人、作品和账号会留下。
+
+命令结束只看 `handoff:`。写着「无待补实体」就停止。写了待补条目，只把那几条追加进 `entities.json`，再跑同一条命令。不要打开脱敏稿、audit 或 ledger。
 
 ## 先选模式
 
@@ -18,11 +26,7 @@ description: "Local-first Chinese legal document redaction (脱敏/去标识/匿
 
 ## 一条命令
 
-```bash
-legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
-```
-
-出证把 `ai` 换成 `production`。只有这条没接住的名字，再补 `entities.json`。
+上面那条就是全部。只有 handoff 点名的漏网，才补 `entities.json`。无书名号、也没有任何「作品名称 / 剧名 / 昵称 / 抖音号」标签的，规则仍然接不住。
 
 ## 一案一份，不要每份重写
 
@@ -111,7 +115,7 @@ legal-redactor restore AI_REPLY.md --ledger LEDGER_PATH -o AI_REPLY.restored.md
 
 `verify --strict` 通过之后仍要看去向：
 
-- 给在线模型：无书名号的作品名或系列名，APP、网站、店铺、开发者主体，账号昵称和 UID，侵权链接。这几类写进 `entities.json` 再跑。交法院时作品名和链接留着，它们是证据。
+- 给在线模型：没有标签的作品名、系列名、APP、网站、店铺、开发者主体。带了「作品名称 / 剧名 / 昵称 / 抖音号」的，这一遍已经去掉。交法院时作品名和链接留着，它们是证据。`--mode production` 不会删。
 - 上网稿用 `judgment-online`。第八条只包括家事与继承的当事人、刑事案件被害人及其法定代理人、证人、鉴定人、未成年人及其法定代理人。工具不判断案由。
 
 ## 不可妥协

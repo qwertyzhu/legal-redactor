@@ -143,8 +143,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "一次扫完高置信姓名、单位、地址和作品名（ai），"
-            "或第三人姓名（production）。不必先让模型手写 entities.json"
+            "或第三人姓名（production）。--mode ai 时这是默认，不必再写"
         ),
+    )
+    pr.add_argument(
+        "--no-auto-confident",
+        action="store_true",
+        help="不要自动替换高置信姓名和带标签的作品、账号",
     )
     pr.add_argument(
         "--allow-residual",
@@ -428,6 +433,29 @@ def _resolve_mode_profile(args: argparse.Namespace) -> tuple[str, str | None]:
     return mode, None
 
 
+def _auto_confident(args: argparse.Namespace) -> bool:
+    if getattr(args, "no_auto_confident", False):
+        return False
+    if getattr(args, "auto_confident", False):
+        return True
+    return getattr(args, "mode", None) == "ai"
+
+
+def _print_handoff(suspects: list, replaced: int) -> None:
+    pending = [s for s in suspects if getattr(s, "reason", "") != "ner"]
+    shown = pending[:8]
+    print(f"handoff:    replaced={replaced} pending={len(pending)}")
+    if not shown:
+        print("handoff:    无待补实体。到此停止，不要打开原文、脱敏稿或 ledger。")
+        return
+    print("handoff:    只把下面几条补进 entities.json，然后重跑同一条命令。不要打开原文。")
+    for item in shown:
+        print(f"handoff:    {item.category}\t{item.text}")
+    extra = len(pending) - len(shown)
+    if extra:
+        print(f"handoff:    另有 {extra} 条。只看 suspects 文件里的 text，仍不要打开原文。")
+
+
 def _cmd_redact(args: argparse.Namespace) -> int:
     args.mode, profile_name = _resolve_mode_profile(args)
     src = Path(args.input)
@@ -462,7 +490,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             extra_categories=_split_cats(args.extra_categories),
             recursive=args.recursive,
             unify_first=unify_first,
-            auto_confident=bool(getattr(args, "auto_confident", False)),
+            auto_confident=_auto_confident(args),
             allowlist_files=list(getattr(args, "allowlist", []) or []),
             use_default_allowlist=not getattr(args, "no_default_allowlist", False),
             profile=profile_name,
@@ -520,6 +548,8 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             print(f"  [SKIP] {path.name}: {reason}", file=sys.stderr)
         if batch.skipped and not batch.results:
             return 1
+        pending = [s for result in batch.results for s in result.suspects]
+        _print_handoff(pending, sum(len(result.plan.entities) for result in batch.results))
         if batch.failed and not args.allow_residual:
             print(
                 "ERROR: one or more files failed residual scan. "
@@ -542,7 +572,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         work_dir=args.work_dir,
         keep_categories=_split_cats(args.keep_categories),
         extra_categories=_split_cats(args.extra_categories),
-        auto_confident=bool(getattr(args, "auto_confident", False)),
+        auto_confident=_auto_confident(args),
         allowlist_files=list(getattr(args, "allowlist", []) or []),
         use_default_allowlist=not getattr(args, "no_default_allowlist", False),
         profile=profile_name,
@@ -596,12 +626,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"audit:       {result.audit_md_path}")
     for w in result.warnings:
         print(f"WARNING:     {w}")
-    if result.suspects:
-        print("suspect NL entities (NOT auto-redacted):")
-        for s in result.suspects[:20]:
-            print(f"  - [{s.category}/{s.role_hint}] {s.text} ({s.reason})")
-        if len(result.suspects) > 20:
-            print(f"  … {len(result.suspects) - 20} more in suspects file")
+    _print_handoff(result.suspects, len(result.plan.entities))
     if not result.ok and not args.allow_residual:
         print(
             "ERROR: residual PII remains (structural, or a planned replacement "

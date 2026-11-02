@@ -116,6 +116,8 @@ def _stable_alias(category: str, index: int) -> str:
         return f"某地址{index + 1}"
     if category == "work_title":
         return f"某作品{index + 1}" if index else "某作品"
+    if category == "account":
+        return f"某账号{index + 1}" if index else "某账号"
     if category == "amount":
         return DEFAULT_PLACEHOLDERS["amount"]
     return DEFAULT_PLACEHOLDERS.get(category, DEFAULT_PLACEHOLDERS["other"])
@@ -320,7 +322,7 @@ def build_plan(
     deferred_structural: list[PatternHit] = []
 
     # 1) agent / manual entities
-    person_i = org_i = addr_i = work_i = 0
+    person_i = org_i = addr_i = work_i = acct_i = 0
     for raw in load_entities_file(entities_file):
         original = str(raw.get("original") or raw.get("text") or "").strip()
         if not original:
@@ -439,7 +441,7 @@ def build_plan(
                 if not third and not address:
                     continue
             if suspect.category == "person":
-                if not _has_surname(suspect.text):
+                if suspect.reason != "latin_labeled" and not _has_surname(suspect.text):
                     continue
                 if alias_style == "court":
                     replacement = _court_person_alias(suspect.text)
@@ -458,6 +460,9 @@ def build_plan(
             elif suspect.category == "work_title" and mode == "ai":
                 replacement = _stable_alias("work_title", work_i)
                 work_i += 1
+            elif suspect.category == "account" and mode == "ai":
+                replacement = _stable_alias("account", acct_i)
+                acct_i += 1
             else:
                 continue
             plan.entities.append(
