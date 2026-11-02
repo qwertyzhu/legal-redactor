@@ -1,0 +1,333 @@
+"""Text-layer PDF redaction via PyMuPDF search + redaction annotations."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pymupdf as fitz
+
+from ..entities import apply_mapping_to_text
+
+
+def extract_text(path: Path) -> str:
+    doc = fitz.open(str(path))
+    try:
+        parts: list[str] = []
+        for page in doc:
+            parts.append(page.get_text("text"))
+        return "\n".join(parts)
+    finally:
+        doc.close()
+
+
+def _has_text_layer(doc: fitz.Document) -> bool:
+    for page in doc:
+        if page.get_text("text").strip():
+            return True
+    return False
+
+
+def _redaction_fontname(text: str) -> str:
+    """Helvetica cannot paint CJK placeholders like [手机号] / 某甲."""
+    if any(ord(ch) > 127 for ch in text):
+        return "china-s"
+    return "helv"
+
+
+def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, preserve_bookmarks: bool = False) -> None:
+    """Drop XMP, bookmarks, form fields, comment annotations and attachments."""
+    warn = warnings if warnings is not None else []
+    try:
+        doc.del_xml_metadata()
+    except Exception as exc:  # noqa: BLE001
+        warn.append(f"pdf: could not delete XMP metadata ({exc})")
+    if not preserve_bookmarks:
+        try:
+            if doc.get_toc():
+                doc.set_toc([])
+                warn.append("pdf: bookmarks removed (titles may carry names)")
+        except Exception as exc:  # noqa: BLE001
+            warn.append(f"pdf: could not clear bookmarks ({exc})")
+    removed_annots = removed_widgets = 0
+    for page in doc:
+        for widget in list(page.widgets() or []):
+            page.delete_widget(widget)
+            removed_widgets += 1
+        for annot in list(page.annots() or []):
+            page.delete_annot(annot)
+            removed_annots += 1
+    if removed_widgets:
+        warn.append(f"pdf: {removed_widgets} form field(s) removed")
+    if removed_annots:
+        warn.append(f"pdf: {removed_annots} annotation(s)/comment(s) removed")
+    try:
+        names = list(doc.embfile_names())
+    except Exception:  # noqa: BLE001
+        names = []
+    for name in names:
+        doc.embfile_del(name)
+    if names:
+        warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
+
+
+def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
+    """Per-line non-space characters with their rects, in reading order."""
+    lines: list[list[tuple[str, fitz.Rect]]] = []
+    raw = page.get_text("rawdict")
+    for block in raw.get("blocks", []):
+        for line in block.get("lines", []):
+            chars: list[tuple[str, fitz.Rect]] = []
+            for span in line.get("spans", []):
+                for ch in span.get("chars", []):
+                    char = ch.get("c", "")
+                    if not char or char.isspace():
+                        continue
+                    chars.append((char, fitz.Rect(ch["bbox"])))
+            if chars:
+                lines.append(chars)
+    return lines
+
+
+def _page_char_index(
+    page: "fitz.Page",
+) -> tuple[str, list["fitz.Rect"], list[int]]:
+    """Whitespace-free text of a page plus each character's rect and line number.
+
+    Court PDFs wrap a long party name across a line break, and `Page.search_for`
+    only matches inside one line, so that occurrence survives the replacement.
+    Indexing characters lets us find the wrapped ones and redact per line.
+    """
+    parts: list[str] = []
+    rects: list[fitz.Rect] = []
+    rows: list[int] = []
+    for row, line in enumerate(_line_chars(page)):
+        for char, rect in line:
+            parts.append(char)
+            rects.append(rect)
+            rows.append(row)
+    return "".join(parts), rects, rows
+
+
+def _wrapped_rects(
+    index: tuple[str, list["fitz.Rect"], list[int]],
+    original: str,
+    *,
+    allow_single_line: bool = False,
+) -> list[tuple["fitz.Rect", bool]]:
+    """Rects for occurrences of `original` that span a line break.
+
+    Returns ``[(rect, carries_replacement_text), ...]`` so the caller paints the
+    alias once, on the first line of the wrapped run.
+    """
+    text, rects, rows = index
+    target = "".join(original.split())
+    if len(target) < 4:
+        return []
+    out: list[tuple[fitz.Rect, bool]] = []
+    start = text.find(target)
+    while start != -1:
+        span_rows = rows[start : start + len(target)]
+        if len(span_rows) == len(target):
+            unique_rows = sorted(set(span_rows))
+            if len(unique_rows) > 1 or allow_single_line:
+                for n, row in enumerate(unique_rows):
+                    line_rects = [
+                        rects[i] for i in range(start, start + len(target)) if rows[i] == row
+                    ]
+                    union = fitz.Rect(line_rects[0])
+                    for rect in line_rects[1:]:
+                        union |= rect
+                    out.append((union, n == 0))
+        start = text.find(target, start + 1)
+    return out
+
+
+def redact_pdf(
+    input_path: Path,
+    output_path: Path,
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None = None,
+    *,
+    preserve_hyperlinks: bool = False,  # unused for pdf text-layer path
+    preserve_bookmarks: bool = False,
+    ocr_images: str = "auto",
+    image_categories: set[str] | None = None,
+) -> str:
+    warn = warnings if warnings is not None else []
+    doc = fitz.open(str(input_path))
+    try:
+        if not _has_text_layer(doc):
+            raise ValueError(
+                "PDF has no extractable text layer (likely a scan). "
+                "Use: legal-redactor ocr INPUT.pdf -o workdir/ "
+                "then redact the normalized markdown; "
+                "or for court visual cover-up: legal-redactor redact-scan INPUT.pdf -o OUT.pdf"
+            )
+
+        for page in doc:
+            found_any = False
+            index: tuple[str, list[fitz.Rect], list[int]] | None = None
+            for original, replacement in mapping:
+                if not original:
+                    continue
+                rects = page.search_for(original)
+                for rect in rects:
+                    page.add_redact_annot(
+                        rect,
+                        text=replacement,
+                        fill=(1, 1, 1),
+                        text_color=(0, 0, 0),
+                        fontsize=9,
+                        fontname=_redaction_fontname(replacement),
+                    )
+                    found_any = True
+                # Names and addresses wrapped across a line break: search_for
+                # cannot see them, so redact those occurrences per line.
+                if index is None:
+                    index = _page_char_index(page)
+                for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):
+                    page.add_redact_annot(
+                        rect,
+                        text=replacement if carries_text else "",
+                        fill=(1, 1, 1),
+                        text_color=(0, 0, 0),
+                        fontsize=9,
+                        fontname=_redaction_fontname(replacement),
+                    )
+                    found_any = True
+            if found_any:
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+
+        _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
+
+        meta = doc.metadata or {}
+        for key in list(meta.keys()):
+            val = meta.get(key)
+            if isinstance(val, str) and val:
+                meta[key] = apply_mapping_to_text(val, mapping)
+        for key in ("author", "title", "subject", "keywords", "producer", "creator"):
+            if key in meta and isinstance(meta[key], str):
+                meta[key] = apply_mapping_to_text(meta[key], mapping)
+        for key in ("author", "creator", "producer"):
+            if key in meta:
+                meta[key] = ""
+        doc.set_metadata(meta)
+        _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(str(output_path), deflate=True, garbage=3)
+    finally:
+        doc.close()
+
+    return extract_text(output_path)
+
+
+def _redact_embedded_images(
+    doc: "fitz.Document",
+    mapping: list[tuple[str, str]],
+    warnings: list[str],
+    ocr_images: str,
+    categories: set[str] | None,
+) -> None:
+    """OCR raster images on text-layer pages and black-box PII pixels (scan path reuse)."""
+    from ..image_scan import ocr_available, ocr_image_hits
+
+    pages_with_images = [p for p in doc if p.get_images(full=True)]
+    if not pages_with_images:
+        return
+    if ocr_images == "off":
+        warnings.append(
+            f"PDF has embedded images on {len(pages_with_images)} page(s); --ocr-images off — review manually"
+        )
+        return
+    if not ocr_available():
+        if ocr_images == "on":
+            raise RuntimeError("--ocr-images on requires Tesseract (chi_sim)")
+        warnings.append(
+            f"PDF has embedded images on {len(pages_with_images)} page(s); Tesseract not installed — "
+            "images not OCR-scanned, review manually"
+        )
+        return
+    from ..patterns import categories_for_mode
+
+    cats = categories if categories is not None else categories_for_mode("ai")
+    terms = [o for o, _ in mapping]
+    total = 0
+    for page in pages_with_images:
+        page_hits = 0
+        for info in page.get_images(full=True):
+            xref = info[0]
+            rects = page.get_image_rects(xref)
+            if not rects:
+                continue
+            try:
+                raw = doc.extract_image(xref)["image"]
+                hits, w, h, _ = ocr_image_hits(raw, categories=cats, extra_terms=terms)
+            except Exception as exc:  # pragma: no cover - defensive
+                warnings.append(f"page {page.number + 1} image xref {xref}: OCR failed ({exc})")
+                continue
+            if not hits or not w or not h:
+                continue
+            for rect in rects:
+                sx, sy = rect.width / w, rect.height / h
+                for hit in hits:
+                    x0, y0, x1, y1 = hit.box
+                    page.add_redact_annot(
+                        fitz.Rect(
+                            rect.x0 + x0 * sx, rect.y0 + y0 * sy, rect.x0 + x1 * sx, rect.y0 + y1 * sy
+                        ),
+                        fill=(0, 0, 0),
+                    )
+                    page_hits += 1
+        if page_hits:
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+            total += page_hits
+    if total:
+        warnings.append(
+            f"IMAGE-PII: blacked out {total} OCR hit box(es) inside embedded images — spot-check the output"
+        )
+
+
+def create_sample_pdf(path: Path, text: str) -> None:
+    """Create a simple text-layer PDF. Prefer a Chinese-capable font when present."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = fitz.open()
+    page = doc.new_page()
+
+    fontname = "helv"
+    # Try common Windows / Noto fonts for CJK; fall back to built-in (latin only).
+    for candidate in (
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simsun.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+    ):
+        fp = Path(candidate)
+        if fp.exists():
+            try:
+                fontname = "cjk"
+                page.insert_font(fontname=fontname, fontfile=str(fp))
+                break
+            except Exception:
+                fontname = "helv"
+
+    y = 72.0
+    for line in text.split("\n"):
+        page.insert_text((72, y), line, fontsize=11, fontname=fontname)
+        y += 16
+        if y > page.rect.height - 72:
+            page = doc.new_page()
+            if fontname == "cjk":
+                # re-insert font on new page
+                for candidate in (
+                    "C:/Windows/Fonts/msyh.ttc",
+                    "C:/Windows/Fonts/simsun.ttc",
+                    "C:/Windows/Fonts/simhei.ttf",
+                ):
+                    if Path(candidate).exists():
+                        page.insert_font(fontname="cjk", fontfile=candidate)
+                        break
+            y = 72.0
+    doc.save(str(path))
+    doc.close()

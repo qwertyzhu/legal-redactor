@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "parties": {
+    "a": {
+      "identifiers": [
+        {
+          "text": "北测文化传播有限公司",
+          "category": "organization"
+        },
+        {
+          "text": "郝测一",
+          "category": "person"
+        },
+        {
+          "text": "13900001111",
+          "category": "mobile"
+        }
+      ],
+      "regions": [
+        {
+          "page": 3,
+          "rect": [0.08, 0.62, 0.48, 0.90],
+          "category": "seal_and_signature_block",
+          "note": "甲方签署栏、签名及整枚公章"
+        }
+      ]
+    },
+    "b": {
+      "identifiers": [
+        {
+          "text": "南测数字发行有限公司",
+          "category": "organization"
+        },
+        {
+          "text": "13800002222",
+          "category": "mobile"
+        }
+      ],
+      "regions": [
+        {
+          "page": 3,
+          "rect": [0.52, 0.62, 0.94, 0.90],
+          "category": "seal_and_signature_block",
+          "note": "乙方签署栏、签名及整枚公章"
+        }
+      ]
+    }
+  }
+}

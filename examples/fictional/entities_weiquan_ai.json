@@ -1,0 +1,58 @@
+{
+  "entities": [
+    {
+      "original": "西测影业有限公司",
+      "category": "organization",
+      "role": "party",
+      "replacement": "某单位A"
+    },
+    {
+      "original": "东例律师事务所（普通合伙）",
+      "category": "organization",
+      "role": "party",
+      "replacement": "某单位B"
+    },
+    {
+      "original": "周测三",
+      "category": "person",
+      "role": "party",
+      "replacement": "某甲"
+    },
+    {
+      "original": "钱测四",
+      "category": "person",
+      "role": "party",
+      "replacement": "某乙"
+    },
+    {
+      "original": "郑测五",
+      "category": "person",
+      "role": "party",
+      "replacement": "某丙"
+    },
+    {
+      "original": "重庆市渝北区样例大道 12 号",
+      "category": "address",
+      "role": "party",
+      "replacement": "某地址1"
+    },
+    {
+      "original": "杭州市西湖区测试巷 9 号",
+      "category": "address",
+      "role": "party",
+      "replacement": "某地址2"
+    },
+    {
+      "original": "《镜湖测案》",
+      "category": "work_title",
+      "role": "other",
+      "replacement": "某作品1"
+    },
+    {
+      "original": "《江城样片》",
+      "category": "work_title",
+      "role": "other",
+      "replacement": "某作品2"
+    }
+  ]
+}

@@ -1,0 +1,250 @@
+[简体中文](README.md) | [English](README.en.md)
+
+# legal-redactor
+
+[![CI](https://github.com/qwertyzhu/legal-redactor/actions/workflows/ci.yml/badge.svg)](https://github.com/qwertyzhu/legal-redactor/actions/workflows/ci.yml)
+[![许可证](https://img.shields.io/github/license/qwertyzhu/legal-redactor)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
+
+**中国法律文书本地脱敏助手：交在线 AI 之前激进去标识，交法院 / 对方之前只去掉证件号、手机、邮箱。**  
+支持按用户选择**整方遮挡甲方、乙方或双方**（名称、联系方式、签名和整枚公章）；实体识别**可选本机 Ollama 模型**，避免把原文交给在线模型。  
+输入什么格式，就返回什么格式：DOCX→DOCX，PDF→PDF（文字层），文本→文本。生成本地审计记录并执行残留检查。  
+两个刚需：
+
+1. **给在线 AI 之前**——激进脱敏，降低事项可反查性；  
+2. **交法院 / 给被告之前**——保留主体与案号，去掉证件号、手机、邮箱、账号等高敏项。
+
+> 早期预览。不替代律师判断。残留扫描通过 ≠ 自然语言标识已全部清除。
+
+## 双模式
+
+| 模式 | 去向 | 默认行为 |
+|---|---|---|
+| `ai` | 在线模型、可外传笔记 | 激进去标识，审判人员姓名一并去掉 |
+| `production` | 法院 / 对方当事人 | 保留当事人与案号；去掉证件号、手机、邮箱、银行账号、信用代码 |
+| `publish` | 公众号 / 对外改写 | 全体自然人写成张某，地址到县区，金额模糊。不是裁判文书上网 |
+| `judgment-online` | 裁判文书上网 | 法释〔2016〕19号：保留当事人、出生日期、案号、信用代码、律师信息和审判人员；地址收到县区；只有 entities 里 `role=article8` 的人写成张某 |
+
+高置信姓名和单位用 `--auto-confident` 一次扫完。没接住的再补 `entities.json`。
+
+Skill 全文在 [skills/legal-document-redactor/SKILL.md](skills/legal-document-redactor/SKILL.md)。把这个文件的 GitHub 地址发给别人即可：`https://github.com/qwertyzhu/legal-redactor/blob/main/skills/legal-document-redactor/SKILL.md`
+
+### 整方遮甲方 / 乙方
+
+扫描合同还支持由用户选择只遮甲方、只遮乙方或双方。整方模式会处理已确认的名称、联系人、地址、联系方式和账号，并用人工确认区域覆盖签名及**整枚公章**；未选中的一方默认全部保留。
+
+```console
+legal-redactor redact-scan scan.pdf --mode production \
+  --redact-party a --party-spec party-spec.json \
+  -o scan.party-a-redacted.pdf
+```
+
+`party-spec.json` 模板位于 `skills/legal-document-redactor/references/party-redaction.template.json`。公章不能只依赖 OCR，必须以归一化区域覆盖完整外圈、名称、编号和中心图案，并逐页人工复核。
+
+### 指哪打哪：选择性脱敏（v0.10.3+）
+
+不必套用整个模式：`--keep-categories` 反向枚举实现「只脱敏某一类」；entities.json 点名人名实现「只换指定名称」；`--preserve` 原样保留指定段落。决策表见 Skill 内 `SKILL.md`。
+
+### 实体识别可选用本机 Ollama 模型（v0.10.4+）
+
+工具全程在本机运行。实体识别可**改用本机 Ollama 模型**，避免把原文交给在线模型；替换仍由 CLI 确定性执行（模型只负责「找」）：
+
+```console
+python3 skills/legal-document-redactor/scripts/ollama_setup.py      # 只读检测：按设备内存推荐模型
+python3 skills/legal-document-redactor/scripts/ollama_entities.py INPUT.docx -o entities.draft.json
+legal-redactor redact INPUT.docx --mode ai --entities entities.draft.json -o OUTPUT.docx
+```
+
+实体识别只需普通文本模型（默认 qwen3.5）；OCR 层仍是 Tesseract，视觉模型仅作可选 OCR 增强。规则详见 Skill 内「本机 Ollama 的运行规则」。
+
+### 规范基线与模板（v0.10.3+）
+
+- `references/redaction-standards.md`：裁判文书上网规则（法释〔2016〕19号）、个人信息保护法、GB/T 37964-2019、律师 AI 应用指引与工具参数对照，含工具识别盲区清单
+- `references/entities.court-style.template.json`：裁判文书上网式隐名模板（保留姓氏+某、住所地到县/区、金额模糊化）
+
+## 60 秒上手
+
+```console
+git clone https://github.com/qwertyzhu/legal-redactor.git
+cd legal-redactor
+python -m pip install -e ".[dev]"
+legal-redactor --version
+python scripts/run_demo.py --clean
+```
+
+`run_demo.py` 会对仓库内的**虚构合同**分别跑 `ai` 与 `production`，并按原格式写出 `md` / `docx` / `pdf` 到 `demo-output/`。两次运行都应打印全部残留扫描通过。加 `--clean` 可重复跑，结果确定。
+
+### 网页版模式（Local-First Web UI & 纯单页 HTML 版）
+
+#### 方式一：极简免安装纯 HTML 版（推荐）
+免安装 Python 的极简场景，有两种极致便捷的使用方式：
+1. **在线免安装直开**：直接访问 **[GitHub Pages 在线脱敏页面](https://qwertyzhu.github.io/legal-redactor/)**（纯前端本地内存运算，文档数据绝不离开浏览器）
+2. **离线单文件下载**：在 **[GitHub Releases 资产列表](https://github.com/qwertyzhu/legal-redactor/releases)** 直接下载 `legal-redactor.html` 存到电脑，双击即用，断网亦可运行
+
+- **零后端依赖**：单个独立 HTML 文件，双击直接在浏览器打开，100% 本地内存执行，绝不向外上传文档
+- **多格式本地处理**：直接在浏览器内部脱敏 **PDF**（基于 pdf.js 与 pdf-lib 文本图层覆墨覆盖）、**Word (.docx)**（基于 JSZip XML 解析重构）及纯文本
+- **AI 智能指令对话框**：页面内自带自然语言对话框，可直接提具体脱敏诉求（如「只脱敏手机号与身份证」、「隐藏当事人姓名」），支持对接本机 Ollama（默认 `http://localhost:11434`）或在线模型 API 自动提取实体
+- **一键下载脱敏文件与审计清单**
+- **架构与设计**：Designed by lawyer朱思浩
+
+#### 方式二：Python 本地 Web 服务（含高精度 OCR 与视觉印章涂黑）
+如果本地已配置 Python 环境并需要深度处理包含扫描件的复杂案卷：
+```console
+legal-redactor web
+```
+- 自动启动本地轻量服务 `http://127.0.0.1:8765`
+- 自动识别 PDF 矢量文字层与纯图片扫描件，支持基于 Tesseract OCR 坐标精准视觉涂黑与印章红墨遮挡
+- 支持一键导出还原账本 (`.ledger.json`) 与 AI 答复当事人反向还原
+
+
+不想先手写 `entities.json` 时，用一条命令扫完高置信姓名和单位（模型不必通读全文）：
+
+```console
+legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
+```
+
+`production` 加同一个参数仍保留当事人，只自动去掉第三人。没把握的名字留在输出旁边的疑似清单里，不会被猜着改掉。简称和全称共用一个替身。
+
+## 虚构样例：脱敏前后
+
+样例当事人是 **郝测一**，样例手机是 **13900001111**（完全虚构）。
+
+| 字段 | 原文 | `ai` | `production` |
+|---|---|---|---|
+| 当事人姓名 | 郝测一 | 去掉（替身 `某甲`） | **保留** |
+| 手机 | 13900001111 | 去掉 | 去掉 |
+| 案号 | （2024）京0491民初1234号 | 去掉 | **保留** |
+
+![虚构合同 PDF 首页上部：原文 / ai / production](docs/images/dual-mode-preview.png)
+
+```text
+# 原文（节选）
+法定代表人：郝测一
+联系电话：13900001111
+关联案号示例：（2024）京0491民初1234号
+
+# --mode ai 之后
+法定代表人：某甲
+联系电话：[手机号]
+关联案号示例：（20XX）XX民初XX号
+
+# --mode production 之后
+法定代表人：郝测一
+联系电话：[手机号]
+关联案号示例：（2024）京0491民初1234号
+```
+
+`ai` 产物不得当作起诉材料。`*.ledger.json` 禁止上传。
+
+## 安装
+
+以 clone 后的可编辑安装为准（当前尚未发布到 PyPI）：
+
+```console
+python -m pip install -e ".[dev]"
+legal-redactor --help    # 列出 redact / scan / verify
+```
+
+只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.18.2）：
+
+```console
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.18.2/legal_redactor-0.18.2-py3-none-any.whl
+```
+
+**升级规则**：Skill 包和 Python 包要**一起换**。CHANGELOG 标注「仅 Skill」的版本可以不升 wheel；标注「修复（包）」的版本（如 v0.10.7 修复中文标签紧贴邮箱的漏检）**必须换 wheel**，只换 Skill 文件无效。装完跑一遍自检确认就绪：
+
+```console
+python3 ~/.claude/skills/legal-document-redactor/scripts/self_test.py   # 全 PASS 才算装好
+```
+
+### Claude Code / Codex Skill
+
+把 `skills/legal-document-redactor` 复制或 junction 到 `~/.claude/skills/`（或 `~/.agents/skills/`）。  
+Release 资产另附打包好的 `legal-document-redactor.skill` 与 `SHA256SUMS.txt`。  
+上传 Skillhub 时用 `legal-document-redactor-skillhub.zip`（根目录就是 `SKILL.md`）。不要传整仓 zip，也不要传 `.skill`。
+
+## 命令行
+
+```console
+legal-redactor scan contract.docx --mode ai
+
+legal-redactor redact contract.docx --mode ai --entities entities.json -o contract.redacted-ai.docx
+
+# 不写实体表，一次扫完高置信姓名 / 单位 / 地址 / 作品 / 金额：
+legal-redactor redact contract.docx --mode ai --auto-confident -o contract.redacted-ai.docx
+
+legal-redactor redact contract.docx --mode production --entities entities.json -o contract.redacted-production.docx
+
+# 起诉材料需要保留统一社会信用代码时：
+legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
+legal-redactor verify out.docx --mode production --keep-categories uscc
+
+# 扫描件 PDF（无文字层）
+legal-redactor ocr scan.pdf -o workdir/
+legal-redactor redact workdir/ocr.normalized.md --mode production -o workdir/out.md
+legal-redactor redact-scan scan.pdf --mode production -o scan.redacted-production.pdf
+
+legal-redactor verify contract.redacted-ai.docx --mode ai
+
+# 生成 entities 草稿（结构性字段 + 疑似姓名/单位/作品提示）
+legal-redactor draft-entities contract.docx -o entities.draft.json
+
+# 批量脱敏（推荐两阶段：先统一替身再脱敏）
+legal-redactor redact ./matters/ --mode ai --unify -o ./matters-redacted/
+
+# 或手动 unify 后再脱敏
+legal-redactor unify ./matters/ -o ./matter-unified/ --mode ai
+legal-redactor redact ./matters/ --mode ai --entities ./matter-unified/entities.consistent.json -o ./matters-redacted/
+
+# 目录扫描 / 残留校验
+legal-redactor scan ./matters/ --mode ai
+legal-redactor verify ./matters-redacted/ --mode ai
+```
+
+每次成功运行还会生成：
+
+- `*.ledger.json` — 原文→替身映射（**仅本地；禁止提交 git / 禁止贴进在线 AI**）。v0.11 起默认写到 `~/.legal-redactor/ledgers/<hash>/`（0600），输出旁只留 `*.ledger-path.txt` 指针；可加 `--ledger-encrypt`，用 `legal-redactor restore` 还原 AI 回复
+- `*.audit.json` / `*.audit.md` — 逐条替换审计与残留风险（含上下文，仅本地）
+- `*.residual.json` — 结构性残留报告
+- `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
+- `*.summary.md` — 可读对照表
+
+批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。
+
+扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
+`entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
+也可先跑 `legal-redactor draft-entities INPUT.docx` 生成结构性草稿 + 疑似实体提示，再人工确认角色与替身。
+
+## 测试
+
+```console
+python -m pytest
+python scripts/run_demo.py --clean
+
+# Skill 安装自检（新设备 / 升级后跑一次，全 PASS 才算就绪）：
+python3 skills/legal-document-redactor/scripts/self_test.py
+```
+
+演示材料完全虚构。
+
+## 限制
+
+- PDF：文字层直接 `redact`；扫描件用 `ocr` / `redact-scan`（需本机 Tesseract + chi_sim）
+- `redact-scan` 为 OCR 坐标涂黑，**交法院前必须人工翻页**
+- 整方脱敏依赖已确认的 `party-spec` 标识与人工复核区域；漏列名称、签名或公章区域即可能漏遮
+- 公章不能只依赖 OCR 文字框，必须覆盖完整外圈、名称、编号和中心图案，并逐页复核
+- 未选中的一方默认完整保留；只有显式使用 `--also-redact-structural-all` 才会额外遮挡所有各方的结构性号码
+- 自然语言姓名靠规则识别（角色词、关系词、公司后缀），没有锚点的人名、APP/产品名仍会漏；`ai` 模式的 `verify` 会把输出里残留的疑似人名/单位/地址列为 WARN，需写入 `entities.json` 重跑
+- 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
+- DOCX：实体被 Word 拆成多个 run 时也逐 run 原位替换，其余文字保留各自格式；实体跨制表符/换行/修订边界时才折叠段落
+- 批量输出为扁平文件名（递归时自动消歧）
+- 目录 `verify` 会跳过 ledger / audit 等旁路文件；退出码 0=PASS、2=FAIL，WARN 默认 0、`--strict` 时 1（交付前用 `--strict`）
+- 不是法律意见，不能替代律所保密流程
+
+## 安全
+
+不要在公开 Issue 里贴真实卷宗或 ledger。见 [SECURITY.md](SECURITY.md)。
+
+## 许可证
+
+Apache License 2.0。见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。

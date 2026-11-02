@@ -1,0 +1,13 @@
+name: production
+description: 交法院 / 对方 — 保留当事人与案号，去掉高敏项
+mode: production
+categories: null
+keep_categories: []
+extra_categories: []
+alias_style: generic
+address_granularity: full
+# 法院人员（审判长/审判员/陪审员/书记员/法官助理/执行员）姓名默认保留
+redact_court_staff: false
+amount_fuzzy: false
+preserve: []
+auto_confident: true

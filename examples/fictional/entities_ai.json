@@ -1,0 +1,54 @@
+[
+  {
+    "original": "郝测一",
+    "category": "person",
+    "role": "party",
+    "replacement": "某甲"
+  },
+  {
+    "original": "沈例二",
+    "category": "person",
+    "role": "party",
+    "replacement": "某乙"
+  },
+  {
+    "original": "北测文化传播有限公司",
+    "category": "organization",
+    "role": "party",
+    "replacement": "某单位A"
+  },
+  {
+    "original": "南例网络科技有限公司",
+    "category": "organization",
+    "role": "party",
+    "replacement": "某单位B"
+  },
+  {
+    "original": "北京市海淀区测试路 88 号",
+    "category": "address",
+    "role": "party"
+  },
+  {
+    "original": "上海市浦东新区样例大道 66 号",
+    "category": "address",
+    "role": "party"
+  },
+  {
+    "original": "《星河测例》",
+    "category": "work_title",
+    "role": "other",
+    "replacement": "某作品"
+  },
+  {
+    "original": "1280000",
+    "category": "amount",
+    "role": "other",
+    "replacement": "X"
+  },
+  {
+    "original": "壹佰贰拾捌万元整",
+    "category": "amount",
+    "role": "other",
+    "replacement": "X万元整"
+  }
+]

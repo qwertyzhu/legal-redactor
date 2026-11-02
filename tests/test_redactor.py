@@ -1,0 +1,657 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+import pymupdf as fitz
+
+from legal_redactor.entities import apply_mapping_to_text, build_plan
+from legal_redactor.formats import docx_io, pdf_io
+from legal_redactor.patterns import detect_structural
+from legal_redactor.pipeline import redact_file
+from legal_redactor.verify import scan_residual
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "examples" / "fictional"
+
+# Load sample without importing (path may contain non-package dirs)
+import importlib.util
+
+spec = importlib.util.spec_from_file_location(
+    "sample_contract_text", FIXTURES / "sample_contract_text.py"
+)
+mod = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(mod)
+SAMPLE = mod.FICTIONAL_CONTRACT
+
+
+def test_detect_structural_on_fiction():
+    hits = detect_structural(SAMPLE)
+    cats = {h.category for h in hits}
+    assert "mobile" in cats
+    assert "id_card" in cats
+    assert "case_number" in cats
+    assert "bank_account" in cats
+
+
+def test_email_adjacent_to_chinese_label():
+    # 中文标签（邮箱）紧贴邮箱地址时也必须检出；\b 会把中文视为 \w 导致漏检
+    for text in ["邮箱zhang@example.com", "邮箱：zhang@example.com", "邮箱 zhang@example.com"]:
+        hits = detect_structural(text)
+        assert any(h.category == "email" for h in hits), text
+    # 但不误伤更长地址的前缀匹配
+    hits = detect_structural("zhang@example.commercial")
+    assert not any(h.category == "email" and h.text.endswith(".com") and "commercial" not in h.text
+                   for h in hits)
+
+
+def test_ai_mode_plan_redacts_parties_and_case():
+    plan = build_plan(
+        SAMPLE,
+        mode="ai",
+        entities_file=FIXTURES / "entities_ai.json",
+    )
+    originals = {e.original for e in plan.entities}
+    assert "郝测一" in originals
+    assert "北测文化传播有限公司" in originals
+    assert any(e.category == "case_number" for e in plan.entities)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" not in text
+    assert "13900001111" not in text
+    assert "（2024）京0491民初1234号" not in text
+    report = scan_residual(text, "ai")
+    assert report.ok, report.summary
+
+
+def test_production_keeps_parties_strips_contacts():
+    plan = build_plan(
+        SAMPLE,
+        mode="production",
+        entities_file=FIXTURES / "entities_production.json",
+    )
+    originals = {e.original for e in plan.entities}
+    # parties not auto-wiped
+    assert "郝测一" not in originals
+    assert "北测文化传播有限公司" not in originals
+    # contacts wiped
+    assert any(e.category == "mobile" for e in plan.entities)
+    assert any(e.category == "id_card" for e in plan.entities)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" in text
+    assert "北测文化传播有限公司" in text
+    assert "13900001111" not in text
+    assert "110101199001011234" not in text
+    # case number kept for court production
+    assert "（2024）京0491民初1234号" in text
+    report = scan_residual(text, "production")
+    assert report.ok, report.summary
+
+
+def test_docx_roundtrip(tmp_path: Path):
+    src = tmp_path / "in.docx"
+    docx_io.create_sample_docx(src, SAMPLE)
+    out = tmp_path / "out.docx"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=FIXTURES / "entities_ai.json",
+        work_dir=tmp_path,
+    )
+    assert out.is_file()
+    assert result.ok
+    text = docx_io.extract_text(out)
+    assert "郝测一" not in text
+    assert "13900001111" not in text
+
+
+def test_pdf_roundtrip(tmp_path: Path):
+    src = tmp_path / "in.pdf"
+    try:
+        pdf_io.create_sample_pdf(src, SAMPLE)
+    except Exception as exc:  # pragma: no cover
+        pytest.skip(f"pdf fixture creation failed: {exc}")
+    # If CJK font missing, Chinese may not embed; still try redaction path
+    extracted = pdf_io.extract_text(src)
+    if "13900001111" not in extracted:
+        pytest.skip("pdf text layer missing expected digits (font issue)")
+    has_cjk_source = "郝测一" in extracted
+    out = tmp_path / "out.pdf"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=FIXTURES / "entities_ai.json",
+        work_dir=tmp_path,
+    )
+    assert out.is_file()
+    assert "13900001111" not in result.output_text
+    # Structural CJK placeholders must be painted (china-s), not Helvetica '???'
+    text = pdf_io.extract_text(out)
+    assert "手机号" in text
+    if has_cjk_source:
+        assert "郝测一" not in text
+        assert "某甲" in text
+
+
+def test_pdf_cjk_replacements_with_builtin_font(tmp_path: Path) -> None:
+    """Does not need a system CJK font — china-s is built into PyMuPDF."""
+    src = tmp_path / "in.pdf"
+    doc = fitz.open()
+    try:
+        page = doc.new_page()
+        page.insert_text(
+            (72, 72),
+            "联系人郝测一 手机13900001111",
+            fontsize=12,
+            fontname="china-s",
+        )
+        doc.save(str(src))
+    finally:
+        doc.close()
+    assert "郝测一" in pdf_io.extract_text(src)
+    out = tmp_path / "out.pdf"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=FIXTURES / "entities_ai.json",
+        work_dir=tmp_path,
+    )
+    assert result.ok, result.residual.summary
+    text = pdf_io.extract_text(out)
+    assert "13900001111" not in text
+    assert "郝测一" not in text
+    assert "某甲" in text
+    assert "手机号" in text
+
+
+def test_output_suffix_must_match(tmp_path: Path):
+    src = tmp_path / "a.docx"
+    docx_io.create_sample_docx(src, "手机 13900001111")
+    with pytest.raises(ValueError, match="suffix"):
+        redact_file(src, mode="ai", output_path=tmp_path / "a.pdf")
+
+
+def test_mapping_longest_first():
+    text = "北测文化传播有限公司与北测文化"
+    mapping = [("北测文化传播有限公司", "某单位A"), ("北测文化", "某简称")]
+    # longest first behavior is in plan.mapping; simulate sorted
+    mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
+    out = apply_mapping_to_text(text, mapping)
+    assert out == "某单位A与某简称"
+
+
+def test_track_changes_ins_text_is_redacted(tmp_path: Path):
+    src = ROOT / "tests" / "fixtures" / "track_changes_fiction.docx"
+    assert src.is_file()
+    from legal_redactor.formats import docx_io
+
+    extracted = docx_io.extract_text(src)
+    assert "南例网络科技有限公司" in extracted
+    assert "13800002222" in extracted
+
+    out = tmp_path / "out.docx"
+    result = redact_file(
+        src,
+        mode="ai",
+        output_path=out,
+        entities_path=None,
+        work_dir=tmp_path,
+    )
+    # structural phone gone
+    assert "13800002222" not in result.output_text
+    # company remains unless entities provided; ensure extract saw it pre-redact path works
+    assert result.ok or "13800002222" not in result.output_text
+    text_out = docx_io.extract_text(out)
+    assert "13800002222" not in text_out
+
+
+def _load_weiquan() -> str:
+    spec_w = importlib.util.spec_from_file_location(
+        "sample_weiquan_text", FIXTURES / "sample_weiquan_text.py"
+    )
+    mod_w = importlib.util.module_from_spec(spec_w)
+    assert spec_w.loader is not None
+    spec_w.loader.exec_module(mod_w)
+    return mod_w.FICTIONAL_WEIQUAN
+
+
+def test_weiquan_ai_mode_strips_contacts_and_parties():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="ai",
+        entities_file=FIXTURES / "entities_weiquan_ai.json",
+    )
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "西测影业有限公司" not in text
+    assert "钱测四" not in text
+    assert "13700003333" not in text
+    assert "500101199203033456" not in text
+    assert "6222021234567890123" not in text
+    assert "91110108MA0123456X" not in text
+    assert "《镜湖测案》" not in text
+    assert "（2025）浙0192民初5678号" not in text
+    report = scan_residual(text, "ai")
+    assert report.ok, report.summary
+
+
+def test_weiquan_production_keeps_parties_strips_high_risk():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="production",
+        entities_file=FIXTURES / "entities_weiquan_production.json",
+    )
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "西测影业有限公司" in text
+    assert "东例律师事务所（普通合伙）" in text
+    assert "钱测四" in text
+    assert "13700003333" not in text
+    assert "500101199203033456" not in text
+    assert "6222021234567890123" not in text
+    assert "91110108MA0123456X" not in text
+    # case number kept by default in production
+    assert "（2025）浙0192民初5678号" in text
+    report = scan_residual(text, "production")
+    assert report.ok, report.summary
+
+
+def test_keep_categories_uscc_on_production():
+    sample = _load_weiquan()
+    plan = build_plan(
+        sample,
+        mode="production",
+        entities_file=FIXTURES / "entities_weiquan_production.json",
+        keep_categories={"uscc"},
+    )
+    originals = {e.original for e in plan.entities}
+    assert "91110108MA0123456X" not in originals
+    assert "31310000MA0198765X" not in originals
+    text = apply_mapping_to_text(sample, plan.mapping())
+    assert "91110108MA0123456X" in text
+    assert "13700003333" not in text
+    report = scan_residual(text, "production", keep_categories={"uscc"})
+    assert report.ok, report.summary
+
+
+def test_keep_categories_unknown_raises():
+    with pytest.raises(ValueError, match="unknown structural"):
+        build_plan(SAMPLE, mode="ai", keep_categories={"not_a_category"})
+
+
+def test_pipeline_keep_categories_roundtrip(tmp_path: Path):
+    sample = _load_weiquan()
+    src = tmp_path / "weiquan.md"
+    src.write_text(sample, encoding="utf-8")
+    out = tmp_path / "weiquan.redacted-production.md"
+    result = redact_file(
+        src,
+        mode="production",
+        output_path=out,
+        entities_path=FIXTURES / "entities_weiquan_production.json",
+        work_dir=tmp_path,
+        keep_categories=["uscc"],
+    )
+    assert result.ok, result.residual.summary
+    body = out.read_text(encoding="utf-8")
+    assert "91110108MA0123456X" in body
+    assert "13700003333" not in body
+
+
+def test_batch_redact_directory(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    src_dir.mkdir()
+    (src_dir / "a.md").write_text("联系电话 13900001111\n", encoding="utf-8")
+    (src_dir / "b.md").write_text("备用号 13800002222\n", encoding="utf-8")
+    (src_dir / "notes.txt").write_text("ignore-me-not-supported-no wait txt is supported 13700003333\n", encoding="utf-8")
+    (src_dir / "skip.bin").write_bytes(b"\x00\x01")
+
+    batch = redact_tree(src_dir, mode="production", output_dir=out_dir, work_dir=out_dir)
+    assert len(batch.results) == 3
+    assert batch.ok
+    assert not (out_dir / "skip.bin").exists()
+    bodies = {r.output_path.name: r.output_path.read_text(encoding="utf-8") for r in batch.results}
+    assert "13900001111" not in bodies["a.redacted-production.md"]
+    assert "13800002222" not in bodies["b.redacted-production.md"]
+    assert "13700003333" not in bodies["notes.redacted-production.txt"]
+
+
+def test_draft_entities_command(tmp_path: Path):
+    from legal_redactor.cli import main
+    from legal_redactor.draft import draft_entities_payload
+
+    src = tmp_path / "x.md"
+    src.write_text("手机 13900001111 案号（2024）京0491民初1234号\n", encoding="utf-8")
+    out = tmp_path / "entities.draft.json"
+    assert main(["draft-entities", str(src), "-o", str(out)]) == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["_meta"]["structural_unique"] >= 2
+    originals = {e["original"] for e in payload["entities"]}
+    assert "13900001111" in originals
+    # does not invent party names
+    rebuilt = draft_entities_payload(src)
+    assert any("填写当事人" in e["original"] for e in rebuilt["entities"])
+
+
+def test_docx_preserves_bold_run_when_secret_in_single_run(tmp_path: Path):
+    import zipfile
+    from lxml import etree
+
+    from legal_redactor.formats import docx_io
+
+    src = tmp_path / "mixed.docx"
+    out = tmp_path / "mixed.out.docx"
+    docx_io.create_mixed_run_docx(
+        src,
+        plain_prefix="甲方联系方式：",
+        bold_secret="13900001111",
+        plain_suffix="（仅限通知）",
+    )
+    result = redact_file(src, mode="production", output_path=out, work_dir=tmp_path)
+    assert result.ok
+    assert "13900001111" not in result.output_text
+
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    bold_runs = []
+    for r in root.iter(f"{W}r"):
+        rpr = r.find(f"{W}rPr")
+        is_bold = rpr is not None and rpr.find(f"{W}b") is not None
+        texts = "".join((t.text or "") for t in r.findall(f"{W}t"))
+        if is_bold and texts.strip():
+            bold_runs.append(texts)
+    # bold run should still exist and hold the placeholder, not be emptied by collapse
+    assert bold_runs, "expected a bold run to survive single-run redaction"
+    assert any("手机" in t or "[" in t for t in bold_runs)
+
+
+def test_suspects_find_orgs_persons_works_without_auto_redact():
+    from legal_redactor.suspects import detect_suspects
+
+    text = SAMPLE
+    suspects = detect_suspects(text)
+    texts = {s.text for s in suspects}
+    assert "北测文化传播有限公司" in texts
+    assert "南例网络科技有限公司" in texts
+    assert "郝测一" in texts
+    assert "沈例二" in texts
+    assert "《星河测例》" in texts
+    # courts in blocklist / weak labels should not dominate
+    assert "北京互联网法院" not in texts
+
+
+def test_suspects_excluded_when_known():
+    from legal_redactor.suspects import detect_suspects
+
+    suspects = detect_suspects(
+        SAMPLE,
+        known={
+            "北测文化传播有限公司",
+            "郝测一",
+            "《星河测例》",
+            "南例网络科技有限公司",
+            "沈例二",
+            "北京市海淀区测试路 88 号",
+            "上海市浦东新区样例大道 66 号",
+        },
+    )
+    assert suspects == []
+
+
+def test_scan_reports_suspects(tmp_path: Path):
+    from legal_redactor.cli import main
+
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    # capture via detect_only
+    from legal_redactor.pipeline import detect_only
+
+    payload = detect_only(src, mode="ai", entities_path=FIXTURES / "entities_ai.json")
+    # entities_ai already lists parties — suspects should shrink
+    knownish = {e["original"] for e in payload["plan"]["entities"]}
+    for s in payload["suspects"]:
+        assert s["text"] not in knownish
+
+
+def test_draft_entities_includes_suspect_rows(tmp_path: Path):
+    from legal_redactor.draft import draft_entities_payload
+
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    payload = draft_entities_payload(src, include_suspects=True)
+    assert payload["_meta"]["suspect_unique"] >= 3
+    sources = {e.get("source") for e in payload["entities"]}
+    assert "suspect-hint" in sources
+    # without auto replacement field
+    for e in payload["entities"]:
+        if e.get("source") == "suspect-hint":
+            assert not e.get("replacement")
+
+
+def test_redact_writes_suspects_sidecar(tmp_path: Path):
+    src = tmp_path / "c.md"
+    src.write_text(SAMPLE, encoding="utf-8")
+    out = tmp_path / "c.redacted-production.md"
+    # production without entities — parties stay; suspects should still list them
+    result = redact_file(src, mode="production", output_path=out, work_dir=tmp_path)
+    assert result.ok
+    assert result.suspects_path is not None and result.suspects_path.is_file()
+    data = json.loads(result.suspects_path.read_text(encoding="utf-8"))
+    texts = {s["text"] for s in data["suspects"]}
+    assert "北测文化传播有限公司" in texts
+    assert "郝测一" in texts
+    # structural redaction still happened
+    assert "13900001111" not in out.read_text(encoding="utf-8")
+
+
+def test_unify_directory_stable_aliases(tmp_path: Path):
+    from legal_redactor.consistency import unify_directory
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text(
+        "甲方法定代表人：郝测一\n联系电话：13900001111\n北测文化传播有限公司\n",
+        encoding="utf-8",
+    )
+    (src / "b.md").write_text(
+        "法定代表人：郝测一\n手机 13900001111\n北测文化传播有限公司与南例网络科技有限公司\n",
+        encoding="utf-8",
+    )
+    report = unify_directory(src, out, mode="ai")
+    assert report.files_scanned == 2
+    assert report.conflict_count == 0
+    assert report.entities_path is not None and report.entities_path.is_file()
+    payload = json.loads(report.entities_path.read_text(encoding="utf-8"))
+    by_original = {e["original"]: e for e in payload["entities"]}
+    assert "郝测一" in by_original
+    assert "13900001111" in by_original
+    assert "北测文化传播有限公司" in by_original
+    # same original appears in both files → single replacement
+    assert set(by_original["郝测一"].get("files", payload["_meta"]["per_entity_files"]["郝测一"])) >= {
+        "a.md",
+        "b.md",
+    }
+
+
+def test_unify_detects_replacement_conflicts(tmp_path: Path):
+    from legal_redactor.consistency import unify_from_ledgers
+
+    ledgers = tmp_path / "ledgers"
+    ledgers.mkdir()
+    (ledgers / "a.ledger.json").write_text(
+        json.dumps(
+            {
+                "mode": "ai",
+                "entities": [
+                    {
+                        "original": "郝测一",
+                        "category": "person",
+                        "role": "party",
+                        "replacement": "某甲",
+                        "source": "agent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (ledgers / "b.ledger.json").write_text(
+        json.dumps(
+            {
+                "mode": "ai",
+                "entities": [
+                    {
+                        "original": "郝测一",
+                        "category": "person",
+                        "role": "party",
+                        "replacement": "某乙",
+                        "source": "agent",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    report = unify_from_ledgers(ledgers, tmp_path / "out", mode="ai")
+    assert report.conflict_count == 1
+    assert report.conflicts[0].original == "郝测一"
+    assert set(report.conflicts[0].replacements) == {"某甲", "某乙"}
+
+
+def test_batch_redact_writes_consistency_bundle(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text("联系电话 13900001111 郝测一\n法定代表人：郝测一\n", encoding="utf-8")
+    (src / "b.md").write_text("手机 13900001111\n", encoding="utf-8")
+    batch = redact_tree(src, mode="ai", output_dir=out, work_dir=out)
+    assert batch.ok
+    assert batch.entities_consistent_path is not None
+    assert batch.entities_consistent_path.is_file()
+    assert batch.consistency_path is not None
+    assert (out / "consistency.report.md").is_file()
+
+
+def test_batch_unify_first_uses_stable_aliases(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text(
+        "法定代表人：郝测一\n北测文化传播有限公司\n电话 13900001111\n",
+        encoding="utf-8",
+    )
+    (src / "b.md").write_text(
+        "法定代表人：郝测一\n北测文化传播有限公司\n手机 13900001111\n",
+        encoding="utf-8",
+    )
+    batch = redact_tree(src, mode="ai", output_dir=out, work_dir=out, unify_first=True)
+    assert batch.ok
+    assert batch.entities_consistent_path is not None
+    # both outputs should use the same alias for 郝测一
+    texts = [r.output_text for r in batch.results]
+    joined = "\n".join(texts)
+    assert "郝测一" not in joined
+    assert "13900001111" not in joined
+    # same person alias string appears in both files
+    entities = json.loads(batch.entities_consistent_path.read_text(encoding="utf-8"))["entities"]
+    person = next(e for e in entities if e["original"] == "郝测一")
+    alias = person["replacement"]
+    assert all(alias in t for t in texts)
+
+
+def test_verify_and_scan_tree(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree, scan_tree, verify_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.md").write_text("手机 13900001111\n", encoding="utf-8")
+    (src / "b.md").write_text("手机 13800002222\n", encoding="utf-8")
+    scanned = scan_tree(src, mode="production")
+    assert scanned["files"] == 2
+    assert all(r["would_replace"] >= 1 for r in scanned["results"])
+
+    batch = redact_tree(src, mode="production", output_dir=out, work_dir=out)
+    assert batch.ok
+    verified = verify_tree(out, mode="production")
+    # only redacted docs should be checked among supported suffixes; ledgers are json and included!
+    # json is supported — residual on ledger may FAIL because ledger contains originals.
+    # Restrict verify_tree usage in test to redacted outputs only via a clean folder.
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    for r in batch.results:
+        target = clean / r.output_path.name
+        target.write_text(r.output_path.read_text(encoding="utf-8"), encoding="utf-8")
+    verified = verify_tree(clean, mode="production")
+    assert verified["ok"] is True
+    assert verified["files"] == 2
+
+
+def test_address_suspect_from_label():
+    from legal_redactor.suspects import detect_suspects
+
+    text = "甲方住所地：北京市海淀区测试路 88 号\n乙方住址：上海市浦东新区样例大道 66 号"
+    suspects = detect_suspects(text)
+    addrs = [s for s in suspects if s.category == "address"]
+    assert len(addrs) >= 2
+    assert any("海淀区测试路" in s.text for s in addrs)
+
+
+def test_spaced_mobile_and_digit_run_is_not_uscc():
+    hits = detect_structural("手机：138 0000 2222\n账号：622202123456789012")
+    texts = {h.text: h.category for h in hits}
+    assert texts.get("138 0000 2222") == "mobile"
+    assert texts.get("622202123456789012") == "bank_account"
+    assert "uscc" not in texts.values()
+
+
+def test_auto_confident_ai_one_pass_without_entities_file():
+    plan = build_plan(SAMPLE, mode="ai", auto_confident=True)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" not in text
+    assert "沈例二" not in text
+    assert "北测文化传播有限公司" not in text
+    assert "《星河测例》" not in text
+    assert "13900001111" not in text
+    assert "1280000" not in text
+    assert "北京互联网法院" in text
+    hao = next(entity for entity in plan.entities if entity.original == "郝测一")
+    assert hao.replacement == "某甲"
+    assert hao.source == "auto-confident"
+    report = scan_residual(text, "ai")
+    assert report.ok, report.summary
+
+
+def test_auto_confident_production_keeps_parties():
+    plan = build_plan(SAMPLE, mode="production", auto_confident=True)
+    text = apply_mapping_to_text(SAMPLE, plan.mapping())
+    assert "郝测一" in text
+    assert "北测文化传播有限公司" in text
+    assert "13900001111" not in text
+    assert "（2024）京0491民初1234号" in text
+
+
+def test_auto_confident_links_abbreviation():
+    raw = "甲方：北测文化传播有限公司（以下简称“北测”）。北测与对方签约。"
+    plan = build_plan(raw, mode="ai", auto_confident=True)
+    text = apply_mapping_to_text(raw, plan.mapping())
+    assert "北测" not in text
+    company = next(entity for entity in plan.entities if entity.original == "北测文化传播有限公司")
+    short = next(entity for entity in plan.entities if entity.original == "北测")
+    assert short.replacement == company.replacement

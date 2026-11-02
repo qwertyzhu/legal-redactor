@@ -1,0 +1,35 @@
+#!/bin/sh
+# Block accidental real-looking secrets outside examples/tests.
+set -u
+fail=0
+RED=$(printf '\033[31m'); YEL=$(printf '\033[33m'); RST=$(printf '\033[0m')
+report() { echo "${RED}✗ $1${RST}"; fail=1; }
+
+files=$(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACM)
+[ -z "$files" ] && exit 0
+
+echo "$files" | while IFS= read -r f; do
+  case "$f" in
+    examples/*|tests/*|skills/*/evals/*) continue ;;
+    *.ledger.json|*credentials*|.env|*.pem)
+      report "blocked path: $f"
+      ;;
+  esac
+done
+
+# Content scan excluding examples/tests
+scan_files=$(echo "$files" | grep -vE '^(examples/|tests/|skills/.*/evals/)' || true)
+if [ -n "$scan_files" ]; then
+  for f in $scan_files; do
+    [ -f "$f" ] || continue
+    if grep -nE 'sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}' "$f" >/dev/null 2>&1; then
+      report "possible API token in $f"
+    fi
+  done
+fi
+
+if [ "$fail" -eq 1 ]; then
+  echo "${YEL}commit blocked. Use fictional fixtures only in public tree.${RST}"
+  exit 1
+fi
+exit 0
