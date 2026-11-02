@@ -16,8 +16,8 @@ from legal_redactor.scan_pdf import (
 
 
 def test_collapse_cjk_spaces():
-    raw = "北 京 奇 艺 世 纪 科 技 有 限 公 司"
-    assert collapse_cjk_spaces(raw) == "北京奇艺世纪科技有限公司"
+    raw = "北 京 云 帆 世 纪 科 技 有 限 公 司"
+    assert collapse_cjk_spaces(raw) == "北京云帆世纪科技有限公司"
     assert collapse_cjk_spaces("手机 13900001111") == "手机 13900001111"
 
 
