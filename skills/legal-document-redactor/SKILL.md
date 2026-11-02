@@ -26,13 +26,13 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 ## 一案一份，不要每份重写
 
-同一案件多份材料放在一个目录。目录里留一份 `entities.json`（没有就先不写）。给模型前，把规则接不住的写进去：没有书名号的作品名和系列名、APP、网站、店铺、开发者、账号昵称。交法院时这些不要写，它们是证据。
+同一案件多份材料放在一个目录，并留一份 `entities.json`（没有就先不写）。给模型前，把规则接不住的写进去：没有书名号的作品名和系列名、APP、网站、店铺、开发者、账号昵称。交法院时这些不要写，它们是证据。
 
 ```bash
 legal-redactor redact 案件目录 --mode ai --auto-confident -o 案件目录/out
 ```
 
-目录默认先统一替身，全称和简称跨文件共用一个。账本和 `entities.consistent.json` 写在 `案件目录/.redactor/`，不要和 `out/` 里的脱敏稿一起外发。不要统一时加 `--no-unify`。
+目录里有 `entities.json` 时才统一替身，全称和简称跨文件共用一个。没有这份文件时各文件单独脱敏，避免把无关文书收成同一人；确是同一案又还没写实体表时，加 `--unify`。账本和 `entities.consistent.json` 写在 `案件目录/.redactor/`，不要和 `out/` 里的脱敏稿一起外发。
 
 单份文件若旁边或当前目录有 `entities.json`，会自动用上。在线回复里的替身仍用 `restore`，ledger 不上传。
 
@@ -73,7 +73,7 @@ legal-redactor verify workdir/ai.md --mode ai --strict
 - 审判人员姓名：`ai` 默认替换（审判人员 + 法院 + 案由可以定位判决）。`production`、`publish`、`judgment-online` 默认保留。`ai` 里要留某一个人，用 `--preserve` 或 allowlist。
 - docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
 - 页眉、页脚、脚注、尾注和批注正文会扫，批注作者改成「作者」。域代码（文件名、交叉引用）不替换，看到 `DOCX-FIELD` 就要看一眼；页码域忽略。
-- 400/800 和带空格的座机按电话去掉。大写金额（如「壹佰贰拾万元整」）只在 `ai` / `publish` 改成量级，出证保留。`http(s)` 网址只在给模型的 `ai` 去掉；`production` 和 `publish` 留下，那是证据或出处。MAC 与 IP 一样去掉。台胞证必须带「台胞证」标签才识别。
+- 400/800 和带空格的座机按电话去掉。证据链接保留；链接里的账号密码、token，以及给模型时的提取码，会去掉。整段网址要去掉才加 `--extra-categories url`。大写金额只在前面是工资、月薪、存款、余额时改成量级，索赔和报酬保留。MAC 与 IP 一样去掉。台胞证必须带「台胞证」标签才识别。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
 

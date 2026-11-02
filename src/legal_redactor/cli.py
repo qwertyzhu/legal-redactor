@@ -447,7 +447,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         if out.exists() and out.is_file():
             print("ERROR: batch output must be a directory, not a file", file=sys.stderr)
             return 1
-        unify_first = not bool(getattr(args, "no_unify", False))
+        if bool(getattr(args, "no_unify", False)):
+            unify_first = False
+        else:
+            unify_first = bool(getattr(args, "unify", False)) or (src / "entities.json").is_file()
         batch = redact_tree(
             input_dir=src,
             mode=args.mode,

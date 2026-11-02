@@ -47,17 +47,46 @@ def test_batch_skips_entities_and_keeps_ledgers_private(tmp_path: Path):
     assert not (out / "entities.json").exists()
 
 
-def test_cli_directory_unifies_by_default(tmp_path: Path, monkeypatch):
+def test_cli_directory_does_not_merge_unrelated_files(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    src = tmp_path / "case"
+    src = tmp_path / "inbox"
     src.mkdir()
-    (src / "a.md").write_text("法定代表人：郝测一\n电话 13900001111\n", encoding="utf-8")
-    (src / "b.md").write_text("法定代表人：郝测一\n手机 13900001111\n", encoding="utf-8")
+    (src / "a.md").write_text("法定代表人：郝测一\n证人李测二\n电话 13900001111\n", encoding="utf-8")
+    (src / "b.md").write_text("法定代表人：李测二\n证人郝测一\n手机 13900001111\n", encoding="utf-8")
     out = tmp_path / "out"
     code = main(["redact", str(src), "--mode", "ai", "--auto-confident", "-o", str(out)])
     assert code == 0
-    texts = [(out / name).read_text(encoding="utf-8") for name in ("a.redacted-ai.md", "b.redacted-ai.md")]
-    assert all("郝测一" not in text for text in texts)
-    assert all("13900001111" not in text for text in texts)
-    assert (src / ".redactor" / "entities.consistent.json").is_file()
-    assert not list(out.glob("*.ledger.json"))
+    a = (out / "a.redacted-ai.md").read_text(encoding="utf-8")
+    b = (out / "b.redacted-ai.md").read_text(encoding="utf-8")
+    assert "郝测一" not in a and "李测二" not in a
+    assert "郝测一" not in b and "李测二" not in b
+    # Without a case file, the first person in each file keeps a local alias.
+    assert "某甲" in a and "某乙" in a
+    assert a.index("某甲") < a.index("某乙")
+    assert b.index("某甲") < b.index("某乙")
+
+
+def test_cli_directory_unifies_when_case_file_exists(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "case"
+    src.mkdir()
+    (src / "entities.json").write_text('{"entities":[]}\n', encoding="utf-8")
+    (src / "a.md").write_text("法定代表人：郝测一\n证人李测二\n电话 13900001111\n", encoding="utf-8")
+    (src / "b.md").write_text("法定代表人：李测二\n证人郝测一\n手机 13900001111\n", encoding="utf-8")
+    out = tmp_path / "out"
+    code = main(["redact", str(src), "--mode", "ai", "--auto-confident", "-o", str(out)])
+    assert code == 0
+    a = (out / "a.redacted-ai.md").read_text(encoding="utf-8")
+    b = (out / "b.redacted-ai.md").read_text(encoding="utf-8")
+    entities = (src / ".redactor" / "entities.consistent.json").read_text(encoding="utf-8")
+    assert "郝测一" in entities and "李测二" in entities
+    # Same person, same alias, regardless of which file names them first.
+    import json
+    import re
+
+    body = json.loads(entities)
+    alias = {item["original"]: item["replacement"] for item in body["entities"]}
+    assert alias["郝测一"] in a and alias["郝测一"] in b
+    assert alias["李测二"] in a and alias["李测二"] in b
+    assert alias["郝测一"] != alias["李测二"]
+    assert not re.search(r"13900001111", a + b)

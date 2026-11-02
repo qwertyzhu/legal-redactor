@@ -23,23 +23,27 @@ def test_mac_and_url_modes():
     assert cats.get("AA:BB:CC:DD:EE:FF") == "mac"
     assert cats.get("https://example-fictional.test/a") == "url"
     assert "www.court.example" not in cats
-    assert "url" in categories_for_mode("ai")
+    assert "url" not in categories_for_mode("ai")
     assert "url" not in categories_for_mode("production")
-    assert "mac" in categories_for_mode("production")
+    assert "url_secret" in categories_for_mode("ai")
+    assert "url_secret" in categories_for_mode("production")
+    assert "share_code" in categories_for_mode("ai")
+    assert "share_code" not in categories_for_mode("production")
     assert "url" not in load_profile("publish").effective_categories()
-    assert "url" in load_profile("ai").effective_categories()
+    assert "url" not in load_profile("ai").effective_categories()
+    assert "url" in categories_for_mode("ai", extra_categories={"url"})
 
 
-def test_chinese_amount_only_when_fuzzy():
-    text = "报酬为壹佰贰拾万元整，另付500元。"
+def test_chinese_amount_only_for_personal_money():
+    text = "月薪为壹万元整。索赔壹佰贰拾万元整，另付500元。"
     ai = build_plan(text, mode="ai", auto_confident=True, amount_fuzzy=True)
     out = apply_mapping_to_text(text, ai.mapping())
-    assert "壹佰贰拾万元整" not in out
+    assert "壹万元整" not in out
+    assert "壹佰贰拾万元整" in out
     assert "500元" not in out
-    assert "百万元级" in out
     filing = build_plan(text, mode="production", auto_confident=True, amount_fuzzy=False)
     kept = apply_mapping_to_text(text, filing.mapping())
-    assert "壹佰贰拾万元整" in kept
+    assert "壹万元整" in kept
     assert "500元" in kept
 
 

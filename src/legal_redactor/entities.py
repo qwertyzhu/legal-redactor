@@ -95,9 +95,12 @@ _AMOUNT = re.compile(
 )
 # 壹佰贰拾万元整. Must contain a financial uppercase digit so 「第壹条」不会命中。
 _CN_AMOUNT = re.compile(
-    r"(?:人民币)?[零壹贰貳叁參叄肆伍陆陸柒捌玖拾佰仟萬万亿元圆角分整]{3,}(?:元|圆)整?"
+    r"(?:人民币)?[零壹贰貳叁參叄肆伍陆陸柒捌玖拾佰仟萬万亿元圆角分整]{1,}(?:元|圆)整?"
 )
 _CN_AMOUNT_DIGIT = re.compile(r"[壹贰貳叁參叄肆伍陆陸柒捌玖]")
+# Personal finances identify a person. A claim, royalty or loss figure is the case.
+_PERSONAL_MONEY = re.compile(r"(?:月薪|年薪|工资|薪资|存款|余额)")
+_CLAIM_MONEY = re.compile(r"(?:赔偿|索赔|标的|诉讼请求|违约金|许可费|稿酬|报酬|损失)")
 
 
 def _stable_alias(category: str, index: int) -> str:
@@ -255,6 +258,9 @@ def _append_amounts(text: str, plan: RedactionPlan, preserve_set: set[str]) -> N
     for match in _CN_AMOUNT.finditer(text):
         raw = match.group(0).strip()
         if not raw or raw in existing or raw in preserve_set or not _CN_AMOUNT_DIGIT.search(raw):
+            continue
+        window = text[max(0, match.start() - 16) : match.start()]
+        if _CLAIM_MONEY.search(window) or not _PERSONAL_MONEY.search(window):
             continue
         plan.entities.append(
             EntityRecord(

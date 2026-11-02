@@ -110,7 +110,18 @@ _MAC = re.compile(
     r"(?<![A-Fa-f0-9])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![A-Fa-f0-9])"
 )
 # http(s) only. Bare www is left alone so a court-site mention is not eaten.
+# The URL itself is not a default replacement: it is often the evidence.
 _URL = re.compile(r"https?://[^\s<>\"'\]）)，。；、]+", re.IGNORECASE)
+# Credential inside a URL. The rest of the link stays.
+_URL_USERINFO = re.compile(r"(?<=://)([^/\s:@]{1,64}:[^/\s@]{4,64})@")
+_URL_QUERY_SECRET = re.compile(
+    r"(?i)([?&](?:access_token|refresh_token|id_token|token|password|passwd|pwd|"
+    r"secret|session|sid|api_key|apikey|key|auth|cookie)=)([^&#\s<>\"'\]）)，。；、]{4,})"
+)
+# Netdisk share password. Evidence on a filing, not something to paste into a model.
+_SHARE_CODE = re.compile(
+    r"(?:提取码|访问密码|取件码|网盘密码)\s*[：:为是]?\s*([A-Za-z0-9]{4,8})"
+)
 # Birth date: …日出生 or labeled 出生日期
 _BIRTH_INLINE = re.compile(r"\d{4}年\d{1,2}月\d{1,2}日(?=出生)")
 _BIRTH_LABELED = re.compile(
@@ -234,6 +245,9 @@ def detect_structural(text: str) -> list[PatternHit]:
         candidates.append(PatternHit("landline", m.group(0), m.start(), m.end()))
 
     for m in _EMAIL.finditer(text):
+        # user:password@host is a URL credential, not a mailbox.
+        if re.search(r"https?://[^/\s@]+:$", text[max(0, m.start() - 80) : m.start()]):
+            continue
         candidates.append(PatternHit("email", m.group(0), m.start(), m.end()))
 
     for m in _CASE_NO.finditer(text):
@@ -363,6 +377,21 @@ def detect_structural(text: str) -> list[PatternHit]:
     for m in _MAC.finditer(text):
         candidates.append(PatternHit("mac", m.group(0), m.start(), m.end()))
 
+    for m in _URL_USERINFO.finditer(text):
+        raw = m.group(1)
+        start = m.start(1)
+        candidates.append(PatternHit("url_secret", raw, start, start + len(raw)))
+
+    for m in _URL_QUERY_SECRET.finditer(text):
+        raw = m.group(1) + m.group(2)
+        start = m.start(1)
+        candidates.append(PatternHit("url_secret", raw, start, start + len(raw)))
+
+    for m in _SHARE_CODE.finditer(text):
+        raw = m.group(1)
+        start = m.start(1)
+        candidates.append(PatternHit("share_code", raw, start, start + len(raw)))
+
     for m in _URL.finditer(text):
         raw = m.group(0).rstrip(".,;:)>】」』")
         if len(raw) < 12:
@@ -384,13 +413,18 @@ def detect_structural(text: str) -> list[PatternHit]:
         start = m.start(1)
         candidates.append(PatternHit("birth_date", raw, start, start + len(raw)))
 
-    # Resolve overlaps: prefer longer, then earlier; prefer auto_replace
-    candidates.sort(
-        key=lambda h: (-(h.end - h.start), 0 if h.auto_replace else 1, h.start)
-    )
+    # A full URL must not hide a phone, token or code inside it.
+    urls = [hit for hit in candidates if hit.category == "url"]
+    rest = [hit for hit in candidates if hit.category != "url"]
+    rest.sort(key=lambda h: (-(h.end - h.start), 0 if h.auto_replace else 1, h.start))
     chosen: list[PatternHit] = []
     occupied: list[tuple[int, int]] = []
-    for hit in candidates:
+    for hit in rest:
+        if any(not (hit.end <= a or hit.start >= b) for a, b in occupied):
+            continue
+        chosen.append(hit)
+        occupied.append((hit.start, hit.end))
+    for hit in urls:
         if any(not (hit.end <= a or hit.start >= b) for a, b in occupied):
             continue
         chosen.append(hit)
@@ -417,6 +451,8 @@ DEFAULT_PLACEHOLDERS = {
     "ip": "[IP地址]",
     "mac": "[MAC地址]",
     "url": "[网址]",
+    "url_secret": "[参数]",
+    "share_code": "[提取码]",
     "birth_date": "[出生日期]",
     "person": "某自然人",
     "organization": "某单位",
@@ -444,6 +480,8 @@ STRUCTURAL_CATEGORIES = frozenset(
         "ip",
         "mac",
         "url",
+        "url_secret",
+        "share_code",
         "birth_date",
     }
 )
@@ -465,6 +503,8 @@ _NUMBERED_STRUCTURAL = frozenset(
         "ip",
         "mac",
         "url",
+        "url_secret",
+        "share_code",
         "birth_date",
     }
 )
@@ -503,7 +543,9 @@ def categories_for_mode(
             )
         return cats
     if mode == "ai":
-        cats = set(STRUCTURAL_CATEGORIES)
+        # url stays detectable, but the link itself is evidence. Opt in with
+        # --extra-categories url when the whole address must disappear.
+        cats = set(STRUCTURAL_CATEGORIES) - {"url"}
     elif mode == "production":
         # Keep case numbers, birth dates, party identity by default;
         # strip high-risk contact/account data + 法释 plate/property_cert.
@@ -521,6 +563,7 @@ def categories_for_mode(
             "wechat_qq",
             "ip",
             "mac",
+            "url_secret",
         }
     else:
         raise ValueError(f"unknown mode: {mode!r}; expected 'ai' or 'production'")
