@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.18.2 - 2026-11-03
 
-- 公开树守卫：`tests/test_public_safety.py` 新增 `test_public_org_names_are_fictional`，仓库里出现的任何企业名必须带虚构标记（测 / 例 / 某某 / 云帆 / 星澜 / 云海 / 朗岳）或是 X/Y 占位，否则 CI 失败。防止再出现真实客户或对手方名称。
+仅脱敏与守卫，行为无变更；发布物里不再带真实当事人名称。
+
+- **发布物不再含真实客户/对手方名称**：源码注释、`skills/legal-document-redactor/SKILL.md`、CHANGELOG 与测试里出现的真实公司全称统一改为虚构名（云帆 / 星澜 / 云海 / 朗岳）。0.18.1 的 wheel、sdist、skill 包与 skillhub zip 携带过这些名称，本版已从全部附件中清除。
+- **公开树守卫**：`tests/test_public_safety.py` 新增 `test_public_org_names_are_fictional`，仓库里出现的任何企业名必须带虚构标记（测 / 例 / 某某 / 云帆 / 星澜 / 云海 / 朗岳）或是 X/Y 占位，否则 CI 失败。防止再出现真实客户或对手方名称。
 
 ## 0.18.1 - 2026-11-02
 
