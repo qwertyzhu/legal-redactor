@@ -131,9 +131,12 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument(
         "--unify",
         action="store_true",
-        help=(
-            "仅批量：先统一目录内实体，再用 entities.consistent.json 脱敏，保证替身稳定"
-        ),
+        help="目录脱敏时先统一替身（目录的默认行为；单文件忽略）",
+    )
+    pr.add_argument(
+        "--no-unify",
+        action="store_true",
+        help="目录脱敏时不要先统一替身",
     )
     pr.add_argument(
         "--auto-confident",
@@ -428,6 +431,14 @@ def _resolve_mode_profile(args: argparse.Namespace) -> tuple[str, str | None]:
 def _cmd_redact(args: argparse.Namespace) -> int:
     args.mode, profile_name = _resolve_mode_profile(args)
     src = Path(args.input)
+    if args.entities is None:
+        found = None
+        from .pipeline import find_case_entities
+
+        found = find_case_entities(src)
+        if found is not None:
+            args.entities = found
+            print(f"entities: {found}")
     if src.is_dir():
         if args.output is None:
             print("ERROR: batch redact requires -o/--output directory", file=sys.stderr)
@@ -436,6 +447,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         if out.exists() and out.is_file():
             print("ERROR: batch output must be a directory, not a file", file=sys.stderr)
             return 1
+        unify_first = not bool(getattr(args, "no_unify", False))
         batch = redact_tree(
             input_dir=src,
             mode=args.mode,
@@ -446,7 +458,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             keep_categories=_split_cats(args.keep_categories),
             extra_categories=_split_cats(args.extra_categories),
             recursive=args.recursive,
-            unify_first=bool(getattr(args, "unify", False)),
+            unify_first=unify_first,
             auto_confident=bool(getattr(args, "auto_confident", False)),
             allowlist_files=list(getattr(args, "allowlist", []) or []),
             use_default_allowlist=not getattr(args, "no_default_allowlist", False),
@@ -487,8 +499,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
-        if getattr(args, "unify", False):
+        if unify_first:
+            private = Path(args.work_dir) if args.work_dir else (src / ".redactor")
             print("pass:     unify-first + redact")
+            print(f"private:  {private}  （账本和统一表在这里，不要和脱敏稿一起外发）")
         if batch.entities_consistent_path:
             print(f"unified:  {batch.entities_consistent_path}")
         if batch.consistency_path:

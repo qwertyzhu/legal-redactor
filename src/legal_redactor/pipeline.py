@@ -23,6 +23,22 @@ from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_or
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
 SUPPORTED_SUFFIXES = TEXT_SUFFIXES | {".docx", ".pdf"}
+# Case files and sidecars are not source documents. Redacting them would
+# copy the originals into the deliverable folder.
+_BATCH_SKIP_NAMES = {
+    "entities.json",
+    "entities.consistent.json",
+    "entities.draft.json",
+    "consistency.report.json",
+}
+_BATCH_SKIP_SUFFIXES = (
+    ".ledger.json",
+    ".ledger.json.enc",
+    ".residual.json",
+    ".suspects.json",
+    ".audit.json",
+    ".ledger-path.txt",
+)
 
 
 @dataclass
@@ -441,6 +457,34 @@ def _audit_part_label(path: Path) -> str:
     return "text"
 
 
+def find_case_entities(src: Path) -> Path | None:
+    """entities.json beside this file or folder, else one level up, else cwd.
+
+    An explicit --entities skips this. The file being redacted is never chosen.
+    """
+    src = Path(src)
+    bases: list[Path] = [src, src.parent] if src.is_dir() else [src.parent, src.parent.parent]
+    bases.append(Path.cwd())
+    seen: set[Path] = set()
+    for base in bases:
+        try:
+            key = base.resolve()
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        candidate = key / "entities.json"
+        if candidate.is_file():
+            try:
+                if candidate.resolve() == src.resolve():
+                    continue
+            except OSError:
+                continue
+            return candidate
+    return None
+
+
 def iter_batch_inputs(input_dir: Path, *, recursive: bool = False) -> list[Path]:
     input_dir = Path(input_dir)
     if not input_dir.is_dir():
@@ -450,7 +494,15 @@ def iter_batch_inputs(input_dir: Path, *, recursive: bool = False) -> list[Path]
         iterator = (p for p in sorted(input_dir.rglob("*")) if p.is_file())
     else:
         iterator = (p for p in sorted(input_dir.iterdir()) if p.is_file())
-    return [p for p in iterator if p.suffix.lower() in SUPPORTED_SUFFIXES]
+    found: list[Path] = []
+    for path in iterator:
+        if ".redactor" in path.parts:
+            continue
+        if path.name in _BATCH_SKIP_NAMES or path.name.endswith(_BATCH_SKIP_SUFFIXES):
+            continue
+        if path.suffix.lower() in SUPPORTED_SUFFIXES:
+            found.append(path)
+    return found
 
 
 def redact_tree(
@@ -485,7 +537,12 @@ def redact_tree(
     if output_dir.resolve() == input_dir.resolve():
         raise ValueError("output directory must differ from input directory")
     output_dir.mkdir(parents=True, exist_ok=True)
-    work_root = Path(work_dir) if work_dir else output_dir
+    # Deliverables stay in output_dir. Ledgers and the shared entity list stay
+    # in the case folder, not beside the files that may be uploaded.
+    if work_dir is None:
+        work_root = input_dir / ".redactor"
+    else:
+        work_root = Path(work_dir)
     work_root.mkdir(parents=True, exist_ok=True)
 
     effective_entities = entities_path

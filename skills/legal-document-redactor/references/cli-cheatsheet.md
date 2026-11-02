@@ -15,7 +15,9 @@ legal-redactor redact contract.docx --mode ai --ledger-encrypt -o out.docx   # �
 legal-redactor restore ai_reply.md --ledger ~/.legal-redactor/ledgers/<hash>/ -o restored.md
 legal-redactor redact contract.docx --mode ai --json -o out.docx
 legal-redactor redact contract.docx --mode production --preserve-hyperlinks --preserve-bookmarks -o out.docx
-legal-redactor redact ./inbox/ --mode ai --unify -o ./outbox/
+legal-redactor redact ./案件目录/ --mode ai --auto-confident -o ./案件目录/out
+# 目录默认统一替身。账本在 ./案件目录/.redactor/ ，不要和 out/ 一起外发。
+# 同目录的 entities.json 会自动用上。不要统一时加 --no-unify。
 legal-redactor draft-entities contract.docx -o entities.draft.json
 legal-redactor ocr scan.pdf -o workdir/
 legal-redactor redact workdir/ocr.normalized.md --mode ai --auto-confident -o workdir/ai.md   # 扫描件走这条；无文字层 PDF 直接 redact 会被拒绝
@@ -30,6 +32,6 @@ python3 scripts/self_test.py
 
 `--keep-categories` / `--extra-categories`：`id_card,mobile,landline,email,bank_account,uscc,case_number,passport,hk_mo_permit,plate,property_cert,wechat_qq,ip,birth_date`。
 
-批量优先 `redact DIR --unify`。目录 `verify` 不要把 ledger 混进校验目录。
+批量默认 `redact 目录 -o 输出目录`（含统一替身）。目录 `verify` 只校验脱敏稿，不要把 `.redactor/` 混进去。
 
 可选 NER：`pip install 'legal-redactor[ner]'`（LTP）。结果只进 `*.suspects.json`（reason=ner），需人工确认后写进 entities 才会替换。

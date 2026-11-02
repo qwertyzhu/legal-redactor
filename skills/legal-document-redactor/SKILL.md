@@ -24,9 +24,21 @@ legal-redactor redact INPUT.docx --mode ai --auto-confident -o OUTPUT.docx
 
 出证把 `ai` 换成 `production`。只有这条没接住的名字，再补 `entities.json`。
 
-## 网页版模式 (Web UI)
+## 一案一份，不要每份重写
 
-如果习惯在浏览器中可视化拖拽文件操作，或处理 PDF / Word：
+同一案件多份材料放在一个目录。目录里留一份 `entities.json`（没有就先不写）。给模型前，把规则接不住的写进去：没有书名号的作品名和系列名、APP、网站、店铺、开发者、账号昵称。交法院时这些不要写，它们是证据。
+
+```bash
+legal-redactor redact 案件目录 --mode ai --auto-confident -o 案件目录/out
+```
+
+目录默认先统一替身，全称和简称跨文件共用一个。账本和 `entities.consistent.json` 写在 `案件目录/.redactor/`，不要和 `out/` 里的脱敏稿一起外发。不要统一时加 `--no-unify`。
+
+单份文件若旁边或当前目录有 `entities.json`，会自动用上。在线回复里的替身仍用 `restore`，ledger 不上传。
+
+扫描件没有文字层时，不要对 PDF 跑上面这条，也不要把原 PDF 交给模型。`redact` 会直接拒绝。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
+
+## 网页版模式 (Web UI)
 
 ```bash
 legal-redactor web
@@ -93,7 +105,7 @@ legal-redactor restore AI_REPLY.md --ledger LEDGER_PATH -o AI_REPLY.restored.md
 - [ ] ledger 未上传任何地方
 - [ ] 反推三问：无残留可识别信息？上下文组合反推不出当事人？未过度脱敏？
 
-旁路产物：`*.audit.md` / `*.audit.json`、`*.residual.json`、`*.suspects.json`、`*.summary.md` 在输出旁；ledger 默认在 `~/.legal-redactor/ledgers/<hash>/`（0600），输出旁只留 `*.ledger-path.txt` 指针。高敏事项加 `--ledger-encrypt`（口令放 `LEGAL_REDACTOR_LEDGER_PASS`）。
+旁路产物：单文件的 `*.audit.md`、`*.residual.json`、`*.suspects.json` 在工作目录；ledger 默认在 `~/.legal-redactor/ledgers/<hash>/`（0600）。目录脱敏的账本和统一表在 `案件目录/.redactor/`，不要放进 `out/`。高敏事项加 `--ledger-encrypt`（口令放 `LEGAL_REDACTOR_LEDGER_PASS`）。
 
 ## 去向再核对
 
