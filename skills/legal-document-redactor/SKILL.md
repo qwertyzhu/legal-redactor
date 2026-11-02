@@ -60,6 +60,8 @@ legal-redactor verify workdir/ai.md --mode ai --strict
 - 扫描件 OCR / 涂黑：见 [references/scanned-pdf.md](references/scanned-pdf.md)
 - 审判人员姓名：`ai` 默认替换（审判人员 + 法院 + 案由可以定位判决）。`production`、`publish`、`judgment-online` 默认保留。`ai` 里要留某一个人，用 `--preserve` 或 allowlist。
 - docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
+- 页眉、页脚、脚注、尾注和批注正文会扫，批注作者改成「作者」。域代码（文件名、交叉引用）不替换，看到 `DOCX-FIELD` 就要看一眼；页码域忽略。
+- 400/800 和带空格的座机按电话去掉。大写金额（如「壹佰贰拾万元整」）只在 `ai` / `publish` 改成量级，出证保留。`http(s)` 网址只在给模型的 `ai` 去掉；`production` 和 `publish` 留下，那是证据或出处。MAC 与 IP 一样去掉。台胞证必须带「台胞证」标签才识别。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
 

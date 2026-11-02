@@ -40,8 +40,10 @@ _LABELED_ACCOUNT = re.compile(
     r"(?:账号|帐号|账户|卡号|银行账号|收款账户|开户账号|对公账户)"
     r"\s*(?:[：:]|为|是)?\s*([0-9][0-9 \u3000-]{6,32}[0-9])"
 )
-# Simple landline: 0xx-xxxxxxx or 0xx xxxxxxxx
-_LANDLINE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
+# Landline, including a space inside the subscriber number: 010-1234 5678
+_LANDLINE = re.compile(r"(?<!\d)0\d{2,3}(?:[\s\u3000-]*\d){7,8}(?!\d)")
+# 400 / 800 service numbers, with or without separators
+_HOTLINE = re.compile(r"(?<!\d)[48]00(?:[\s\u3000-]*\d){7}(?!\d)")
 # Email. Chinese labels like 邮箱 are word chars in Python re, so \b fails for
 # label-adjacent addresses (邮箱zhang@example.com). Use charset lookarounds instead.
 _EMAIL = re.compile(
@@ -74,7 +76,8 @@ _LABELED_PASSPORT = re.compile(
     re.IGNORECASE,
 )
 _LABELED_HK_MO = re.compile(
-    r"(?:港澳通行证|通行证号?|回乡证号?)\s*[：: ]\s*([A-Z0-9]{8,11})",
+    r"(?:港澳通行证|通行证号?|回乡证号?|台胞证号?|台湾居民来往大陆通行证)"
+    r"\s*[：: ]\s*([A-Z0-9]{8,11})",
     re.IGNORECASE,
 )
 # Plate: 京A12345 / 浙A·12345 / 应急等尾缀
@@ -102,6 +105,12 @@ _LABELED_WECHAT_QQ = re.compile(
 _IP = re.compile(
     r"(?<!\d)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?!\d)"
 )
+# MAC, colon or hyphen. Not auto-confused with times (those have no six pairs).
+_MAC = re.compile(
+    r"(?<![A-Fa-f0-9])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![A-Fa-f0-9])"
+)
+# http(s) only. Bare www is left alone so a court-site mention is not eaten.
+_URL = re.compile(r"https?://[^\s<>\"'\]）)，。；、]+", re.IGNORECASE)
 # Birth date: …日出生 or labeled 出生日期
 _BIRTH_INLINE = re.compile(r"\d{4}年\d{1,2}月\d{1,2}日(?=出生)")
 _BIRTH_LABELED = re.compile(
@@ -219,6 +228,9 @@ def detect_structural(text: str) -> list[PatternHit]:
             )
 
     for m in _LANDLINE.finditer(text):
+        candidates.append(PatternHit("landline", m.group(0), m.start(), m.end()))
+
+    for m in _HOTLINE.finditer(text):
         candidates.append(PatternHit("landline", m.group(0), m.start(), m.end()))
 
     for m in _EMAIL.finditer(text):
@@ -348,6 +360,16 @@ def detect_structural(text: str) -> list[PatternHit]:
     for m in _IP.finditer(text):
         candidates.append(PatternHit("ip", m.group(0), m.start(), m.end()))
 
+    for m in _MAC.finditer(text):
+        candidates.append(PatternHit("mac", m.group(0), m.start(), m.end()))
+
+    for m in _URL.finditer(text):
+        raw = m.group(0).rstrip(".,;:)>】」』")
+        if len(raw) < 12:
+            continue
+        start = m.start()
+        candidates.append(PatternHit("url", raw, start, start + len(raw)))
+
     for m in _BIRTH_INLINE.finditer(text):
         # include trailing 出生 for a stable replace span when present
         end = m.end()
@@ -393,6 +415,8 @@ DEFAULT_PLACEHOLDERS = {
     "property_cert": "[不动产权证号]",
     "wechat_qq": "[社交账号]",
     "ip": "[IP地址]",
+    "mac": "[MAC地址]",
+    "url": "[网址]",
     "birth_date": "[出生日期]",
     "person": "某自然人",
     "organization": "某单位",
@@ -418,6 +442,8 @@ STRUCTURAL_CATEGORIES = frozenset(
         "property_cert",
         "wechat_qq",
         "ip",
+        "mac",
+        "url",
         "birth_date",
     }
 )
@@ -437,6 +463,8 @@ _NUMBERED_STRUCTURAL = frozenset(
         "property_cert",
         "wechat_qq",
         "ip",
+        "mac",
+        "url",
         "birth_date",
     }
 )
@@ -492,6 +520,7 @@ def categories_for_mode(
             "property_cert",
             "wechat_qq",
             "ip",
+            "mac",
         }
     else:
         raise ValueError(f"unknown mode: {mode!r}; expected 'ai' or 'production'")

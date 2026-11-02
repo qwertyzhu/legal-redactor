@@ -81,7 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
             help=(
                 "不自动脱敏的结构类别（可重复或逗号分隔）。"
                 "例如：uscc, bank_account, case_number, mobile, email, id_card, landline, "
-                "passport, hk_mo_permit, plate, property_cert, wechat_qq, ip, birth_date"
+                "passport, hk_mo_permit, plate, property_cert, wechat_qq, ip, mac, url, birth_date"
             ),
         )
         sp.add_argument(

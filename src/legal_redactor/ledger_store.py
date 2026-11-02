@@ -213,7 +213,7 @@ def restore_text(text: str, ledger: dict[str, Any]) -> tuple[str, list[str]]:
         out = out.replace(token, original)
     # surface leftover placeholders that look like ours
     leftovers = sorted(
-        set(re.findall(r"某[甲乙丙丁戊己庚辛壬癸]\d*|某单位[A-Z]\d*|\[(?:身份证号|手机号|邮箱|账号|统一社会信用代码|车牌号|护照号|IP地址|出生日期|社交账号|不动产权证号|电话|已脱敏)\d*\]", out))
+        set(re.findall(r"某[甲乙丙丁戊己庚辛壬癸]\d*|某单位[A-Z]\d*|\[(?:身份证号|手机号|邮箱|账号|统一社会信用代码|车牌号|护照号|IP地址|MAC地址|网址|出生日期|社交账号|不动产权证号|电话|已脱敏)\d*\]", out))
     )
     for item in leftovers[:10]:
         warns.append(f"possible unrestored placeholder remains: {item}")

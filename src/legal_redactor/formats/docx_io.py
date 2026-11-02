@@ -390,6 +390,10 @@ def redact_docx(
             )
         if any(n.startswith("word/embeddings/") for n in names):
             warn.append("docx contains word/embeddings/* (OLE) — review or remove before sharing")
+        if _has_sensitive_field(zin, names):
+            warn.append(
+                "DOCX-FIELD: 域代码未替换（交叉引用、文件名域）。页码域忽略。导出前看一眼域结果里有没有人名。"
+            )
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
             for item in zin.infolist():
                 data = zin.read(item.filename)
@@ -418,6 +422,24 @@ def redact_docx(
         )
         _REVISION_SPLIT_WARN.clear()
     return "\n".join(collected)
+
+
+_BENIGN_FIELD = re.compile(br"(?i)^[\s\\]*(PAGE|NUMPAGES|SECTIONPAGES|DATE|TIME|SEQ|PAGE\s*\\\*[^\s]*)\b")
+
+
+def _has_sensitive_field(zin: zipfile.ZipFile, names: list[str]) -> bool:
+    """True when a Word field is not a page/date/seq field. Those can hide a filename or a name."""
+    for name in names:
+        if not name.startswith("word/") or not name.endswith(".xml"):
+            continue
+        data = zin.read(name)
+        if b"instrText" not in data:
+            continue
+        for match in re.finditer(br"<w:instrText[^>]*>([^<]*)</w:instrText>", data):
+            body = match.group(1).strip()
+            if body and not _BENIGN_FIELD.match(body):
+                return True
+    return False
 
 
 def _media_warnings(

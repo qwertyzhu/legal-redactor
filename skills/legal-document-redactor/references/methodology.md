@@ -44,7 +44,7 @@ If a court form **requires** an ID number, do not use this tool to invent blanks
 | `--extra-categories CAT[,CAT…]` | Auto-redact beyond mode default (e.g. strip `case_number` in production) |
 | `--preserve TEXT` | Leave one exact string unchanged (any category) |
 
-Known structural categories: `id_card`, `mobile`, `landline`, `email`, `bank_account`, `case_number`, `uscc`, `passport`, `hk_mo_permit`, `plate`, `property_cert`, `wechat_qq`, `ip`, `birth_date`.
+Known structural categories: `id_card`, `mobile`, `landline` (含 400/800 与空格分段座机), `email`, `bank_account`, `case_number`, `uscc`, `passport`, `hk_mo_permit` (含台胞证标签), `plate`, `property_cert`, `wechat_qq`, `ip`, `mac`, `url`（仅 `ai` 默认去掉）, `birth_date`.
 
 ## Process split
 

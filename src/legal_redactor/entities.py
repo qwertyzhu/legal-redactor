@@ -93,6 +93,11 @@ _ABBR_BLOCK = {"甲方", "乙方", "丙方", "原告", "被告", "本公司", "�
 _AMOUNT = re.compile(
     r"(?<!\d)(?:人民币|RMB|[￥¥])?\s*(?:(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)\s*(?:万元|元)"
 )
+# 壹佰贰拾万元整. Must contain a financial uppercase digit so 「第壹条」不会命中。
+_CN_AMOUNT = re.compile(
+    r"(?:人民币)?[零壹贰貳叁參叄肆伍陆陸柒捌玖拾佰仟萬万亿元圆角分整]{3,}(?:元|圆)整?"
+)
+_CN_AMOUNT_DIGIT = re.compile(r"[壹贰貳叁參叄肆伍陆陸柒捌玖]")
 
 
 def _stable_alias(category: str, index: int) -> str:
@@ -141,15 +146,54 @@ def _district_address(addr: str) -> str:
     return "某地址"
 
 
+def _cn_amount_value(raw: str) -> float | None:
+    """Rough value of a financial-uppercase RMB string. None if it does not parse."""
+    digits = {
+        "零": 0, "壹": 1, "贰": 2, "貳": 2, "叁": 3, "參": 3, "叄": 3,
+        "肆": 4, "伍": 5, "陆": 6, "陸": 6, "柒": 7, "捌": 8, "玖": 9,
+    }
+    units = {"拾": 10, "佰": 100, "仟": 1000, "千": 1000, "百": 100, "十": 10}
+
+    def chunk(part: str) -> int:
+        total = 0
+        num = 0
+        for ch in part:
+            if ch in digits:
+                num = digits[ch]
+            elif ch in units:
+                total += (num or 1) * units[ch]
+                num = 0
+        return total + num
+
+    text = raw.replace("人民币", "").replace("整", "").replace("圆", "元").replace("圓", "元")
+    text = text.replace("萬", "万")
+    if not _CN_AMOUNT_DIGIT.search(text):
+        return None
+    yi = wan = 0
+    rest = text
+    if "亿" in rest:
+        left, rest = rest.split("亿", 1)
+        yi = chunk(left.replace("元", ""))
+    if "万" in rest:
+        left, rest = rest.split("万", 1)
+        wan = chunk(left.replace("元", ""))
+    return float(yi * 100_000_000 + wan * 10_000 + chunk(rest))
+
+
 def _amount_alias(raw: str) -> str:
-    compact = re.sub(r"[,，\s人民币RMB￥¥]", "", raw)
-    wan = "万" in compact
-    digits = re.sub(r"万元|元", "", compact)
-    try:
-        number = float(digits)
-    except ValueError:
-        return "X元"
-    value = number * 10000 if wan else number
+    if _CN_AMOUNT_DIGIT.search(raw):
+        value = _cn_amount_value(raw)
+        if value is None:
+            return "X元"
+    else:
+        compact = re.sub(r"[,，\s人民币RMB￥¥]", "", raw)
+        wan = "万" in compact
+        digits = re.sub(r"万元|元", "", compact)
+        try:
+            number = float(digits)
+        except ValueError:
+            return "X元"
+        value = number * 10000 if wan else number
     if value < 10_000:
         return "不足万元"
     if value < 100_000:
@@ -205,6 +249,21 @@ def _append_amounts(text: str, plan: RedactionPlan, preserve_set: set[str]) -> N
                 role="other",
                 source="auto-confident",
                 notes="精确金额改为量级",
+            )
+        )
+        existing.add(raw)
+    for match in _CN_AMOUNT.finditer(text):
+        raw = match.group(0).strip()
+        if not raw or raw in existing or raw in preserve_set or not _CN_AMOUNT_DIGIT.search(raw):
+            continue
+        plan.entities.append(
+            EntityRecord(
+                original=raw,
+                category="amount",
+                replacement=_amount_alias(raw),
+                role="other",
+                source="auto-confident",
+                notes="大写金额改为量级",
             )
         )
         existing.add(raw)
