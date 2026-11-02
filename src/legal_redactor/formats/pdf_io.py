@@ -70,6 +70,78 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
 
 
+def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
+    """Per-line non-space characters with their rects, in reading order."""
+    lines: list[list[tuple[str, fitz.Rect]]] = []
+    raw = page.get_text("rawdict")
+    for block in raw.get("blocks", []):
+        for line in block.get("lines", []):
+            chars: list[tuple[str, fitz.Rect]] = []
+            for span in line.get("spans", []):
+                for ch in span.get("chars", []):
+                    char = ch.get("c", "")
+                    if not char or char.isspace():
+                        continue
+                    chars.append((char, fitz.Rect(ch["bbox"])))
+            if chars:
+                lines.append(chars)
+    return lines
+
+
+def _page_char_index(
+    page: "fitz.Page",
+) -> tuple[str, list["fitz.Rect"], list[int]]:
+    """Whitespace-free text of a page plus each character's rect and line number.
+
+    Court PDFs wrap a long party name across a line break, and `Page.search_for`
+    only matches inside one line, so that occurrence survives the replacement.
+    Indexing characters lets us find the wrapped ones and redact per line.
+    """
+    parts: list[str] = []
+    rects: list[fitz.Rect] = []
+    rows: list[int] = []
+    for row, line in enumerate(_line_chars(page)):
+        for char, rect in line:
+            parts.append(char)
+            rects.append(rect)
+            rows.append(row)
+    return "".join(parts), rects, rows
+
+
+def _wrapped_rects(
+    index: tuple[str, list["fitz.Rect"], list[int]],
+    original: str,
+    *,
+    allow_single_line: bool = False,
+) -> list[tuple["fitz.Rect", bool]]:
+    """Rects for occurrences of `original` that span a line break.
+
+    Returns ``[(rect, carries_replacement_text), ...]`` so the caller paints the
+    alias once, on the first line of the wrapped run.
+    """
+    text, rects, rows = index
+    target = "".join(original.split())
+    if len(target) < 4:
+        return []
+    out: list[tuple[fitz.Rect, bool]] = []
+    start = text.find(target)
+    while start != -1:
+        span_rows = rows[start : start + len(target)]
+        if len(span_rows) == len(target):
+            unique_rows = sorted(set(span_rows))
+            if len(unique_rows) > 1 or allow_single_line:
+                for n, row in enumerate(unique_rows):
+                    line_rects = [
+                        rects[i] for i in range(start, start + len(target)) if rows[i] == row
+                    ]
+                    union = fitz.Rect(line_rects[0])
+                    for rect in line_rects[1:]:
+                        union |= rect
+                    out.append((union, n == 0))
+        start = text.find(target, start + 1)
+    return out
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -94,6 +166,7 @@ def redact_pdf(
 
         for page in doc:
             found_any = False
+            index: tuple[str, list[fitz.Rect], list[int]] | None = None
             for original, replacement in mapping:
                 if not original:
                     continue
@@ -102,6 +175,20 @@ def redact_pdf(
                     page.add_redact_annot(
                         rect,
                         text=replacement,
+                        fill=(1, 1, 1),
+                        text_color=(0, 0, 0),
+                        fontsize=9,
+                        fontname=_redaction_fontname(replacement),
+                    )
+                    found_any = True
+                # Names and addresses wrapped across a line break: search_for
+                # cannot see them, so redact those occurrences per line.
+                if index is None:
+                    index = _page_char_index(page)
+                for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):
+                    page.add_redact_annot(
+                        rect,
+                        text=replacement if carries_text else "",
                         fill=(1, 1, 1),
                         text_color=(0, 0, 0),
                         fontsize=9,

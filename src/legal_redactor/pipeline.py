@@ -363,6 +363,23 @@ def redact_file(
         source_text, known=known, allowlist=allowlist
     )
     suspects += _ner_suspects(source_text, known | {x.text for x in suspects})
+    # A truncated or over-long variant of a name that is already planned for
+    # replacement is not a new entity. Without this, a PDF that wraps
+    # 北京朗岳网络科技有限公司 across a line break keeps coming back as
+    # 朗岳网络科技有限公司 and the handoff loop never converges.
+    planned = [e.original for e in plan.entities if e.original]
+    if planned:
+        suspects = [
+            s
+            for s in suspects
+            if not (
+                s.text
+                and any(
+                    s.text != original and (s.text in original or original in s.text)
+                    for original in planned
+                )
+            )
+        ]
 
     ledger_target = resolve_ledger_path(
         input_path,

@@ -77,7 +77,9 @@ _LABELED_PASSPORT = re.compile(
 )
 _LABELED_HK_MO = re.compile(
     r"(?:港澳通行证|通行证号?|回乡证号?|台胞证号?|台湾居民来往大陆通行证)"
-    r"\s*[：: ]\s*([A-Z0-9]{8,11})",
+    # 台湾居民来往大陆通行证（台胞证）号：0123456789
+    r"(?:[（(][^）)\n]{0,12}[）)])?"
+    r"\s*号?\s*[：: ]\s*([A-Z0-9]{8,11})",
     re.IGNORECASE,
 )
 # Plate: 京A12345 / 浙A·12345 / 应急等尾缀
@@ -182,6 +184,20 @@ def case_number_placeholder(raw: str) -> str:
     kind = match.group(1)
     stage = match.group(2) or "初"
     return f"（20XX）X{kind}{stage}X号"
+
+
+# A label-anchored category beats a generic one that matches the same span
+# (台胞证号：0123456789 also looks like a 10-digit landline). Only categories that
+# require an explicit label belong here — an unlabeled USCC regex would otherwise
+# outrank a resident ID of the same length.
+_CATEGORY_SPECIFICITY = {
+    "passport": 2,
+    "hk_mo_permit": 2,
+    "share_code": 2,
+    "url_secret": 2,
+    "wechat_qq": 2,
+    "property_cert": 2,
+}
 
 
 def detect_structural(text: str) -> list[PatternHit]:
@@ -416,7 +432,17 @@ def detect_structural(text: str) -> list[PatternHit]:
     # A full URL must not hide a phone, token or code inside it.
     urls = [hit for hit in candidates if hit.category == "url"]
     rest = [hit for hit in candidates if hit.category != "url"]
-    rest.sort(key=lambda h: (-(h.end - h.start), 0 if h.auto_replace else 1, h.start))
+    # Longest first, then the more specific category: a labelled 台胞证号/通行证号
+    # that happens to look like a landline (0123456789) must keep its own label
+    # instead of degrading to [电话].
+    rest.sort(
+        key=lambda h: (
+            -(h.end - h.start),
+            -_CATEGORY_SPECIFICITY.get(h.category, 0),
+            0 if h.auto_replace else 1,
+            h.start,
+        )
+    )
     chosen: list[PatternHit] = []
     occupied: list[tuple[int, int]] = []
     for hit in rest:

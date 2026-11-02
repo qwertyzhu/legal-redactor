@@ -441,14 +441,52 @@ def _auto_confident(args: argparse.Namespace) -> bool:
     return getattr(args, "mode", None) == "ai"
 
 
-def _print_handoff(suspects: list, replaced: int) -> None:
+def _print_handoff(
+    suspects: list,
+    replaced: int,
+    *,
+    hits: list[dict] | None = None,
+    ok: bool = True,
+    mode: str | None = None,
+    allow_residual: bool = False,
+) -> None:
+    """Print the one block an agent is allowed to read.
+
+    `ok=False` means the residual scan failed: saying "无待补实体，到此停止"
+    there would let an agent ship a failing file, so failure wins over the
+    pending list.
+    """
     pending = [s for s in suspects if getattr(s, "reason", "") != "ner"]
-    shown = pending[:8]
+    if not ok and not allow_residual:
+        hits = list(hits or [])
+        print(f"handoff:    status=FAIL 不得交付（replaced={replaced}）")
+        print(
+            "handoff:    下面这些原文仍在输出里。先修规则或补 entities，"
+            "补不掉的不要交出去；不要打开原文。"
+            if hits
+            else "handoff:    残留扫描未通过。先看 residual 文件，不要打开原文。"
+        )
+        for hit in hits[:8]:
+            print(f"handoff:    {hit.get('category')}\t{hit.get('text')}")
+        extra = len(hits) - 8
+        if extra > 0:
+            print(f"handoff:    另有 {extra} 条，见 residual 文件。")
+        return
     print(f"handoff:    replaced={replaced} pending={len(pending)}")
-    if not shown:
+    if mode == "production":
+        # production removes credentials but keeps parties, lawyers, addresses,
+        # work titles and accounts on purpose; listing them as 待补 makes an
+        # agent over-redact a filing.
+        print(
+            "handoff:    production 模式：当事人、律师、地址、作品名、账号按设计保留，"
+            "下列残留多为应保留项，不要为它们补 entities。"
+        )
+        return
+    if not pending:
         print("handoff:    无待补实体。到此停止，不要打开原文、脱敏稿或 ledger。")
         return
     print("handoff:    只把下面几条补进 entities.json，然后重跑同一条命令。不要打开原文。")
+    shown = pending[:8]
     for item in shown:
         print(f"handoff:    {item.category}\t{item.text}")
     extra = len(pending) - len(shown)
@@ -549,7 +587,21 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         if batch.skipped and not batch.results:
             return 1
         pending = [s for result in batch.results for s in result.suspects]
-        _print_handoff(pending, sum(len(result.plan.entities) for result in batch.results))
+        failed = [r for r in batch.results if not r.ok]
+        failed_hits: list[dict] = []
+        for result in failed:
+            for hit in result.residual.hits:
+                failed_hits.append(
+                    dict(hit, text=f"{result.output_path.name}: {hit.get('text')}")
+                )
+        _print_handoff(
+            pending,
+            sum(len(result.plan.entities) for result in batch.results),
+            hits=failed_hits,
+            ok=not failed,
+            mode=batch.mode,
+            allow_residual=bool(args.allow_residual),
+        )
         if batch.failed and not args.allow_residual:
             print(
                 "ERROR: one or more files failed residual scan. "
@@ -626,7 +678,14 @@ def _cmd_redact(args: argparse.Namespace) -> int:
         print(f"audit:       {result.audit_md_path}")
     for w in result.warnings:
         print(f"WARNING:     {w}")
-    _print_handoff(result.suspects, len(result.plan.entities))
+    _print_handoff(
+        result.suspects,
+        len(result.plan.entities),
+        hits=result.residual.hits,
+        ok=result.ok,
+        mode=result.mode,
+        allow_residual=bool(args.allow_residual),
+    )
     if not result.ok and not args.allow_residual:
         print(
             "ERROR: residual PII remains (structural, or a planned replacement "

@@ -13,7 +13,13 @@ legal-redactor redact INPUT.docx --mode ai -o OUTPUT.docx
 
 `--mode ai` 已经会自动替换带标签的姓名、单位、住址、书名号作品、作品名称、剧名、昵称和抖音号。出证把 `ai` 换成 `production`，当事人、作品和账号会留下。
 
-命令结束只看 `handoff:`。写着「无待补实体」就停止。写了待补条目，只把那几条追加进 `entities.json`，再跑同一条命令。不要打开脱敏稿、audit 或 ledger。
+命令结束只看 `handoff:`。分三种：
+
+- `handoff: 无待补实体。到此停止` — 可以交付，停止。
+- `handoff: 只把下面几条补进 entities.json` — 只把那几条追加进 `entities.json`，再跑同一条命令。
+- `handoff: status=FAIL 不得交付` — 退出码同时是 2。残留在 `handoff:` 或 `residual` 文件里，补表补不掉的说明是规则没接住，不要交出去，也不要当成「没有待补」放行。
+
+不要打开脱敏稿、audit 或 ledger 核对清单。
 
 ## 先选模式
 
@@ -39,8 +45,6 @@ legal-redactor redact 案件目录 --mode ai --auto-confident -o 案件目录/ou
 目录里有 `entities.json` 时才统一替身，全称和简称跨文件共用一个。没有这份文件时各文件单独脱敏，避免把无关文书收成同一人；确是同一案又还没写实体表时，加 `--unify`。账本和 `entities.consistent.json` 写在 `案件目录/.redactor/`，不要和 `out/` 里的脱敏稿一起外发。
 
 单份文件若旁边或当前目录有 `entities.json`，会自动用上。在线回复里的替身仍用 `restore`，ledger 不上传。
-
-扫描件没有文字层时，不要对 PDF 跑上面这条，也不要把原 PDF 交给模型。`redact` 会直接拒绝。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
 
 ## 网页版模式 (Web UI)
 
@@ -78,6 +82,7 @@ legal-redactor verify workdir/ai.md --mode ai --strict
 - docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
 - 页眉、页脚、脚注、尾注和批注正文会扫，批注作者改成「作者」。域代码（文件名、交叉引用）不替换，看到 `DOCX-FIELD` 就要看一眼；页码域忽略。
 - 400/800 和带空格的座机按电话去掉。证据链接保留；链接里的账号密码、token，以及给模型时的提取码，会去掉。整段网址要去掉才加 `--extra-categories url`。大写金额只在前面是工资、月薪、存款、余额时改成量级，索赔和报酬保留。MAC 与 IP 一样去掉。台胞证必须带「台胞证」标签才识别。
+- 判决书、裁定书 PDF 里当事人全称常被排版折到下一行。工具按字符级匹配把跨行的名字一起去掉（0.18.1），所以补完 `entities.json` 后仍报 `unreplaced_entity` 的，先看是不是同一名字的另一种写法（带/不带「北京」前缀、被截断的片段）。简称（「晓明公司」「云海公司」）目前只在同一行内联动，跨行折开的「以下简称」认不到，`ai` 稿交出去前人工核一眼。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
 
