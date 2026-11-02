@@ -207,3 +207,74 @@ def test_public_tree_has_no_live_structural_pii():
             offenders.append(f"{rel}: home_path {val}")
 
     assert not offenders, "public tree structural PII suspects:\n" + "\n".join(offenders[:40])
+
+
+# Every organisation name in the public tree must be visibly fictional. A real
+# client / opposing party name must never be shipped, not even in a test fixture
+# or a CHANGELOG sentence — that is how one leaked in 0.18.1.
+_SYNTHETIC_MARKERS = (
+    "测",  # 北测 / 星测 / 杭州云测
+    "例",  # 南例 / 东例
+    "某某",  # 杭州某某网络科技有限公司
+    "合成",
+    "云帆",
+    "星澜",
+    "云海",
+    "朗岳",
+)
+_GENERIC_ORG_ALLOW = {
+    "股份有限公司",
+    "集团有限公司",
+    "有限责任公司",
+    "银行股份有限公司",
+    "文化有限公司",
+    "律师事务所",
+    "合作的律师事务所",
+    "本所",
+}
+_ORG_TOKEN = re.compile(
+    r"[·一-鿿A-Za-z0-9]{2,32}?"
+    r"(?:股份有限公司|有限责任公司|有限公司|律师事务所|会计事务所)"
+)
+# The match above starts at the sentence start (role words included), so reduce
+# every token to its last clean segment before judging it.
+_ORG_TOKEN_NOISE = re.compile(
+    r"(?:原告|被告|第三人|上诉人|被上诉人|申请人|被执行人|甲方|乙方|丙方|"
+    r"赔偿|判令|本合同由|本公司|该公司|与|及|和|向|由|在|诉|、|，|。|：|“|”|（|）|\(|\))"
+)
+# Placeholder shapes that are obviously not a live party name.
+_PLACEHOLDER_MARKERS = ("X", "Y", "Z", "x", "y", "某某", "甲", "乙", "丙")
+# Names deliberately split across a line to exercise wrapped-name redaction.
+_ORG_FRAGMENT_ALLOW = {
+    "字娱乐发行股份有限公司",  # tail half of the wrapped synthetic name
+}
+
+
+def _org_name_is_fictional(token: str) -> bool:
+    parts = [p for p in _ORG_TOKEN_NOISE.split(token) if p]
+    bare = parts[-1] if parts else token
+    if bare in _GENERIC_ORG_ALLOW or bare in _ORG_FRAGMENT_ALLOW:
+        return True
+    if any(marker in bare for marker in _SYNTHETIC_MARKERS):
+        return True
+    return any(marker in bare for marker in _PLACEHOLDER_MARKERS)
+
+
+def test_public_org_names_are_fictional():
+    offenders: list[str] = []
+    for path in _iter_public_text_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for match in _ORG_TOKEN.finditer(text):
+            token = match.group(0)
+            bare = re.sub(r"^[（(“\"']+", "", token)
+            if _org_name_is_fictional(bare):
+                continue
+            offenders.append(f"{rel}: {bare}")
+    assert not offenders, (
+        "public tree contains non-fictional organisation names "
+        "(replace with 北测/星测/南例/某某 style):\n" + "\n".join(sorted(set(offenders))[:40])
+    )

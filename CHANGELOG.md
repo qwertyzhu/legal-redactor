@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 公开树守卫：`tests/test_public_safety.py` 新增 `test_public_org_names_are_fictional`，仓库里出现的任何企业名必须带虚构标记（测 / 例 / 某某 / 云帆 / 星澜 / 云海 / 朗岳）或是 X/Y 占位，否则 CI 失败。防止再出现真实客户或对手方名称。
+
 ## 0.18.1 - 2026-11-02
 
 `handoff:` 不再在 FAIL 时让人停手；判决书 PDF 里被排版折行的当事人全称真的会去掉。
