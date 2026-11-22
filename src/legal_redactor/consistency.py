@@ -11,11 +11,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+from .allowlist import load_allowlist
 from .draft import extract_text
-from .entities import load_entities_file
-from .patterns import DEFAULT_PLACEHOLDERS, detect_structural, structural_placeholder
-from .pipeline import iter_batch_inputs
-from .suspects import detect_suspects
+from .entities import build_plan, load_entities_file
+from .patterns import DEFAULT_PLACEHOLDERS, structural_placeholder
+from .pipeline import _normalize_keep_extra, iter_batch_inputs
+from .profiles_loader import resolve_profile
 
 _PERSON_COUNTER = "甲乙丙丁戊己庚辛壬癸"
 _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -34,6 +35,8 @@ def _stable_alias(category: str, index: int, original: str = "") -> str:
         return f"某地址{index + 1}"
     if category == "work_title":
         return f"某作品{index + 1}" if index else "某作品"
+    if category == "account":
+        return f"某账号{index + 1}" if index else "某账号"
     if category == "amount":
         return DEFAULT_PLACEHOLDERS["amount"]
     if category == "case_number":
@@ -49,6 +52,7 @@ class Observation:
     source: str
     files: list[str] = field(default_factory=list)
     replacements_seen: list[str] = field(default_factory=list)
+    abbr_of: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -104,6 +108,7 @@ def _add_obs(
     source: str,
     file_label: str,
     replacement: str | None = None,
+    abbr_of: str | None = None,
 ) -> None:
     original = original.strip()
     if not original:
@@ -117,6 +122,7 @@ def _add_obs(
             source=source,
             files=[],
             replacements_seen=[],
+            abbr_of=abbr_of,
         )
         bucket[original] = obs
     if file_label not in obs.files:
@@ -128,19 +134,46 @@ def _add_obs(
         obs.role = role
     if replacement and replacement not in obs.replacements_seen:
         obs.replacements_seen.append(replacement)
+    if abbr_of and not obs.abbr_of:
+        obs.abbr_of = abbr_of
 
 
 def collect_observations_from_file(
     path: Path,
     *,
+    mode: str = "ai",
     entities_path: Path | None = None,
     include_suspects: bool = True,
+    preserve: list[str] | None = None,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
+    allowlist: set[str] | None = None,
+    profile: str | None = None,
+    redact_court_staff: bool | None = None,
 ) -> dict[str, Observation]:
-    """Scan one source document into original→observation map."""
+    """Scan one source document into original→observation map respecting mode/profile."""
     path = Path(path)
     text = extract_text(path)
     label = path.name
     bucket: dict[str, Observation] = {}
+
+    prof = resolve_profile(profile=profile, mode=None) if profile else None
+    eff_mode = (prof.mode if prof else mode).lower().strip()
+    eff_preserve = list(preserve or []) + (list(prof.preserve) if prof else [])
+    keep, extra = _normalize_keep_extra(keep_categories, extra_categories)
+    only = prof.categories if prof is not None else None
+    if prof is not None and prof.categories is None:
+        keep |= prof.keep_categories
+        extra |= prof.extra_categories
+    eff_allow = allowlist if allowlist is not None else load_allowlist(search_dirs=[Path.cwd(), path.parent])
+    alias_style = prof.alias_style if prof else "generic"
+    address_granularity = prof.address_granularity if prof else "full"
+    amount_fuzzy = prof.amount_fuzzy if prof else True
+    staff = (
+        redact_court_staff
+        if redact_court_staff is not None
+        else (prof.redact_court_staff if prof else (eff_mode == "ai"))
+    )
 
     for raw in load_entities_file(entities_path):
         original = str(raw.get("original") or raw.get("text") or "").strip()
@@ -156,27 +189,41 @@ def collect_observations_from_file(
             replacement=str(raw.get("replacement") or "").strip() or None,
         )
 
-    for hit in detect_structural(text):
+    plan = build_plan(
+        text,
+        mode=eff_mode,
+        entities_file=entities_path,
+        preserve=eff_preserve,
+        keep_categories=keep,
+        extra_categories=extra,
+        auto_confident=include_suspects,
+        allowlist=eff_allow,
+        only_categories=only,
+        alias_style=alias_style,
+        address_granularity=address_granularity,
+        amount_fuzzy=amount_fuzzy,
+        redact_court_staff=staff,
+        truncate_addresses=bool(prof.truncate_addresses) if prof else False,
+        redact_third_party=prof.redact_third_party if prof else True,
+    )
+    for ent in plan.entities:
+        abbr_of = ent.notes.split(":", 1)[1] if ent.notes.startswith("以下简称:") else None
+        keep_fixed_repl = (
+            ent.source not in {"structural", "auto-confident"}
+            or ent.category == "amount"
+            or (ent.category == "address" and address_granularity == "district")
+            or (ent.category == "person" and (alias_style == "court" or ent.role == "article8"))
+        )
         _add_obs(
             bucket,
-            original=hit.text,
-            category=hit.category,
-            role="structural",
-            source="structural",
+            original=ent.original,
+            category=ent.category,
+            role=ent.role,
+            source=ent.source,
             file_label=label,
+            replacement=ent.replacement if keep_fixed_repl else None,
+            abbr_of=abbr_of,
         )
-
-    if include_suspects:
-        known = set(bucket)
-        for s in detect_suspects(text, known=known):
-            _add_obs(
-                bucket,
-                original=s.text,
-                category=s.category,
-                role=s.role_hint if s.role_hint != "unknown" else "other",
-                source="suspect-hint",
-                file_label=label,
-            )
     return bucket
 
 
@@ -219,6 +266,7 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
                     source=obs.source,
                     files=list(obs.files),
                     replacements_seen=list(obs.replacements_seen),
+                    abbr_of=obs.abbr_of,
                 )
                 continue
             for f in obs.files:
@@ -227,6 +275,8 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
             for r in obs.replacements_seen:
                 if r not in existing.replacements_seen:
                     existing.replacements_seen.append(r)
+            if obs.abbr_of and not existing.abbr_of:
+                existing.abbr_of = obs.abbr_of
             if existing.category in {"other", "unknown"} and obs.category not in {
                 "other",
                 "unknown",
@@ -257,10 +307,14 @@ def build_unified_entities(
     *,
     mode: str = "ai",
 ) -> list[dict[str, Any]]:
-    """Assign one stable replacement per original (longest originals first for readability)."""
+    """Assign one stable replacement per original (full names before abbreviations)."""
     mode = mode.lower().strip()
-    items = sorted(bucket.values(), key=lambda o: (-len(o.original), o.original))
+    items = sorted(
+        bucket.values(),
+        key=lambda o: (1 if o.abbr_of else 0, -len(o.original), o.original),
+    )
     counters: dict[str, int] = {}
+    assigned: dict[str, str] = {}
     entities: list[dict[str, Any]] = []
 
     for obs in items:
@@ -292,11 +346,14 @@ def build_unified_entities(
         if obs.replacements_seen:
             # Prefer first non-empty; conflicts reported separately
             replacement = obs.replacements_seen[0]
+        elif obs.abbr_of and obs.abbr_of in assigned:
+            replacement = assigned[obs.abbr_of]
         else:
             idx = counters.get(category, 0)
             replacement = _stable_alias(category, idx, obs.original)
             counters[category] = idx + 1
 
+        assigned[obs.original] = replacement
         row: dict[str, Any] = {
             "original": obs.original,
             "category": category,
@@ -430,13 +487,29 @@ def unify_directory(
     entities_path: Path | None = None,
     recursive: bool = False,
     include_suspects: bool = True,
+    preserve: list[str] | None = None,
+    keep_categories: list[str] | set[str] | None = None,
+    extra_categories: list[str] | set[str] | None = None,
+    allowlist: set[str] | None = None,
+    profile: str | None = None,
+    redact_court_staff: bool | None = None,
 ) -> ConsistencyReport:
     """Scan a directory of source docs and write unified entities + report."""
     input_dir = Path(input_dir)
     paths = iter_batch_inputs(input_dir, recursive=recursive)
+    eff_allow = allowlist if allowlist is not None else load_allowlist(search_dirs=[Path.cwd(), input_dir])
     maps = [
         collect_observations_from_file(
-            p, entities_path=entities_path, include_suspects=include_suspects
+            p,
+            mode=mode,
+            entities_path=entities_path,
+            include_suspects=include_suspects,
+            preserve=preserve,
+            keep_categories=keep_categories,
+            extra_categories=extra_categories,
+            allowlist=eff_allow,
+            profile=profile,
+            redact_court_staff=redact_court_staff,
         )
         for p in paths
     ]

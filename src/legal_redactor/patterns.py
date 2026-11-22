@@ -53,11 +53,16 @@ _EMAIL = re.compile(
 _BANK = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
 # 律师执业证号常为 17 位，紧挨标签时不是银行账号（法释〔2016〕19号第十一条保留）
 _LICENSE_LABEL = re.compile(r"(?:执业证号|执业证|律师证号)\s*[：: ]?\s*$")
-# PRC case number, e.g. （2024）京73民初1234号
+# PRC case number, e.g. （2024）京73民初1234号 / 〔2023〕京0105民初999号 / （2015）朝民（知）初字第12345号 / （2024）京仲案字第0888号
 _CASE_NO = re.compile(
-    r"[（(]\d{4}[）)][^（）()\n]{0,20}?"
-    r"(?:民|刑|行|执|知|商|赔|清|破|辖|认)"
-    r"[^（）()\n]{0,12}?\d+号"
+    r"(?:[（(〔【]\d{4}[）)〕】](?:[^（）()〔〕【】\n]|[（(][一-鿿]{1,4}[）)]){0,20}?"
+    r"(?:民|刑|行|执|知|商|赔|清|破|辖|认|仲)"
+    r"(?:[^（）()〔〕【】\n]|[（(][一-鿿]{1,4}[）)]){0,14}?\d+号"
+    r"|[一-鿿]{2,16}仲[一-鿿]{0,6}[（(〔【]\d{4}[）)〕】]第?\d+号)"
+)
+# PRC notary certificate number, e.g. （2024）京方圆内经证字第12345号
+_NOTARY_NO = re.compile(
+    r"[（(〔【]\d{4}[）)〕】][^（）()〔〕【】\n]{1,24}?证(?:[A-Za-z\u4e00-\u9fff]{0,4})?字\s*第?\s*\d+\s*号"
 )
 # Unified social credit code (18 alnum)
 _USCC = re.compile(
@@ -82,13 +87,13 @@ _LABELED_HK_MO = re.compile(
     r"\s*号?\s*[：: ]\s*([A-Z0-9]{8,11})",
     re.IGNORECASE,
 )
-# Plate: 京A12345 / 浙A·12345 / 应急等尾缀
+# Plate: 京A12345 (7-char) / 京AD12345 (8-char new energy) / 浙A·12345 / 应急等尾缀
 _PLATE = re.compile(
     r"(?<![A-Z0-9])"
     r"[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼]"
     r"[A-HJ-NP-Z]"
     r"[·\s]?"
-    r"[A-HJ-NP-Z0-9]{4,5}"
+    r"[A-HJ-NP-Z0-9]{4,6}"
     r"[挂学警港澳使领]?"
     r"(?![A-Z0-9])"
 )
@@ -173,17 +178,18 @@ def _uscc_checksum_ok(value: str) -> bool:
     return _USCC_ALPHABET[(31 - total % 31) % 31] == body[17]
 
 
-def case_number_placeholder(raw: str) -> str:
-    """Preserve case-type letter and 初/终/再/执 stage in the alias."""
+def case_number_placeholder(raw: str, index: int = 0) -> str:
+    """Preserve case-type letter and 初/终/再/执 stage in the alias; disambiguate distinct cases."""
+    suffix = "" if index == 0 else str(index + 1)
     match = re.search(
-        r"(民|刑|行|执|知|商|赔|清|破|辖|认)(初|终|再|执|督|特|确)?",
+        r"(民|刑|行|执|知|商|赔|清|破|辖|认|仲)(?:[（(][一-鿿]{1,4}[）)])?(初|终|再|执|督|特|确|案)?",
         raw,
     )
     if not match:
-        return "（20XX）XX民初XX号"
+        return f"（20XX）XX民初XX{suffix}号"
     kind = match.group(1)
-    stage = match.group(2) or "初"
-    return f"（20XX）X{kind}{stage}X号"
+    stage = match.group(2) or ("案" if kind == "仲" else "初")
+    return f"（20XX）X{kind}{stage}X{suffix}号"
 
 
 # A label-anchored category beats a generic one that matches the same span
@@ -197,6 +203,7 @@ _CATEGORY_SPECIFICITY = {
     "url_secret": 2,
     "wechat_qq": 2,
     "property_cert": 2,
+    "notary_number": 2,
 }
 
 
@@ -265,6 +272,9 @@ def detect_structural(text: str) -> list[PatternHit]:
         if re.search(r"https?://[^/\s@]+:$", text[max(0, m.start() - 80) : m.start()]):
             continue
         candidates.append(PatternHit("email", m.group(0), m.start(), m.end()))
+
+    for m in _NOTARY_NO.finditer(text):
+        candidates.append(PatternHit("notary_number", m.group(0), m.start(), m.end()))
 
     for m in _CASE_NO.finditer(text):
         candidates.append(PatternHit("case_number", m.group(0), m.start(), m.end()))
@@ -468,6 +478,7 @@ DEFAULT_PLACEHOLDERS = {
     "email": "[邮箱]",
     "bank_account": "[账号]",
     "case_number": "（20XX）XX民初XX号",
+    "notary_number": "[公证书号]",
     "uscc": "[统一社会信用代码]",
     "passport": "[护照号]",
     "hk_mo_permit": "[通行证号]",
@@ -497,6 +508,7 @@ STRUCTURAL_CATEGORIES = frozenset(
         "email",
         "bank_account",
         "case_number",
+        "notary_number",
         "uscc",
         "passport",
         "hk_mo_permit",
@@ -520,6 +532,7 @@ _NUMBERED_STRUCTURAL = frozenset(
         "email",
         "id_card",
         "bank_account",
+        "notary_number",
         "uscc",
         "passport",
         "hk_mo_permit",
@@ -538,7 +551,7 @@ _NUMBERED_STRUCTURAL = frozenset(
 
 def structural_placeholder(category: str, original: str, index: int) -> str:
     if category == "case_number":
-        return case_number_placeholder(original)
+        return case_number_placeholder(original, index)
     base = DEFAULT_PLACEHOLDERS.get(category, DEFAULT_PLACEHOLDERS["other"])
     if category in _NUMBERED_STRUCTURAL:
         return base if index == 0 else f"{base.rstrip(']')}{index + 1}]"

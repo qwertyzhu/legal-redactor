@@ -142,6 +142,16 @@ def _wrapped_rects(
     return out
 
 
+def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
+    area = max(rect.width * rect.height, 0.01)
+    for prev in claimed:
+        inter = rect & prev
+        if inter.width > 0 and inter.height > 0:
+            if (inter.width * inter.height) / area > 0.35:
+                return True
+    return False
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -154,6 +164,7 @@ def redact_pdf(
     image_categories: set[str] | None = None,
 ) -> str:
     warn = warnings if warnings is not None else []
+    ordered_mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
     doc = fitz.open(str(input_path))
     try:
         if not _has_text_layer(doc):
@@ -166,12 +177,16 @@ def redact_pdf(
 
         for page in doc:
             found_any = False
+            claimed_rects: list[fitz.Rect] = []
             index: tuple[str, list[fitz.Rect], list[int]] | None = None
-            for original, replacement in mapping:
+            for original, replacement in ordered_mapping:
                 if not original:
                     continue
                 rects = page.search_for(original)
                 for rect in rects:
+                    if _overlaps_claimed(rect, claimed_rects):
+                        continue
+                    claimed_rects.append(rect)
                     page.add_redact_annot(
                         rect,
                         text=replacement,
@@ -186,6 +201,9 @@ def redact_pdf(
                 if index is None:
                     index = _page_char_index(page)
                 for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):
+                    if _overlaps_claimed(rect, claimed_rects):
+                        continue
+                    claimed_rects.append(rect)
                     page.add_redact_annot(
                         rect,
                         text=replacement if carries_text else "",

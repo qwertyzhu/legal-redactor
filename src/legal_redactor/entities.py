@@ -64,32 +64,22 @@ class RedactionPlan:
         path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+from .suspects import (
+    COMPOUND_SURNAMES as _COMPOUND_SURNAMES,
+    SURNAMES as _SURNAMES,
+    has_surname as _has_surname,
+)
+
 _PERSON_COUNTER = "甲乙丙丁戊己庚辛壬癸"
 _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-_SURNAMES = set(
-    "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
-    "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
-    "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄"
-    "和穆萧尹姚邵汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜"
-    "阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞"
-    "万支柯管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉钮龚程嵇邢"
-    "滑裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧山谷"
-    "车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘厉戎祖武符刘景詹束龙叶幸司韶郜"
-    "黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡"
-    "劳逄姬申扶堵冉宰郦雍桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕"
-    "连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧"
-    "殳沃利蔚越夔隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关"
-    "蒯相查后荆红游竺权逯盖益桓公"
-)
-_COMPOUND_SURNAMES = ("欧阳", "司马", "上官", "诸葛", "司徒", "宇文", "长孙", "慕容", "东方", "皇甫", "令狐")
 # Contracts quote the short name (以下简称“星河公司”); judgments usually don't
-# (以下简称星河公司). Both must link to the full name's alias.
-_ABBR = re.compile(
-    r"(?:[（(]\s*)?以下(?:简称|称)\s*[“\"「『]?"
-    r"([^“”\"「」『』（）()\n，,。；;]{2,12}?)"
-    r"[”\"」』]?\s*(?=[）)，,；;。])"
+# (以下简称星河公司); PDFs may wrap across a newline; clauses may list “甲方”或“星河公司”.
+_ABBR_CLAUSE = re.compile(
+    r"^[（(]?以下(?:简称|称)([^）)。；;，,]{2,32}?)(?=[）)，,；;。]|$)"
 )
-_ABBR_BLOCK = {"甲方", "乙方", "丙方", "原告", "被告", "本公司", "我方", "对方", "双方", "许可方", "被许可方"}
+_ABBR_QUOTED = re.compile(r"[“\"「『]([^“”\"「」『』]{2,16})[”\"」』]")
+_ABBR_SPLIT = re.compile(r"(?:或|及|、|/)")
+_ABBR_BLOCK = {"甲方", "乙方", "丙方", "丁方", "原告", "被告", "本公司", "我方", "对方", "双方", "许可方", "被许可方"}
 _AMOUNT = re.compile(
     r"(?<!\d)(?:人民币|RMB|[￥¥])?\s*(?:(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)\s*(?:万元|元)"
 )
@@ -121,13 +111,6 @@ def _stable_alias(category: str, index: int) -> str:
     if category == "amount":
         return DEFAULT_PLACEHOLDERS["amount"]
     return DEFAULT_PLACEHOLDERS.get(category, DEFAULT_PLACEHOLDERS["other"])
-
-
-def _has_surname(name: str) -> bool:
-    if any(name.startswith(item) for item in _COMPOUND_SURNAMES):
-        return True
-    return bool(name) and name[0] in _SURNAMES
-
 
 
 def _court_person_alias(name: str) -> str:
@@ -221,22 +204,26 @@ def _link_abbreviations(text: str, plan: RedactionPlan) -> None:
             at = text.find(org.original, start)
             if at < 0:
                 break
-            window = text[at + len(org.original) : at + len(org.original) + 24]
-            match = _ABBR.search(window)
+            window = re.sub(r"\s+", "", text[at + len(org.original) : at + len(org.original) + 40])
+            match = _ABBR_CLAUSE.search(window)
             if match:
-                short = match.group(1).strip()
-                if len(short) >= 2 and short not in existing and short not in _ABBR_BLOCK:
-                    plan.entities.append(
-                        EntityRecord(
-                            original=short,
-                            category="organization",
-                            replacement=org.replacement,
-                            role=org.role,
-                            source="auto-confident",
-                            notes="以下简称，与全称同一替身",
+                body = match.group(1).strip()
+                quoted = _ABBR_QUOTED.findall(body)
+                parts = quoted if quoted else _ABBR_SPLIT.split(body)
+                for raw_short in parts:
+                    short = raw_short.strip().strip("“”\"「」『』")
+                    if 2 <= len(short) <= 16 and short not in existing and short not in _ABBR_BLOCK:
+                        plan.entities.append(
+                            EntityRecord(
+                                original=short,
+                                category="organization",
+                                replacement=org.replacement,
+                                role=org.role,
+                                source="auto-confident",
+                                notes=f"以下简称:{org.original}",
+                            )
                         )
-                    )
-                    existing.add(short)
+                        existing.add(short)
             start = at + max(1, len(org.original))
 
 

@@ -22,7 +22,7 @@ from typing import Any
 
 import pymupdf as fitz
 
-from .ocr_engine import find_tesseract, find_tessdata
+from .ocr_engine import find_tesseract, find_tessdata, ocr_image_rapidocr, rapidocr_available
 from .patterns import categories_for_mode, detect_structural
 
 BANK_RE = re.compile(r"(?<!\d)\d{16,19}(?!\d)")
@@ -124,6 +124,51 @@ def _ocr_words(
         tsv.unlink()
     except OSError:
         pass
+    return rows
+
+
+_RAPID_TOKEN_RE = re.compile(r"[A-Za-z0-9@._+\-]+|[\u4e00-\u9fff]+|[^\s]")
+
+
+def _char_visual_width(ch: str) -> float:
+    return 2.0 if ord(ch) > 127 else 1.0
+
+
+def _ocr_words_rapidocr(png_bytes: bytes) -> list[dict[str, Any]]:
+    """Convert RapidOCR line quads into word-level boxes via visual-width interpolation."""
+    rows: list[dict[str, Any]] = []
+    for line_idx, entry in enumerate(ocr_image_rapidocr(png_bytes), start=1):
+        if not entry or len(entry) < 2:
+            continue
+        quad, line_text = entry[0], str(entry[1] or "")
+        if not line_text.strip() or not quad:
+            continue
+        xs = [float(pt[0]) for pt in quad]
+        ys = [float(pt[1]) for pt in quad]
+        x0, x1 = min(xs), max(xs)
+        y0, y1 = min(ys), max(ys)
+        line_w = max(1.0, x1 - x0)
+        line_h = max(1, int(round(y1 - y0)))
+        total_w = max(1.0, sum(_char_visual_width(c) for c in line_text))
+        for word_idx, match in enumerate(_RAPID_TOKEN_RE.finditer(line_text), start=1):
+            tok = match.group(0)
+            w_before = sum(_char_visual_width(c) for c in line_text[: match.start()])
+            w_tok = sum(_char_visual_width(c) for c in tok)
+            left = int(round(x0 + line_w * (w_before / total_w)))
+            width = max(2, int(round(line_w * (w_tok / total_w))))
+            rows.append(
+                {
+                    "left": left,
+                    "top": int(round(y0)),
+                    "width": width,
+                    "height": line_h,
+                    "text": tok,
+                    "block_num": 1,
+                    "par_num": line_idx,
+                    "line_num": line_idx,
+                    "word_num": word_idx,
+                }
+            )
     return rows
 
 
@@ -365,6 +410,7 @@ def redact_scanned_pdf(
     redact_party: str | None = None,
     party_spec_path: Path | None = None,
     also_redact_structural_all: bool = False,
+    engine: str = "auto",
 ) -> ScanRedactResult:
     """Black-box structural PII or a reviewed whole party; keep visual layout."""
     input_path = Path(input_path)
@@ -389,8 +435,25 @@ def redact_scanned_pdf(
     # phone/account/email. Legacy structural-all behavior remains available.
     if redact_party is not None and not also_redact_structural_all:
         cats = set()
-    tesseract = find_tesseract(tesseract_cmd)
-    tessdata = find_tessdata(tessdata_dir)
+    engine_choice = (engine or "auto").strip().lower()
+    use_rapid = False
+    tesseract = ""
+    tessdata: str | None = None
+    if tesseract_cmd is not None or engine_choice == "tesseract":
+        tesseract = find_tesseract(tesseract_cmd)
+        tessdata = find_tessdata(tessdata_dir)
+    elif engine_choice == "rapidocr":
+        if not rapidocr_available():
+            raise RuntimeError("RapidOCR not installed. Run: pip install 'legal-redactor[ocr]'")
+        use_rapid = True
+    elif engine_choice == "auto":
+        if rapidocr_available():
+            use_rapid = True
+        else:
+            tesseract = find_tesseract(tesseract_cmd)
+            tessdata = find_tessdata(tessdata_dir)
+    else:
+        raise ValueError(f"unknown OCR engine: {engine!r}; expected auto, rapidocr, or tesseract")
 
     doc = fitz.open(str(input_path))
     all_hits: list[dict[str, Any]] = []
@@ -400,11 +463,14 @@ def redact_scanned_pdf(
             tmp_path = Path(tmp)
             for i, page in enumerate(doc):
                 pix = page.get_pixmap(matrix=mat, alpha=False)
-                img_path = tmp_path / f"page_{i + 1:04d}.png"
-                pix.save(str(img_path))
-                words = _ocr_words(
-                    img_path, tesseract=tesseract, tessdata=tessdata, lang=lang, psm=psm
-                )
+                if use_rapid:
+                    words = _ocr_words_rapidocr(pix.tobytes("png"))
+                else:
+                    img_path = tmp_path / f"page_{i + 1:04d}.png"
+                    pix.save(str(img_path))
+                    words = _ocr_words(
+                        img_path, tesseract=tesseract, tessdata=tessdata, lang=lang, psm=psm
+                    )
                 boxes = _collect_boxes(words, cats) if cats else []
                 if redact_party is not None:
                     boxes.extend(_collect_identifier_boxes(words, party_identifiers))

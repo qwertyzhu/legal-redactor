@@ -81,19 +81,19 @@ python scripts/run_demo.py --clean
 1. **在线免安装直开**：直接访问 **[GitHub Pages 在线脱敏页面](https://qwertyzhu.github.io/legal-redactor/)**（纯前端本地内存运算，文档数据绝不离开浏览器）
 2. **离线单文件下载**：在 **[GitHub Releases 资产列表](https://github.com/qwertyzhu/legal-redactor/releases)** 直接下载 `legal-redactor.html` 存到电脑，双击即用，断网亦可运行
 
-- **零后端依赖**：单个独立 HTML 文件，双击直接在浏览器打开，100% 本地内存执行，绝不向外上传文档
-- **多格式本地处理**：直接在浏览器内部脱敏 **PDF**（基于 pdf.js 与 pdf-lib 文本图层覆墨覆盖）、**Word (.docx)**（基于 JSZip XML 解析重构）及纯文本
+- **零后端依赖**：单个独立 HTML 文件，双击直接在浏览器打开，100% 本地内存执行，绝不向外上传文档（离线使用需浏览器已缓存前端库，无网环境推荐用 Python CLI / `legal-redactor web`）
+- **多格式本地真脱敏**：**PDF** 采用 `pdf.js` 2x Canvas 像素级重绘封装全新纯图 PDF（彻底物理销毁原底层文字流与元数据，并提供 `.md` 纯文本导出供喂给 AI）、**Word (.docx)** 基于 DOM 跨 run 解析重构及清理修订元数据
 - **AI 智能指令对话框**：页面内自带自然语言对话框，可直接提具体脱敏诉求（如「只脱敏手机号与身份证」、「隐藏当事人姓名」），支持对接本机 Ollama（默认 `http://localhost:11434`）或在线模型 API 自动提取实体
 - **一键下载脱敏文件与审计清单**
 - **架构与设计**：Designed by lawyer朱思浩
 
-#### 方式二：Python 本地 Web 服务（含高精度 OCR 与视觉印章涂黑）
-如果本地已配置 Python 环境并需要深度处理包含扫描件的复杂案卷：
+#### 方式二：Python 本地 Web 服务（矢量保留 + 高精度 RapidOCR/Tesseract 与印章涂黑，主力推荐）
+如果本地已配置 Python 环境，处理正式诉讼材料或扫描案卷推荐用本地服务或 CLI：
 ```console
 legal-redactor web
 ```
-- 自动启动本地轻量服务 `http://127.0.0.1:8765`
-- 自动识别 PDF 矢量文字层与纯图片扫描件，支持基于 Tesseract OCR 坐标精准视觉涂黑与印章红墨遮挡
+- 自动启动本地轻量服务 `http://127.0.0.1:8765`（内置跨站请求防护与临时文件自动清理）
+- PDF 矢量文字层走 PyMuPDF 底层内容流物理删除（保留清晰矢量文字）；扫描件支持基于 RapidOCR / Tesseract 坐标精准视觉涂黑与印章遮挡
 - 支持一键导出还原账本 (`.ledger.json`) 与 AI 答复当事人反向还原
 
 
@@ -145,10 +145,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # 列出 redact / scan / verify
 ```
 
-只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.18.2）：
+只要 CLI，装**最新** GitHub Release 的 wheel（安装前先到 [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) 核对版本号；当前是 v0.19.0）：
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.18.2/legal_redactor-0.18.2-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.19.0/legal_redactor-0.19.0-py3-none-any.whl
 ```
 
 **升级规则**：Skill 包和 Python 包要**一起换**。CHANGELOG 标注「仅 Skill」的版本可以不升 wheel；标注「修复（包）」的版本（如 v0.10.7 修复中文标签紧贴邮箱的漏检）**必须换 wheel**，只换 Skill 文件无效。装完跑一遍自检确认就绪：

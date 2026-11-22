@@ -28,6 +28,27 @@ DEFAULT_TESSDATA_CANDIDATES = (
     r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
 )
 
+_RAPIDOCR_ENGINE: Any = None
+
+
+def rapidocr_available() -> bool:
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def ocr_image_rapidocr(png_bytes: bytes) -> list[Any]:
+    global _RAPIDOCR_ENGINE
+    if _RAPIDOCR_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        _RAPIDOCR_ENGINE = RapidOCR()
+    res, _ = _RAPIDOCR_ENGINE(png_bytes)
+    return list(res or [])
+
 
 def collapse_cjk_spaces(text: str) -> str:
     """Remove spaces inserted between CJK characters by OCR engines."""
@@ -141,6 +162,25 @@ def pdf_has_text_layer(path: Path, *, min_chars: int = 20) -> bool:
         doc.close()
 
 
+def pdf_has_full_page_scan(path: Path, *, area_ratio: float = 0.75) -> bool:
+    """True when any page has both extractable text and a full-page raster scan (>=75% page area)."""
+    doc = fitz.open(str(path))
+    try:
+        for page in doc:
+            if not (page.get_text("text") or "").strip():
+                continue
+            page_area = max(page.rect.width * page.rect.height, 1.0)
+            for info in page.get_images(full=True):
+                for rect in page.get_image_rects(info[0]):
+                    clipped = rect & page.rect
+                    if clipped.width > 0 and clipped.height > 0:
+                        if (clipped.width * clipped.height) / page_area >= area_ratio:
+                            return True
+        return False
+    finally:
+        doc.close()
+
+
 def _ocr_image_file(
     image_path: Path,
     *,
@@ -186,32 +226,42 @@ def ocr_pdf(
     psm: int = 6,
     tesseract_cmd: str | Path | None = None,
     tessdata_dir: str | Path | None = None,
+    engine: str = "auto",
 ) -> OcrResult:
     """Render each PDF page and OCR to markdown + normalized text."""
     input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    tesseract = find_tesseract(tesseract_cmd)
-    tessdata = find_tessdata(tessdata_dir)
+    engine_choice = (engine or "auto").strip().lower()
+    use_rapid = False
+    tesseract = ""
+    tessdata: str | None = None
+    if tesseract_cmd is not None or engine_choice == "tesseract":
+        tesseract = find_tesseract(tesseract_cmd)
+        tessdata = find_tessdata(tessdata_dir)
+    elif engine_choice == "rapidocr":
+        if not rapidocr_available():
+            raise RuntimeError("RapidOCR not installed. Run: pip install 'legal-redactor[ocr]'")
+        use_rapid = True
+    elif engine_choice == "auto":
+        if rapidocr_available():
+            use_rapid = True
+        else:
+            tesseract = find_tesseract(tesseract_cmd)
+            tessdata = find_tessdata(tessdata_dir)
+    else:
+        raise ValueError(f"unknown OCR engine: {engine!r}; expected auto, rapidocr, or tesseract")
 
     doc = fitz.open(str(input_path))
     page_results: list[OcrPageResult] = []
     try:
         mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
-        with tempfile.TemporaryDirectory(prefix="legal-redactor-ocr-") as tmp:
-            tmp_path = Path(tmp)
+        if use_rapid:
             for i, page in enumerate(doc):
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                img_path = tmp_path / f"page_{i + 1:04d}.png"
-                pix.save(str(img_path))
-                text = _ocr_image_file(
-                    img_path,
-                    tesseract=tesseract,
-                    tessdata=tessdata,
-                    lang=lang,
-                    psm=psm,
-                )
+                png = page.get_pixmap(matrix=mat, alpha=False).tobytes("png")
+                rows = ocr_image_rapidocr(png)
+                text = "\n".join(str(r[1]).strip() for r in rows if len(r) >= 2 and str(r[1]).strip())
                 page_results.append(
                     OcrPageResult(
                         page=i + 1,
@@ -220,6 +270,28 @@ def ocr_pdf(
                         uncovered=page_is_uncovered(text),
                     )
                 )
+        else:
+            with tempfile.TemporaryDirectory(prefix="legal-redactor-ocr-") as tmp:
+                tmp_path = Path(tmp)
+                for i, page in enumerate(doc):
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    img_path = tmp_path / f"page_{i + 1:04d}.png"
+                    pix.save(str(img_path))
+                    text = _ocr_image_file(
+                        img_path,
+                        tesseract=tesseract,
+                        tessdata=tessdata,
+                        lang=lang,
+                        psm=psm,
+                    )
+                    page_results.append(
+                        OcrPageResult(
+                            page=i + 1,
+                            text=text,
+                            char_count=len(text),
+                            uncovered=page_is_uncovered(text),
+                        )
+                    )
     finally:
         doc.close()
 
@@ -249,7 +321,8 @@ def ocr_pdf(
                 "dpi": dpi,
                 "lang": lang,
                 "psm": psm,
-                "tesseract": tesseract,
+                "engine": "rapidocr" if use_rapid else "tesseract",
+                "tesseract": tesseract or None,
                 "tessdata": tessdata,
             },
             ensure_ascii=False,

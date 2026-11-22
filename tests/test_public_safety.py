@@ -44,6 +44,7 @@ _TEXT_SUFFIXES = {
     ".cfg",
     ".ps1",
     ".sh",
+    ".html",
 }
 
 # Real-looking structural PII shapes that must not leak into docs/scripts.

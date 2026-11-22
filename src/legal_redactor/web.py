@@ -6,10 +6,12 @@ All processing is done locally with no cloud or external network requests.
 
 from __future__ import annotations
 
+import atexit
 import json
 import mimetypes
 import os
 import re
+import shutil
 import socket
 import sys
 import tempfile
@@ -98,6 +100,36 @@ def parse_multipart(content_type: str, body_bytes: bytes) -> tuple[dict[str, str
 
 WEB_TASKS_DIR = Path(tempfile.gettempdir()) / "legal_redactor_web_tasks"
 WEB_TASKS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    os.chmod(WEB_TASKS_DIR, 0o700)
+except OSError:
+    pass
+atexit.register(lambda: shutil.rmtree(WEB_TASKS_DIR, ignore_errors=True))
+_WEB_TASK_TTL_SECONDS = 1800.0
+
+
+def _cleanup_expired_web_tasks(now: float | None = None) -> None:
+    if not WEB_TASKS_DIR.is_dir():
+        return
+    cutoff = (time.time() if now is None else now) - _WEB_TASK_TTL_SECONDS
+    for child in list(WEB_TASKS_DIR.iterdir()):
+        try:
+            if child.is_dir() and child.stat().st_mtime < cutoff:
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def _resolve_web_mode_profile(raw_mode: str, raw_profile: str | None) -> tuple[str, str | None]:
+    mode_clean = (raw_mode or "ai").strip().lower()
+    prof_clean = (raw_profile or "").strip().lower() or None
+    if prof_clean:
+        prof = load_profile(prof_clean)
+        return prof.mode, prof.name
+    if mode_clean not in {"ai", "production"}:
+        prof = load_profile(mode_clean)
+        return prof.mode, prof.name
+    return mode_clean, None
 
 
 class WebRequestHandler(BaseHTTPRequestHandler):
@@ -106,6 +138,34 @@ class WebRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         # Keep console output clean
         pass
+
+    def _check_request_origin(self) -> bool:
+        """Block cross-site browser requests (CSRF) and DNS-rebinding Host headers."""
+        bound_host = str(getattr(self.server, "server_address", ("127.0.0.1", 0))[0]).lower()
+        allowed_hosts = {"", "127.0.0.1", "localhost", "::1", bound_host}
+
+        raw_host = (self.headers.get("Host") or "").strip()
+        if raw_host.startswith("["):
+            host_only = raw_host.split("]", 1)[0].lstrip("[").lower()
+        else:
+            host_only = raw_host.split(":", 1)[0].lower()
+        if host_only not in allowed_hosts:
+            self._send_json({"ok": False, "error": "Forbidden Host header"}, status=403)
+            return False
+
+        sec_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if sec_site == "cross-site":
+            self._send_json({"ok": False, "error": "Forbidden cross-site request"}, status=403)
+            return False
+
+        if "Origin" in self.headers:
+            origin = (self.headers.get("Origin") or "").strip()
+            parsed = urllib.parse.urlparse(origin)
+            origin_host = (parsed.hostname or "").lower()
+            if parsed.scheme not in {"http", "https"} or origin_host not in allowed_hosts - {""}:
+                self._send_json({"ok": False, "error": "Forbidden Origin header"}, status=403)
+                return False
+        return True
 
     def _send_json(self, data: dict[str, Any], status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -136,6 +196,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(file_bytes)
 
     def do_GET(self) -> None:
+        if not self._check_request_origin():
+            return
+        _cleanup_expired_web_tasks()
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
@@ -200,6 +263,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self) -> None:
+        if not self._check_request_origin():
+            return
+        _cleanup_expired_web_tasks()
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         content_type = self.headers.get("Content-Type", "")
@@ -303,8 +369,13 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             safe_name = _safe_filename(raw_name)
             content = file_item["content"]
 
-            mode = form.get("mode", "ai")
-            profile = form.get("profile") or None
+            try:
+                mode, profile = _resolve_web_mode_profile(
+                    form.get("mode", "ai"), form.get("profile")
+                )
+            except Exception as exc:
+                self._send_json({"ok": False, "error": f"无效的脱敏模式/配置: {exc}"}, status=400)
+                return
             auto_confident = form.get("auto_confident", "true").lower() == "true"
             is_scanned_mode = form.get("is_scanned_mode", "false").lower() == "true"
             redact_court_staff = (
@@ -353,6 +424,19 @@ class WebRequestHandler(BaseHTTPRequestHandler):
 
             # Special case: scanned PDF visual cover-up (redact-scan)
             if is_scanned_mode and suffix == ".pdf":
+                if mode == "ai":
+                    shutil.rmtree(task_dir, ignore_errors=True)
+                    self._send_json(
+                        {
+                            "ok": False,
+                            "error": (
+                                "ai 模式面向在线大模型：扫描件视觉涂黑仅遮挡证件/电话，图上的当事人姓名与公章仍在，"
+                                "不得直接发给大模型。请用 `legal-redactor ocr` 转为文本脱敏，或切换为 production 模式做视觉涂黑。"
+                            ),
+                        },
+                        status=400,
+                    )
+                    return
                 from .scan_pdf import redact_scanned_pdf
 
                 try:
@@ -479,8 +563,13 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "脱敏文本内容不能为空"}, status=400)
                 return
 
-            mode = data.get("mode", "ai")
-            profile = data.get("profile") or None
+            try:
+                mode, profile = _resolve_web_mode_profile(
+                    str(data.get("mode", "ai")), data.get("profile")
+                )
+            except Exception as exc:
+                self._send_json({"ok": False, "error": f"无效的脱敏模式/配置: {exc}"}, status=400)
+                return
             auto_confident = bool(data.get("auto_confident", True))
             keep_cats = data.get("keep_categories", [])
             extra_cats = data.get("extra_categories", [])
@@ -1127,7 +1216,7 @@ footer {
               保留统一社会信用代码 (立案常用)
             </label>
             <label class="checkbox-label">
-              <input type="checkbox" id="fileRedactCourtStaff">
+              <input type="checkbox" id="fileRedactCourtStaff" checked>
               隐去审判人员姓名 (ai 默认已隐)
             </label>
           </div>
@@ -1221,6 +1310,8 @@ footer {
             <option value="ai" selected>🤖 ai 模式 (全面替身化，适合发给大模型)</option>
             <option value="production">⚖️ production 模式 (保留当事人/案号)</option>
             <option value="publish">📢 publish 模式 (公开改写/张某)</option>
+            <option value="judgment-online">🏛️ judgment-online 模式 (裁判文书上网)</option>
+            <option value="minimal">🔒 minimal 模式 (仅去身份证/手机/邮箱/账号)</option>
           </select>
           <label class="checkbox-label">
             <input type="checkbox" id="textAutoConfident" checked> 自动识别高置信人名/单位

@@ -785,11 +785,15 @@ footer {
             <span id="resultStatusBadge" class="badge badge-success">PASS</span>
             <strong id="resultSummaryText" style="font-size:16px;">脱敏完成</strong>
           </div>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a id="btnDownloadFile" class="btn btn-primary" href="#" download>📥 下载脱敏后文档</a>
+            <button id="btnDownloadMdText" class="btn btn-secondary hidden" onclick="downloadCurrentRedactedMd()">📝 下载脱敏纯文本 (.md · 推荐喂给 AI)</button>
             <button id="btnDownloadAudit" class="btn btn-secondary" onclick="downloadCurrentAudit()">📄 下载审计报告 (.md)</button>
             <button id="btnDownloadLedger" class="btn btn-secondary" onclick="downloadCurrentLedger()">🔐 导出还原账本 (.json)</button>
           </div>
+        </div>
+        <div id="pdfRasterNotice" class="alert alert-success hidden" style="margin-top:0;margin-bottom:14px;">
+          <div>🔒 <strong>PDF 物理级栅格脱敏已完成：</strong>导出的 PDF 已通过 Canvas 像素重绘重建，原文件底层文字流、隐藏图层与元数据已 100% 物理清除（不可复制原字）。若需发给在线大模型分析，建议同时点击上方「下载脱敏纯文本 (.md)」，省 Token 且识别更准。</div>
         </div>
 
         <div id="replacementsSection" style="margin-top:16px;">
@@ -1437,13 +1441,41 @@ function formatSize(bytes) {
 
 // 核心规则与替身生成器
 const ALIASES = ['某甲', '某乙', '某丙', '某丁', '某戊', '某己', '某庚', '某辛', '某壬', '某癸'];
-const COMPANY_ALIASES = ['某单位A', '某单位B', '某单位C', '某单位D', '某单位E'];
+const COMPANY_ALIASES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(c => '某单位' + c);
+const SURNAME_SET = new Set(
+  '赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜' +
+  '戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐' +
+  '费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄' +
+  '和穆萧尹姚邵汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜' +
+  '阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞' +
+  '万支柯管卢莫经房裘缪干解应宗丁宣邓郁单杭洪包诸左石崔吉钮龚程嵇邢' +
+  '滑裴陆荣翁荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧山谷' +
+  '车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘厉戎祖武符刘景詹束龙叶幸司韶郜' +
+  '黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴胥能苍双闻莘党翟谭贡' +
+  '劳逄姬申扶堵冉宰郦雍桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕' +
+  '连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧' +
+  '殳沃利蔚越夔隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关' +
+  '蒯相查后荆红游竺权逯盖益桓公' +
+  '肖付闫代兰芦丛岳沿涂牟阳位覃隋植辜丘晋苑畅来苟木邸商揭迟宇鄢稽练' +
+  '冼原官衣楚佟栗台僧谌银扬保旷邝门侍寸过达刀字奉闪税盘闭'
+);
+const COMPOUND_SURNAMES = ['欧阳', '司马', '上官', '诸葛', '司徒', '宇文', '长孙', '慕容', '东方', '皇甫', '令狐', '完颜', '端木', '独孤', '南宫', '尉迟', '公孙'];
+const PERSON_STOPWORDS = ['陈述', '明知', '明确', '方面', '平台', '管理', '管辖', '经营', '经济', '时间', '于是', '应当', '承担', '全部', '安全', '成立', '关于', '支付', '曾经', '向其', '和解', '公开', '公司', '单位', '双方', '代表', '出庭', '作证', '经查', '经审', '申请', '许可', '连带', '计算', '董事长', '总经理', '律师', '法官'];
+let currentRedactedMdText = '';
+
+function hasValidSurname(name) {
+  if (!name || name.includes('某')) return false;
+  if (PERSON_STOPWORDS.some(w => name.startsWith(w))) return false;
+  if ((name.includes('·') || name.includes('•')) && name.length >= 3) return true;
+  if (COMPOUND_SURNAMES.some(s => name.startsWith(s))) return true;
+  return SURNAME_SET.has(name[0]);
+}
 
 function buildRedactionPlan(text, options) {
   const mode = options.mode || 'ai';
   const autoConfident = options.autoConfident !== false;
   const keepUscc = !!options.keepUscc;
-  const redactStaff = !!options.redactStaff;
+  const redactStaff = options.redactStaff !== undefined ? !!options.redactStaff : (mode === 'ai');
   const customEntities = options.customEntities || [];
   const allowlist = new Set(options.allowlist || []);
 
@@ -1451,9 +1483,10 @@ function buildRedactionPlan(text, options) {
   const seenOriginals = new Set();
   let aliasIdx = 0;
   let compIdx = 0;
+  let caseIdx = 0;
 
   function addHit(original, replacement, category, role) {
-    if (!original || seenOriginals.has(original)) return;
+    if (!original || original === replacement || seenOriginals.has(original)) return;
     if (allowlist.has(original)) return;
     seenOriginals.add(original);
     entities.push({ original, replacement, category, role });
@@ -1462,97 +1495,161 @@ function buildRedactionPlan(text, options) {
   // 1. 自定义实体补录
   for (const c of customEntities) {
     if (c.original && c.replacement) {
-      addHit(c.original, c.replacement, c.category || 'custom', 'custom');
+      addHit(c.original, c.replacement, c.category || 'custom', c.role || 'custom');
     }
   }
 
   // 2. 结构性号码检测
-  // 身份证 (18位)
-  const idRegex = /(?<!\d)[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)/g;
   let m;
+  const idRegex = /(?<!\d)[1-9]\d{5}[\s-]?(?:19|20)\d{2}[\s-]?(?:0[1-9]|1[0-2])[\s-]?(?:0[1-9]|[12]\d|3[01])[\s-]?\d{3}[\s-]?[\dXx](?!\d)/g;
   while ((m = idRegex.exec(text)) !== null) {
     addHit(m[0], '[身份证号]', 'id_card', 'structural');
   }
 
-  // 手机号 (11位)
-  const mobileRegex = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
+  const mobileRegex = /(?<!\d)1[3-9](?:[\s\u3000-]{0,2}\d){9}(?!\d)/g;
   while ((m = mobileRegex.exec(text)) !== null) {
     addHit(m[0], '[手机号]', 'mobile', 'structural');
   }
 
-  // 统一社会信用代码 (18位)
-  if (!keepUscc && mode !== 'production') {
+  // 统一社会信用代码 (production 与 ai 默认均去掉，除非勾选保留)
+  if (!keepUscc) {
     const usccRegex = /(?<![A-Z0-9])[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}(?![A-Z0-9])/g;
     while ((m = usccRegex.exec(text)) !== null) {
-      addHit(m[0], '[统一社会信用代码]', 'uscc', 'structural');
+      if (!/^\d+$/.test(m[0])) addHit(m[0], '[统一社会信用代码]', 'uscc', 'structural');
     }
   }
 
-  // 银行账号 (16-19位)
+  // 带标签对公/个人账号 + 常见卡号
+  const labeledBank = /(?:账号|帐号|账户|卡号|银行账号|收款账户|开户账号|对公账户)\s*(?:[：:]|为|是)?\s*([0-9][0-9 \u3000-]{6,32}[0-9])/g;
+  while ((m = labeledBank.exec(text)) !== null) {
+    addHit(m[1], '[账号]', 'bank_account', 'structural');
+  }
   const bankRegex = /(?<!\d)(?:62|60|95|40|41|42|43|44|45|46|47|48|49|51|52|53|54|55)\d{14,17}(?!\d)/g;
   while ((m = bankRegex.exec(text)) !== null) {
     addHit(m[0], '[银行账号]', 'bank_account', 'structural');
   }
 
-  // 电子邮箱
   const emailRegex = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   while ((m = emailRegex.exec(text)) !== null) {
     addHit(m[0], '[邮箱]', 'email', 'structural');
   }
 
-  // 固定电话
-  const phoneRegex = /(?<!\d)0\d{2,3}-\d{7,8}(?!\d)/g;
+  const phoneRegex = /(?<!\d)(?:0\d{2,3}(?:[\s\u3000-]*\d){7,8}|[48]00(?:[\s\u3000-]*\d){7})(?!\d)/g;
   while ((m = phoneRegex.exec(text)) !== null) {
-    addHit(m[0], '[固定电话]', 'landline', 'structural');
+    addHit(m[0], '[电话]', 'landline', 'structural');
   }
 
-  // 案号脱敏 (ai 模式)
-  if (mode === 'ai') {
-    const caseRegex = /([（(]\d{4}[）)][^（）()\n]{0,15}?(?:民|刑|行|执|知|商|赔|清|破|辖|认)[^（）()\n]{0,12}?\d+号)/g;
+  // 7位传统车牌 + 8位新能源车牌
+  const plateRegex = /(?<![A-Z0-9])[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-HJ-NP-Z][·\s]?[A-HJ-NP-Z0-9]{4,6}[挂学警港澳使领]?(?![A-Z0-9])/g;
+  while ((m = plateRegex.exec(text)) !== null) {
+    addHit(m[0], '[车牌号]', 'plate', 'structural');
+  }
+
+  // 公证书号与案号脱敏 (ai / publish 模式)
+  if (mode === 'ai' || mode === 'publish') {
+    const notaryRegex = /[（(〔【]\d{4}[）)〕】][^（）()〔〕【】\n]{1,24}?证[A-Za-z\u4e00-\u9fa5]{0,4}字\s*第?\s*\d+\s*号/g;
+    while ((m = notaryRegex.exec(text)) !== null) {
+      addHit(m[0], '[公证书号]', 'notary_number', 'structural');
+    }
+    const caseRegex = /(?:[（(〔【]\d{4}[）)〕】](?:[^（）()〔〕【】\n]|[（(][\u4e00-\u9fa5]{1,4}[）)]){0,20}?(?:民|刑|行|执|知|商|赔|清|破|辖|认|仲)(?:[^（）()〔〕【】\n]|[（(][\u4e00-\u9fa5]{1,4}[）)]){0,14}?\d+号)/g;
     while ((m = caseRegex.exec(text)) !== null) {
-      addHit(m[1], '(20XX)XX民初XX号', 'case_number', 'structural');
+      const stageMatch = m[0].match(/(民|刑|行|执|知|商|赔|清|破|辖|认|仲)(?:[（(][\u4e00-\u9fa5]{1,4}[）)])?(初|终|再|执|督|特|确|案)?/);
+      const kind = stageMatch ? stageMatch[1] : '民';
+      const stg = (stageMatch && stageMatch[2]) ? stageMatch[2] : (kind === '仲' ? '案' : '初');
+      const numSuffix = caseIdx === 0 ? '' : String(caseIdx + 1);
+      caseIdx++;
+      addHit(m[0], `（20XX）X${kind}${stg}X${numSuffix}号`, 'case_number', 'structural');
     }
   }
 
   // 3. 自然语言实体 (ai / publish 模式)
   if (autoConfident && (mode === 'ai' || mode === 'publish')) {
-    // 角色人名
-    const roleRegex = /(原告|被告|申请人|被申请人|第三人|被执行人|法定代表人|委托代理人)[：:\s]*([·\u4e00-\u9fa5]{2,4})/g;
+    const roleRegex = /(原告|被告|申请人|被申请人|上诉人|被上诉人|第三人|被执行人|法定代表人|委托诉讼代理人|委托代理人|联系人|证人|姓名|权利人|著作权人)[：:\s]*([\u4e00-\u9fa5]{1,6}(?:[·•][\u4e00-\u9fa5]{1,6})+|[\u4e00-\u9fa5]{2,4})(?=[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$)/g;
     while ((m = roleRegex.exec(text)) !== null) {
       const name = m[2];
-      if (name && !['公司', '有限', '组织', '协会', '政府', '法院'].some(w => name.includes(w))) {
-        const repl = mode === 'publish' ? (name[0] + '某') : (ALIASES[aliasIdx % ALIASES.length] || '某某');
+      if (name && hasValidSurname(name) && !['公司', '有限', '组织', '协会', '政府', '法院', '事务所'].some(w => name.includes(w))) {
+        const repl = mode === 'publish' ? (name[0] + '某') : (ALIASES[aliasIdx % ALIASES.length] || ('某人' + (aliasIdx + 1)));
         aliasIdx++;
         addHit(name, repl, 'person', 'party');
       }
     }
 
-    // 审判人员 (ai 模式)
     if (redactStaff && mode === 'ai') {
-      const staffRegex = /(审判长|审判员|代理审判员|法官助理|人民陪审员|书记员|执行员)[：:\s]*([·\u4e00-\u9fa5]{2,4})/g;
+      const staffRegex = /(审判长|审判员|代理审判员|法官助理|人民陪审员|书记员|执行员)[：:\s]*([\u4e00-\u9fa5]{2,4})(?=[，,。；;、\s\d）)\n]|$)/g;
       while ((m = staffRegex.exec(text)) !== null) {
         const name = m[2];
-        if (name && !['公司', '有限'].some(w => name.includes(w))) {
+        if (name && hasValidSurname(name)) {
           addHit(name, '[审判人员]', 'person', 'court_staff');
         }
       }
     }
 
-    // 公司单位全称
-    const compRegex = /([\u4e00-\u9fa5]{4,25}(?:有限(?:责任)?公司|股份有限公司|合伙企业|经营部|商行))/g;
+    const compRegex = /(?:原告|被告|第三人|上诉人|被上诉人|申请人|被申请人|甲方|乙方|丙方|被授权方|授权方|[：:，,。；;、\n\s]|^)([\u4e00-\u9fa5A-Za-z0-9（）()·]{2,26}(?:合伙企业[（(](?:有限|普通|特殊普通)合伙[）)]|工作室[（(](?:有限|普通)合伙[）)]|有限(?:责任)?公司|股份有限公司|合伙企业|律师事务所|工作室|经营部|商行|服务部))/g;
     while ((m = compRegex.exec(text)) !== null) {
-      const comp = m[1];
-      if (!entities.some(e => e.original === comp)) {
-        const repl = COMPANY_ALIASES[compIdx % COMPANY_ALIASES.length] || '某单位';
+      const comp = m[1].replace(/^(?:与|及|和|向|由)/, '');
+      if (comp.length >= 4 && !comp.endsWith('人民法院') && !entities.some(e => e.original === comp)) {
+        const repl = COMPANY_ALIASES[compIdx % COMPANY_ALIASES.length] || ('某单位' + (compIdx + 1));
         compIdx++;
-        addHit(comp, repl, 'company', 'party');
+        addHit(comp, repl, 'organization', 'party');
+      }
+    }
+
+    // 联动“以下简称”
+    const orgList = entities.filter(e => e.category === 'organization');
+    for (const org of orgList) {
+      let idx = text.indexOf(org.original);
+      while (idx !== -1) {
+        const win = text.slice(idx + org.original.length, idx + org.original.length + 40).replace(/\s+/g, '');
+        const abbrMatch = win.match(/^[（(]?以下(?:简称|称)([^）)。；;，,]{2,28})/);
+        if (abbrMatch) {
+          const body = abbrMatch[1];
+          const quoted = Array.from(body.matchAll(/[“"「『]([^“”"「」『』]{2,16})[”"」』]/g)).map(x => x[1]);
+          const parts = quoted.length ? quoted : body.split(/或|及|、|\//);
+          for (const rawShort of parts) {
+            const shortName = rawShort.trim().replace(/^[“"「『]|[”"」』]$/g, '');
+            if (shortName.length >= 2 && !['甲方', '乙方', '丙方', '原告', '被告', '本公司', '双方'].includes(shortName)) {
+              addHit(shortName, org.replacement, 'organization', org.role);
+            }
+          }
+        }
+        idx = text.indexOf(org.original, idx + org.original.length);
       }
     }
   }
 
-  // 实体按原文长度倒序排列，防止子串覆盖
   entities.sort((a, b) => b.original.length - a.original.length);
   return entities;
+}
+
+function findMappingSpans(text, plan) {
+  const spans = [];
+  for (const ent of plan) {
+    if (!ent.original) continue;
+    let pos = text.indexOf(ent.original);
+    while (pos !== -1) {
+      const end = pos + ent.original.length;
+      const overlaps = spans.some(s => !(end <= s.start || pos >= s.end));
+      if (!overlaps) {
+        spans.push({ start: pos, end, replacement: ent.replacement, original: ent.original });
+      }
+      pos = text.indexOf(ent.original, pos + 1);
+    }
+  }
+  spans.sort((a, b) => a.start - b.start);
+  return spans;
+}
+
+function applyPlanToText(text, plan) {
+  if (!text || !plan.length) return text;
+  const spans = findMappingSpans(text, plan);
+  if (!spans.length) return text;
+  let out = '';
+  let last = 0;
+  for (const s of spans) {
+    out += text.slice(last, s.start) + s.replacement;
+    last = s.end;
+  }
+  return out + text.slice(last);
 }
 
 // 开始脱敏主入口
@@ -1585,25 +1682,25 @@ async function startFileRedact() {
     let resultBlob = null;
     let outFileName = '';
     let plan = [];
+    currentRedactedMdText = '';
 
     if (ext === 'docx') {
       const res = await redactDocx(currentArrayBuffer, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
       resultBlob = res.blob;
       plan = res.plan;
+      currentRedactedMdText = res.redactedText || '';
       outFileName = currentFile.name.replace(/\.docx$/i, `.redacted-${mode}.docx`);
     } else if (ext === 'pdf') {
       const res = await redactPdf(currentArrayBuffer, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
       resultBlob = res.blob;
       plan = res.plan;
+      currentRedactedMdText = res.redactedText || '';
       outFileName = currentFile.name.replace(/\.pdf$/i, `.redacted-${mode}.pdf`);
     } else {
-      // 纯文本
       const text = new TextDecoder('utf-8').decode(currentArrayBuffer);
       plan = buildRedactionPlan(text, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
-      let outText = text;
-      for (const ent of plan) {
-        outText = outText.split(ent.original).join(ent.replacement);
-      }
+      const outText = applyPlanToText(text, plan);
+      currentRedactedMdText = outText;
       resultBlob = new Blob([outText], { type: 'text/plain;charset=utf-8' });
       outFileName = currentFile.name.replace(/\.(txt|md)$/i, `.redacted-${mode}.$1`);
     }
@@ -1612,12 +1709,23 @@ async function startFileRedact() {
     currentLedgerJson = { mode, timestamp: new Date().toISOString(), entities: plan };
     currentAuditMd = generateAuditMarkdown(currentFile.name, outFileName, mode, plan);
 
-    // 设置下载链接
     const dlBtn = document.getElementById('btnDownloadFile');
     dlBtn.href = URL.createObjectURL(resultBlob);
     dlBtn.download = outFileName;
 
-    // 渲染结果
+    const mdBtn = document.getElementById('btnDownloadMdText');
+    const pdfNotice = document.getElementById('pdfRasterNotice');
+    if (currentRedactedMdText) {
+      mdBtn.classList.remove('hidden');
+    } else {
+      mdBtn.classList.add('hidden');
+    }
+    if (ext === 'pdf') {
+      pdfNotice.classList.remove('hidden');
+    } else {
+      pdfNotice.classList.add('hidden');
+    }
+
     renderResult(outFileName, plan);
 
     startBtn.disabled = false;
@@ -1629,103 +1737,317 @@ async function startFileRedact() {
   }
 }
 
-// DOCX 纯浏览器脱敏
-async function redactDocx(arrayBuffer, options) {
-  const zip = await JSZip.loadAsync(arrayBuffer);
-  let docXml = await zip.file("word/document.xml").async("string");
+// OOXML 跨 run 原位替换与元数据清理
+function localTagName(node) {
+  return (node && (node.localName || (node.nodeName ? node.nodeName.split(':').pop() : ''))) || '';
+}
 
-  // 提取全文以发现实体
-  const textContent = docXml.replace(/<[^>]+>/g, '');
-  const plan = buildRedactionPlan(textContent, options);
+function flattenDomRevisionsAndAuthors(xmlDoc) {
+  const all = Array.from(xmlDoc.getElementsByTagName('*'));
+  for (const el of all) {
+    const tag = localTagName(el);
+    if ((tag === 'del' || tag === 'moveFrom') && el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const el of Array.from(xmlDoc.getElementsByTagName('*'))) {
+      const tag = localTagName(el);
+      if ((tag === 'ins' || tag === 'moveTo') && el.parentNode) {
+        while (el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+        el.parentNode.removeChild(el);
+        changed = true;
+        break;
+      }
+    }
+  }
+  for (const el of Array.from(xmlDoc.getElementsByTagName('*'))) {
+    for (const attr of Array.from(el.attributes || [])) {
+      const aName = attr.localName || attr.name.split(':').pop();
+      if (aName === 'author' || aName === 'lastModifiedBy') {
+        el.setAttribute(attr.name, '作者');
+      } else if (/^rsid/i.test(aName)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+}
 
-  // 在 XML 中逐项替换
-  for (const ent of plan) {
-    const escapedOrig = escapeXml(ent.original);
-    const escapedRepl = escapeXml(ent.replacement);
-    docXml = docXml.split(escapedOrig).join(escapedRepl);
+function replaceAcrossDomRuns(tNodes, plan) {
+  if (!tNodes.length || !plan.length) return;
+  const texts = tNodes.map(n => n.textContent || '');
+  const offsets = [];
+  let pos = 0;
+  for (const t of texts) {
+    offsets.push(pos);
+    pos += t.length;
+  }
+  const spans = findMappingSpans(texts.join(''), plan);
+  if (!spans.length) return;
+
+  function nodeAt(charIdx) {
+    let i = 0;
+    while (i + 1 < offsets.length && offsets[i + 1] <= charIdx) i++;
+    return i;
   }
 
-  zip.file("word/document.xml", docXml);
-
-  // 同时处理页眉页脚
-  const headerFooterFiles = Object.keys(zip.files).filter(f => /^word\/(header|footer)\d+\.xml$/.test(f));
-  for (const hf of headerFooterFiles) {
-    let xml = await zip.file(hf).async("string");
-    for (const ent of plan) {
-      xml = xml.split(escapeXml(ent.original)).join(escapeXml(ent.replacement));
+  for (let s = spans.length - 1; s >= 0; s--) {
+    const { start, end, replacement } = spans[s];
+    const i = nodeAt(start);
+    const j = nodeAt(end - 1);
+    const a = start - offsets[i];
+    const b = end - offsets[j];
+    if (i === j) {
+      texts[i] = texts[i].slice(0, a) + replacement + texts[i].slice(b);
+    } else {
+      texts[i] = texts[i].slice(0, a) + replacement;
+      for (let k = i + 1; k < j; k++) texts[k] = '';
+      texts[j] = texts[j].slice(b);
     }
-    zip.file(hf, xml);
+  }
+  for (let idx = 0; idx < tNodes.length; idx++) {
+    if ((tNodes[idx].textContent || '') !== texts[idx]) {
+      tNodes[idx].textContent = texts[idx];
+      if (/^\s|\s$/.test(texts[idx])) {
+        tNodes[idx].setAttribute('xml:space', 'preserve');
+      }
+    }
+  }
+}
+
+function collectParagraphSegments(pEl) {
+  const groups = [];
+  let cur = [];
+  function walk(node) {
+    for (const child of Array.from(node.childNodes || [])) {
+      if (child.nodeType !== 1) continue;
+      const tag = localTagName(child);
+      if (tag === 'p') continue; // 嵌套文本框段落单独遍历
+      if (tag === 't') {
+        cur.push(child);
+      } else if (tag === 'tab' || tag === 'br') {
+        if (cur.length) { groups.push(cur); cur = []; }
+      } else {
+        walk(child);
+      }
+    }
+  }
+  walk(pEl);
+  if (cur.length) groups.push(cur);
+  return groups;
+}
+
+// DOCX 纯浏览器 DOM 级原位脱敏（支持跨 run 拼接、清理修订及元数据）
+async function redactDocx(arrayBuffer, options) {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
+  const textPartNames = Object.keys(zip.files).filter(f =>
+    /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/.test(f)
+  );
+
+  const parsedParts = [];
+  const extractedParas = [];
+
+  for (const name of textPartNames) {
+    const rawXml = await zip.file(name).async('string');
+    const xmlDoc = parser.parseFromString(rawXml, 'application/xml');
+    flattenDomRevisionsAndAuthors(xmlDoc);
+    const paras = Array.from(xmlDoc.getElementsByTagName('*')).filter(el => localTagName(el) === 'p');
+    for (const p of paras) {
+      const segs = collectParagraphSegments(p);
+      const pText = segs.map(g => g.map(n => n.textContent || '').join('')).join('\t');
+      if (pText.trim()) extractedParas.push(pText);
+    }
+    parsedParts.push({ name, xmlDoc, paras });
+  }
+
+  const fullText = extractedParas.join('\n');
+  const plan = buildRedactionPlan(fullText, options);
+  const redactedText = applyPlanToText(fullText, plan);
+
+  for (const part of parsedParts) {
+    for (const p of part.paras) {
+      for (const seg of collectParagraphSegments(p)) {
+        replaceAcrossDomRuns(seg, plan);
+      }
+    }
+    zip.file(part.name, serializer.serializeToString(part.xmlDoc));
+  }
+
+  if (zip.file('docProps/core.xml')) {
+    const coreDoc = parser.parseFromString(await zip.file('docProps/core.xml').async('string'), 'application/xml');
+    for (const el of Array.from(coreDoc.getElementsByTagName('*'))) {
+      const tag = localTagName(el);
+      if (tag === 'creator' || tag === 'lastModifiedBy') el.textContent = '作者';
+      else if (el.textContent && el.children.length === 0) el.textContent = applyPlanToText(el.textContent, plan);
+    }
+    zip.file('docProps/core.xml', serializer.serializeToString(coreDoc));
+  }
+  if (zip.file('docProps/app.xml')) {
+    const appDoc = parser.parseFromString(await zip.file('docProps/app.xml').async('string'), 'application/xml');
+    for (const el of Array.from(appDoc.getElementsByTagName('*'))) {
+      if (['Company', 'Manager', 'HyperlinkBase'].includes(localTagName(el))) el.textContent = '';
+    }
+    zip.file('docProps/app.xml', serializer.serializeToString(appDoc));
   }
 
   const blob = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   });
-  return { blob, plan };
+  return { blob, plan, redactedText };
 }
 
-// PDF 纯浏览器脱敏
+function dataUrlToUint8Array(dataUrl) {
+  const base64 = dataUrl.split(',')[1] || '';
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// PDF 纯浏览器物理级脱敏：Canvas 2x 栅格化涂抹重打包（彻底销毁原底层文字流与隐藏元数据）
 async function redactPdf(arrayBuffer, options) {
-  // 1. pdf.js 提取文本并定位坐标
   const pdfJsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
-  let fullText = '';
-  const pageItems = [];
+  const pageEntries = [];
+  const pageTexts = [];
 
   for (let i = 1; i <= pdfJsDoc.numPages; i++) {
     const page = await pdfJsDoc.getPage(i);
     const textContent = await page.getTextContent();
-    const items = textContent.items;
-    pageItems.push({ pageIndex: i, items });
-    for (const it of items) {
-      fullText += it.str + ' ';
-    }
+    const items = textContent.items || [];
+    pageEntries.push({ page, items });
+    pageTexts.push(items.map(it => it.str || '').join(''));
   }
 
-  // 生成脱敏计划
+  const fullText = pageTexts.join('\n');
   const plan = buildRedactionPlan(fullText, options);
+  const redactedText = applyPlanToText(fullText, plan);
 
-  // 2. pdf-lib 加载并绘制矩形遮挡
-  const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
-  const pages = pdfDoc.getPages();
+  // 创建全新空白 PDF，绝不加载原 PDF 内容流，保证底层原文字 0% 残留
+  const pdfDoc = await PDFLib.PDFDocument.create();
+  const renderScale = 2.0;
 
-  for (const p of pageItems) {
-    const libPage = pages[p.pageIndex - 1];
-    for (const it of p.items) {
-      if (!it.str.trim()) continue;
-      // 检查当前文本块是否包含脱敏实体
-      for (const ent of plan) {
-        if (it.str.includes(ent.original)) {
-          // 找到命中坐标并画白块遮挡
-          const x = it.transform[4];
-          const y = it.transform[5];
-          const width = it.width;
-          const height = it.height || it.transform[0] || 12;
+  for (const { page, items } of pageEntries) {
+    const baseVp = page.getViewport({ scale: 1.0 });
+    const vp = page.getViewport({ scale: renderScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width);
+    canvas.height = Math.ceil(vp.height);
+    const ctx = canvas.getContext('2d');
 
-          libPage.drawRectangle({
-            x: Math.max(0, x - 1),
-            y: Math.max(0, y - 2),
-            width: width + 2,
-            height: height + 4,
-            color: PDFLib.rgb(1, 1, 1),
-            borderColor: PDFLib.rgb(0.85, 0.85, 0.85),
-            borderWidth: 0.5,
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+    // 建立页面级字符索引（兼容同一行拆分或跨行折行的当事人名称）
+    let joined = '';
+    const charRefs = [];
+    for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
+      const it = items[itemIdx];
+      const str = it.str || '';
+      if (!str) continue;
+      const tx = pdfjsLib.Util.transform(vp.transform, it.transform);
+      const fontPx = Math.max(10, Math.hypot(tx[2], tx[3]) || Math.abs(tx[0]) || 12 * renderScale);
+      const itemW = Math.max(fontPx * 0.5, (it.width || 0) * renderScale);
+      const totalWeight = Math.max(1, Array.from(str).reduce((acc, ch) => acc + (ch.charCodeAt(0) > 127 ? 2 : 1), 0));
+      let accWeight = 0;
+      for (const ch of str) {
+        const w = ch.charCodeAt(0) > 127 ? 2 : 1;
+        if (!/\s/.test(ch)) {
+          const x0 = tx[4] + itemW * (accWeight / totalWeight);
+          const cw = itemW * (w / totalWeight);
+          const yBottom = tx[5];
+          charRefs.push({
+            x0,
+            x1: x0 + cw,
+            yTop: yBottom - fontPx * 0.92,
+            yBottom: yBottom + fontPx * 0.24,
+            fontPx,
+            lineKey: Math.round(yBottom / (fontPx * 0.6))
           });
+          joined += ch;
         }
+        accWeight += w;
       }
     }
+
+    const compactPlan = plan
+      .map(e => ({ ...e, compact: (e.original || '').replace(/\s+/g, '') }))
+      .filter(e => e.compact.length > 0);
+    const spans = [];
+    for (const ent of compactPlan) {
+      let pos = joined.indexOf(ent.compact);
+      while (pos !== -1) {
+        const end = pos + ent.compact.length;
+        if (!spans.some(s => !(end <= s.start || pos >= s.end))) {
+          spans.push({ start: pos, end, replacement: ent.replacement });
+        }
+        pos = joined.indexOf(ent.compact, pos + 1);
+      }
+    }
+
+    for (const sp of spans) {
+      const slice = charRefs.slice(sp.start, sp.end);
+      if (!slice.length) continue;
+      // 按行分组绘制遮挡块，首行写入替身文字
+      const byLine = new Map();
+      for (const ref of slice) {
+        if (!byLine.has(ref.lineKey)) byLine.set(ref.lineKey, []);
+        byLine.get(ref.lineKey).push(ref);
+      }
+      let isFirstLine = true;
+      for (const lineChars of byLine.values()) {
+        const x0 = Math.min(...lineChars.map(c => c.x0)) - 3;
+        const x1 = Math.max(...lineChars.map(c => c.x1)) + 3;
+        const y0 = Math.min(...lineChars.map(c => c.yTop)) - 2;
+        const y1 = Math.max(...lineChars.map(c => c.yBottom)) + 2;
+        const boxW = Math.max(8, x1 - x0);
+        const boxH = Math.max(12, y1 - y0);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x0, y0, boxW, boxH);
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x0, y0, boxW, boxH);
+
+        if (isFirstLine && sp.replacement) {
+          const targetFont = Math.min(Math.max(11, boxH * 0.72), (boxW - 4) / Math.max(1, sp.replacement.length * 0.65));
+          ctx.fillStyle = '#0f172a';
+          ctx.font = `600 ${Math.round(targetFont)}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(sp.replacement, x0 + 2, y0 + boxH / 2, Math.max(boxW - 4, 24));
+        }
+        isFirstLine = false;
+      }
+    }
+
+    const jpgBytes = dataUrlToUint8Array(canvas.toDataURL('image/jpeg', 0.90));
+    const jpgImg = await pdfDoc.embedJpg(jpgBytes);
+    const outPage = pdfDoc.addPage([baseVp.width, baseVp.height]);
+    outPage.drawImage(jpgImg, { x: 0, y: 0, width: baseVp.width, height: baseVp.height });
   }
 
-  // 清除元数据
   pdfDoc.setTitle('');
   pdfDoc.setAuthor('');
-  pdfDoc.setSubject('');
-  pdfDoc.setKeywords([]);
   pdfDoc.setProducer('');
   pdfDoc.setCreator('');
 
   const pdfBytes = await pdfDoc.save();
   const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-  return { blob, plan };
+  return { blob, plan, redactedText };
+}
+
+function downloadCurrentRedactedMd() {
+  if (!currentRedactedMdText) return;
+  const blob = new Blob([currentRedactedMdText], { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (currentFile ? currentFile.name.replace(/\.[^.]+$/, '') : 'document') + '.redacted.md';
+  a.click();
 }
 
 function renderResult(outFileName, plan) {
@@ -1797,10 +2119,7 @@ function startTextRedact() {
   const autoConfident = document.getElementById('textAutoConfident').checked;
 
   const plan = buildRedactionPlan(text, { mode, autoConfident });
-  let outText = text;
-  for (const ent of plan) {
-    outText = outText.split(ent.original).join(ent.replacement);
-  }
+  const outText = applyPlanToText(text, plan);
 
   document.getElementById('textOutput').value = outText;
   currentTextLedger = { mode, entities: plan };
@@ -1852,12 +2171,20 @@ function startRestore() {
 
   let out = text;
   const entities = ledger.entities || [];
-  // 按照替身长度倒序替换
-  const valid = entities.filter(e => e.replacement && e.original);
+  const valid = entities.filter(e => e.replacement && e.original && e.replacement !== e.original);
   valid.sort((a, b) => b.replacement.length - a.replacement.length);
 
-  for (const e of valid) {
-    out = out.split(e.replacement).join(e.original);
+  // 哨兵两阶段替换，防止链式覆盖
+  const sentinels = [];
+  valid.forEach((e, idx) => {
+    if (out.includes(e.replacement)) {
+      const tok = `⟦S${idx}⟧`;
+      out = out.split(e.replacement).join(tok);
+      sentinels.push([tok, e.original]);
+    }
+  });
+  for (const [tok, orig] of sentinels) {
+    out = out.split(tok).join(orig);
   }
 
   document.getElementById('restoreOutput').value = out;

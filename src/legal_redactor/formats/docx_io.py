@@ -16,6 +16,7 @@ from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
+from ..patterns import detect_structural, structural_placeholder
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -346,7 +347,12 @@ def _scrub_misc_part(data: bytes) -> bytes:
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
-def _scrub_rels(data: bytes) -> bytes:
+def _scrub_rels(
+    data: bytes,
+    mapping: list[tuple[str, str]] | None = None,
+    *,
+    drop_http: bool = True,
+) -> bytes:
     try:
         root = etree.fromstring(data)
     except etree.XMLSyntaxError:
@@ -356,9 +362,27 @@ def _scrub_rels(data: bytes) -> bytes:
         if _local(el.tag) != "Relationship":
             continue
         target = el.get("Target") or ""
-        if target.lower().startswith("mailto:") or el.get("TargetMode") == "External":
+        if target.lower().startswith("mailto:"):
             el.set("Target", "#")
             changed = True
+        elif el.get("TargetMode") == "External":
+            if drop_http:
+                el.set("Target", "#")
+                changed = True
+            elif target:
+                redacted_target = apply_mapping_to_text(target, mapping or [])
+                # Also strip structural URL credentials/tokens/phones hidden only in rels Target
+                url_pairs = [
+                    (h.text, structural_placeholder(h.category, h.text, 0))
+                    for h in detect_structural(redacted_target)
+                    if h.auto_replace and h.category in {"url_secret", "mobile", "id_card", "email"}
+                ]
+                if url_pairs:
+                    url_pairs.sort(key=lambda p: len(p[0]), reverse=True)
+                    redacted_target = apply_mapping_to_text(redacted_target, url_pairs)
+                if redacted_target != target:
+                    el.set("Target", redacted_target)
+                    changed = True
     if not changed:
         return data
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
@@ -375,6 +399,7 @@ def redact_docx(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    mode: str = "ai",
 ) -> str:
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -410,7 +435,8 @@ def redact_docx(
                     data = _clean_custom_props(data)
                 elif name.startswith("word/_rels/") and name.endswith(".rels"):
                     if not preserve_hyperlinks:
-                        data = _scrub_rels(data)
+                        drop_http = mode.lower().strip() != "production"
+                        data = _scrub_rels(data, mapping, drop_http=drop_http)
                 elif name in ("word/settings.xml", "word/people.xml"):
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)

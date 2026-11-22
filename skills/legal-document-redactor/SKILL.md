@@ -58,7 +58,7 @@ legal-redactor web
 - 内置**纯文本即时洗稿**与**AI 回答当事人反向还原**
 - 免安装 Python 场景可直接双击项目内 `docs/index.html` 打开纯前端离线版
 
-扫描件 PDF 没有文字层时，不要对 PDF 跑上面这条，也不要把原 PDF 交给模型。`redact` 会直接拒绝。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
+- 扫描件 PDF 没有文字层（或属于整页扫描图叠加文字层的双层 PDF）时，不要对 PDF 直接跑 `redact`，`ai` 模式会直接拒绝；也不要把原 PDF 交给模型。`redact-scan` 只涂证件号和电话，姓名和公章仍在图上，不能代替。
 
 ```bash
 legal-redactor ocr scan.pdf -o workdir/
@@ -82,7 +82,7 @@ legal-redactor verify workdir/ai.md --mode ai --strict
 - docx 修订默认接受；要保留修订用 `--revisions keep-and-redact`。内嵌图片告警 `IMAGE-PII` 必须处理；`seal-draft` 与 NER 只给草稿/疑似，须人工确认。
 - 页眉、页脚、脚注、尾注和批注正文会扫，批注作者改成「作者」。域代码（文件名、交叉引用）不替换，看到 `DOCX-FIELD` 就要看一眼；页码域忽略。
 - 400/800 和带空格的座机按电话去掉。证据链接保留；链接里的账号密码、token，以及给模型时的提取码，会去掉。整段网址要去掉才加 `--extra-categories url`。大写金额只在前面是工资、月薪、存款、余额时改成量级，索赔和报酬保留。MAC 与 IP 一样去掉。台胞证必须带「台胞证」标签才识别。
-- 判决书、裁定书 PDF 里当事人全称常被排版折到下一行。工具按字符级匹配把跨行的名字一起去掉（0.18.1），所以补完 `entities.json` 后仍报 `unreplaced_entity` 的，先看是不是同一名字的另一种写法（带/不带「北京」前缀、被截断的片段）。简称（「星澜公司」「云海公司」）目前只在同一行内联动，跨行折开的「以下简称」认不到，`ai` 稿交出去前人工核一眼。
+- 判决书、裁定书 PDF 里当事人全称常被排版折到下一行。工具按字符级匹配把跨行的名字一起去掉（0.18.1），跨行或并列的「以下简称」（如「以下简称甲方或星澜公司」）也会自动与全称共用替身（0.19.0）。补完 `entities.json` 后仍报 `unreplaced_entity` 的，先看是不是同一名字的另一种写法（带/不带行政区划前缀、被截断的片段）。
 - 本机 Ollama 识别：见 [references/ollama.md](references/ollama.md)
 - CLI 速查：见 [references/cli-cheatsheet.md](references/cli-cheatsheet.md)
 

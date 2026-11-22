@@ -113,6 +113,7 @@ def _apply(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    mode: str = "ai",
 ) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
@@ -125,6 +126,7 @@ def _apply(
             revisions=revisions,
             ocr_images=ocr_images,
             image_categories=image_categories,
+            mode=mode,
         )
     if suffix == ".pdf":
         return pdf_io.redact_pdf(
@@ -244,16 +246,6 @@ def redact_file(
     input_path = Path(input_path)
     if not input_path.is_file():
         raise FileNotFoundError(input_path)
-    if input_path.suffix.lower() == ".pdf":
-        from .ocr_engine import pdf_has_text_layer
-
-        # Default of 20 treats a one-line phone as "no text layer" and blocks
-        # metadata cleanup. Refuse only when extractable text is empty.
-        if not pdf_has_text_layer(input_path, min_chars=1):
-            raise ValueError(
-                "这份 PDF 没有文字层。给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
-                "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
-            )
 
     prof: Profile | None
     if isinstance(profile, Profile):
@@ -267,11 +259,30 @@ def redact_file(
         preserve = list(preserve or []) + list(prof.preserve)
         if not auto_confident:
             auto_confident = prof.auto_confident
+    mode = mode.lower().strip()
+
+    is_sandwich_pdf = False
+    if input_path.suffix.lower() == ".pdf":
+        from .ocr_engine import pdf_has_full_page_scan, pdf_has_text_layer
+
+        # Default of 20 treats a one-line phone as "no text layer" and blocks
+        # metadata cleanup. Refuse only when extractable text is empty.
+        if not pdf_has_text_layer(input_path, min_chars=1):
+            raise ValueError(
+                "这份 PDF 没有文字层。给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
+                "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
+            )
+        is_sandwich_pdf = pdf_has_full_page_scan(input_path)
+        if is_sandwich_pdf and mode == "ai" and ocr_images != "on":
+            raise ValueError(
+                "这份 PDF 是双层扫描件（整页扫描图片叠加文字层）。文字层替换后图上的姓名与公章仍在，"
+                "不能直接交给模型；请先跑 ocr，再对 ocr.normalized.md 做 redact。"
+            )
+
     # Backward compat: explicit work_dir means caller wants sidecars there (incl. ledger)
     if ledger_beside_output is None:
         ledger_beside_output = work_dir is not None and ledger is None
 
-    mode = mode.lower().strip()
     output_path = Path(output_path) if output_path else default_output_path(input_path, mode)
     if output_path.suffix.lower() != input_path.suffix.lower():
         raise ValueError(
@@ -320,6 +331,10 @@ def redact_file(
     )
     mapping = plan.mapping()
     warnings: list[str] = []
+    if is_sandwich_pdf:
+        warnings.append(
+            "PDF 包含整页扫描图层（双层扫描件）：文字层已处理，图像层须人工逐页核查或改用 redact-scan"
+        )
     output_text = _apply(
         input_path,
         output_path,
@@ -332,6 +347,7 @@ def redact_file(
         image_categories=categories_for_mode(
             mode, keep_categories=keep, extra_categories=extra, only_categories=only
         ),
+        mode=mode,
     )
     residual = scan_residual(
         output_text,
@@ -562,6 +578,9 @@ def redact_tree(
         work_root = Path(work_dir)
     work_root.mkdir(parents=True, exist_ok=True)
 
+    batch_allow = resolve_allowlist(
+        input_dir, allowlist_files, include_defaults=use_default_allowlist
+    )
     effective_entities = entities_path
     pre_entities_path: Path | None = None
     if unify_first:
@@ -574,6 +593,12 @@ def redact_tree(
             entities_path=entities_path,
             recursive=recursive,
             include_suspects=True,
+            preserve=preserve,
+            keep_categories=keep_categories,
+            extra_categories=extra_categories,
+            allowlist=batch_allow,
+            profile=profile,
+            redact_court_staff=redact_court_staff,
         )
         pre_entities_path = pre.entities_path
         effective_entities = pre.entities_path
@@ -581,9 +606,6 @@ def redact_tree(
     results: list[RedactResult] = []
     skipped: list[tuple[Path, str]] = []
     used_names: set[str] = set()
-    batch_allow = resolve_allowlist(
-        input_dir, allowlist_files, include_defaults=use_default_allowlist
-    )
 
     for src in iter_batch_inputs(input_dir, recursive=recursive):
         name = f"{src.stem}.redacted-{mode}{src.suffix}"

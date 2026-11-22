@@ -345,6 +345,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     po.add_argument("--dpi", type=int, default=200)
     po.add_argument("--lang", default="chi_sim+eng")
+    po.add_argument("--engine", choices=("auto", "rapidocr", "tesseract"), default="auto")
     po.add_argument("--tesseract", type=Path, default=None, help="tesseract.exe 路径")
     po.add_argument("--tessdata", type=Path, default=None, help="TESSDATA_PREFIX 目录")
 
@@ -362,6 +363,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prs.add_argument("--dpi", type=int, default=200)
     prs.add_argument("--lang", default="chi_sim+eng")
+    prs.add_argument("--engine", choices=("auto", "rapidocr", "tesseract"), default="auto")
     prs.add_argument("--work-dir", type=Path, default=None)
     prs.add_argument("--keep-categories", action="append", default=[], metavar="CAT")
     prs.add_argument("--extra-categories", action="append", default=[], metavar="CAT")
@@ -404,10 +406,10 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _extract_any(path: Path) -> str:
+def _extract_any(path: Path, *, revisions: str = "accept") -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
-        return docx_io.extract_text(path)
+        return docx_io.extract_text(path, revisions=revisions)
     if suffix == ".pdf":
         return pdf_io.extract_text(path)
     return text_io.extract_text(path)
@@ -877,7 +879,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 from .pipeline import resolve_allowlist
 
-                text = _extract_any(src)
+                text = _extract_any(src, revisions="keep-and-redact")
                 report = scan_residual(
                     text,
                     mode=vmode,
@@ -1000,6 +1002,7 @@ def main(argv: list[str] | None = None) -> int:
                 lang=args.lang,
                 tesseract_cmd=args.tesseract,
                 tessdata_dir=args.tessdata,
+                engine=getattr(args, "engine", "auto"),
             )
             uncovered = [p.page for p in result.pages if p.uncovered]
             print(f"pages:      {len(result.pages)}")
@@ -1033,6 +1036,7 @@ def main(argv: list[str] | None = None) -> int:
                 redact_party=args.redact_party,
                 party_spec_path=args.party_spec,
                 also_redact_structural_all=args.also_redact_structural_all,
+                engine=getattr(args, "engine", "auto"),
             )
             print(f"mode:    {result.mode}")
             print(f"output:  {result.output_path}")

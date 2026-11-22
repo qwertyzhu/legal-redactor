@@ -21,8 +21,10 @@ MIN_IMAGE_SIDE = 40  # skip icons/bullets
 
 def ocr_available() -> bool:
     try:
-        from .ocr_engine import find_tesseract
+        from .ocr_engine import find_tesseract, rapidocr_available
 
+        if rapidocr_available():
+            return True
         find_tesseract()
         return True
     except Exception:
@@ -75,20 +77,23 @@ def ocr_image_hits(
     psm: int = 6,
 ) -> tuple[list[ImageHit], int, int, str]:
     """OCR one raster image. Returns (hits, width, height, ocr_text)."""
-    from .ocr_engine import collapse_cjk_spaces, find_tessdata, find_tesseract
-    from .scan_pdf import _collect_boxes, _ocr_words
+    from .ocr_engine import collapse_cjk_spaces, find_tessdata, find_tesseract, rapidocr_available
+    from .scan_pdf import _collect_boxes, _ocr_words, _ocr_words_rapidocr
 
     norm = _png_bytes(data)
     if norm is None:
         return [], 0, 0, ""
     png, w, h = norm
     cats = set(categories)
-    with tempfile.TemporaryDirectory(prefix="lr-img-") as td:
-        img = Path(td) / "img.png"
-        img.write_bytes(png)
-        words = _ocr_words(
-            img, tesseract=find_tesseract(), tessdata=find_tessdata(), lang=lang, psm=psm
-        )
+    if rapidocr_available():
+        words = _ocr_words_rapidocr(png)
+    else:
+        with tempfile.TemporaryDirectory(prefix="lr-img-") as td:
+            img = Path(td) / "img.png"
+            img.write_bytes(png)
+            words = _ocr_words(
+                img, tesseract=find_tesseract(), tessdata=find_tessdata(), lang=lang, psm=psm
+            )
     hits = [ImageHit(c, t, (x0, y0, x1, y1)) for x0, y0, x1, y1, c, t in _collect_boxes(words, cats)]
     terms = [t for t in extra_terms if t and len(t) >= 2]
     if terms:

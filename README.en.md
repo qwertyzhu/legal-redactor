@@ -80,7 +80,7 @@ Zero-install, client-side redaction available via two ways:
 2. **Offline Download**: Download `legal-redactor.html` directly from **[GitHub Releases Assets](https://github.com/qwertyzhu/legal-redactor/releases)** and double-click to open offline.
 
 - **Zero-Backend**: No server, no Python, 100% in-browser memory execution.
-- **Client-side PDF & Word Redaction**: Redacts PDF (via pdf-lib / pdf.js text masking) and DOCX (via JSZip XML reconstruction) without any backend.
+- **Client-side PDF & Word Redaction**: Redacts PDF (via pdf.js 2x Canvas rasterization into a fresh image-only PDF with zero residual text stream, plus `.md` text export for LLMs) and DOCX (via DOM cross-run reconstruction & revision/metadata cleanup) without any backend.
 - **Interactive AI Prompt Box**: Input specific redaction requirements directly in natural language (e.g. "Only redact phone numbers and amounts", "Mask all party names"), supporting local Ollama (`http://localhost:11434`) or custom OpenAI API.
 - **Designed by**: lawyer朱思浩
 
@@ -132,10 +132,10 @@ python -m pip install -e ".[dev]"
 legal-redactor --help    # lists redact / scan / verify
 ```
 
-CLI-only from the **latest** GitHub Release wheel (v0.18.2 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
+CLI-only from the **latest** GitHub Release wheel (v0.19.0 shown; check [Releases](https://github.com/qwertyzhu/legal-redactor/releases/latest) first):
 
 ```console
-python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.18.2/legal_redactor-0.18.2-py3-none-any.whl
+python -m pip install https://github.com/qwertyzhu/legal-redactor/releases/download/v0.19.0/legal_redactor-0.19.0-py3-none-any.whl
 ```
 
 **Upgrade rule**: update the skill bundle and the Python package together. CHANGELOG entries marked "skill only" need no wheel upgrade; entries marked "fix (package)" (e.g. v0.10.7 fixing label-adjacent email misses) **require** the new wheel. After installing, run the self-check:

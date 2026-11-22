@@ -14,9 +14,15 @@ from .allowlist import is_statute_title
 
 # Org-like endings common in Chinese contracts / pleadings.
 _ORG_SUFFIX = (
-    r"(?:有限责任公司|股份有限公司|有限公司|集团有限公司|集团|律师事务所|事务所|"
+    r"(?:合伙企业[（(](?:有限|普通|特殊普通)合伙[）)]|"
+    r"工作室[（(](?:有限|普通)合伙[）)]|"
+    r"有限责任公司|股份有限公司|有限公司|集团有限公司|集团|"
+    r"有限合伙企业|普通合伙企业|合伙企业|"
+    r"律师事务所|会计师事务所|事务所|"
     r"人民法院|检察院|仲裁委员会|医院|大学|学院|银行股份有限公司|"
-    r"支行|分行|中心|研究院|研究所|工厂|合作社|基金会|协会|学会|出版社)"
+    r"支行|分行|中心|研究院|研究所|工厂|合作社|基金会|协会|学会|"
+    r"广播电视台|电视台|出版社|杂志社|报社|"
+    r"工作室|经营部|商行|服务部)"
 )
 _ORG_SUFFIX_RE = re.compile(_ORG_SUFFIX)
 _ORG_NAME_CHAR = re.compile(r"[一-鿿A-Za-z0-9（）()·&]")
@@ -28,7 +34,8 @@ _ORG_MAX_HEAD = 30
 # The name starts after the last boundary found.
 _ORG_LEFT_CUT = re.compile(
     r"[（(]以下(?:简称|称)[^）)]{0,20}[）)]"
-    r"|(?:公司|集团|事务所|中心|研究院|研究所|医院|大学|学院|协会|学会|出版社|基金会|合作社|工厂|支行|分行)"
+    r"|(?:合伙企业[（(][^）)]{2,6}[）)]|工作室[（(][^）)]{2,6}[）)]|"
+    r"公司|集团|事务所|中心|研究院|研究所|医院|大学|学院|协会|学会|出版社|基金会|合作社|工厂|支行|分行|合伙企业|工作室|经营部|商行)"
     r"(?:和|与|及|同)"
     r"|原审原告|原审被告|原审第三人|被上诉人|上诉人|被申请人|申请执行人|被执行人|申请人|第三人|原告|被告"
     r"|甲方|乙方|丙方|丁方|被授权方|被许可方|授权方|许可方|受让方|转让方|委托|聘请"
@@ -43,7 +50,12 @@ _INSTITUTIONAL_SUFFIX = (
     "律师事务所",
     "事务所",
     "出版社",
+    "广播电视台",
+    "电视台",
+    "报社",
+    "杂志社",
 )
+_GENERIC_HEAD_ONLY = frozenset({"本", "该", "各", "某", "原", "现", "个体", "个体工", "生产", "市场"})
 _CLAUSE_IN_HEAD = re.compile(
     r"[的向其与及或]|协议|签署|任一|均可|合作|披露|授予|根据|可以|应当"
 )
@@ -64,16 +76,18 @@ _COURT_STAFF_ROLES = ("审判长", "审判员", "陪审员", "书记员", "法�
 _ENTRUSTED = re.compile(
     r"(?:接受|受)(?P<name>[·一-鿿]{2,4}?)(?:的)?(?:全权)?委托"
 )
-# Optional parenthetical annotation, then optional colon/space, then 2–4 CJK name chars.
+_PERSON_NAME_PAT = r"(?:[一-鿿]{1,6}(?:[·•][一-鿿]{1,6})+|[·一-鿿]{2,4})"
+# Optional parenthetical annotation, then optional colon/space, then CJK or dot-separated ethnic name.
 _PERSON = re.compile(
     rf"(?:{_PERSON_ROLES})"
     rf"(?:[（(][^）)\n]{{0,20}}[）)])?"
     rf"(?P<delim>[：:]\s*[，,、]\s*|[：:]\s*|\s*)"
-    rf"(?P<name>[·一-鿿]{{2,4}})"
+    rf"(?P<name>{_PERSON_NAME_PAT})"
     rf"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|电子|邮箱|住址|住所|$))"
 )
 
-_SURNAMES = set(
+# Classical Baijiaxing + modern PRC simplified/household-registration surnames (肖/付/闫/代/兰/岳/覃 etc.)
+SURNAMES = set(
     "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
     "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
     "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄"
@@ -87,8 +101,11 @@ _SURNAMES = set(
     "连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东欧"
     "殳沃利蔚越夔隆师巩聂晁勾敖融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关"
     "蒯相查后荆红游竺权逯盖益桓公"
+    "肖付闫代兰芦丛岳沿涂牟阳位覃隋植辜丘晋苑畅来苟木邸商揭迟宇鄢稽练"
+    "冼原官衣楚佟栗台僧谌银扬保旷邝门侍寸过达刀字奉闪税盘闭东门完颜"
 )
-_COMPOUND_SURNAMES = (
+_SURNAMES = SURNAMES
+COMPOUND_SURNAMES = (
     "欧阳",
     "司马",
     "上官",
@@ -100,7 +117,14 @@ _COMPOUND_SURNAMES = (
     "东方",
     "皇甫",
     "令狐",
+    "完颜",
+    "端木",
+    "独孤",
+    "南宫",
+    "尉迟",
+    "公孙",
 )
+_COMPOUND_SURNAMES = COMPOUND_SURNAMES
 
 # Work titles in 《》 — high-value matter keys in copyright practice.
 _WORK = re.compile(r"《([^》\n]{1,40})》")
@@ -184,10 +208,10 @@ _PERSON_BLOCKLIST = frozenset(
 # replaced everywhere in the document.
 _PERSON_STOPWORDS = frozenset(
     {
-        "陈述", "明知", "方面", "平台", "管理", "经营", "经济", "经济损失", "时间", "于是",
+        "陈述", "明知", "明确", "方面", "平台", "管理", "管辖", "经营", "经济", "经济损失", "时间", "于是",
         "应当", "承担", "全部", "安全", "高度", "成立", "关于", "支付", "单方", "常年",
         "曾经", "曾多次", "向其", "和解", "合理开支", "公开", "公司", "单位", "家庭",
-        "双方", "代表", "工作", "居住", "出庭", "作证",
+        "双方", "代表", "工作", "居住", "出庭", "作证", "经查", "经审", "申请", "许可", "连带", "计算",
     }
 )
 
@@ -195,7 +219,7 @@ _PERSON_STOPWORDS = frozenset(
 _LABELED_PERSON = re.compile(
     r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)"
     r"\s*[：:]\s*"
-    r"(?P<name>[·一-鿿]{2,4})"
+    rf"(?P<name>{_PERSON_NAME_PAT})"
     r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))"
 )
 _LABELED_LATIN = re.compile(
@@ -252,10 +276,17 @@ class Suspect:
         return asdict(self)
 
 
-def _has_surname(name: str) -> bool:
-    if any(name.startswith(item) for item in _COMPOUND_SURNAMES):
+def has_surname(name: str) -> bool:
+    if not name:
+        return False
+    if ("·" in name or "•" in name) and len(name) >= 3:
+        return not name.startswith(("·", "•")) and not name.endswith(("·", "•"))
+    if any(name.startswith(item) for item in COMPOUND_SURNAMES):
         return True
-    return bool(name) and name[0] in _SURNAMES
+    return name[0] in SURNAMES
+
+
+_has_surname = has_surname
 
 
 def _role_hint_for_person(context: str) -> str:
@@ -309,10 +340,14 @@ def _org_candidates(text: str) -> list[tuple[str, int, bool]]:
             if not lead or not lead.end():
                 break
             head = head[lead.end() :]
-        if len(head) < 2:
+        if len(head) < 2 or head in _GENERIC_HEAD_ONLY:
             continue
         suffix = m.group(0)
         if suffix.endswith(_INSTITUTIONAL_SUFFIX) and _CLAUSE_IN_HEAD.search(head):
+            continue
+        if suffix in ("工作室", "经营部", "商行", "服务部") and (
+            len(head) < 3 or re.search(r"[的向与及或]|协议|签署|任一|均可|根据|可以|应当", head)
+        ):
             continue
         out.append((head + suffix, s - len(head), anchored))
     return out
