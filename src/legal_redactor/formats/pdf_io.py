@@ -312,8 +312,8 @@ def create_sample_pdf(path: Path, text: str) -> None:
     doc = fitz.open()
     page = doc.new_page()
 
-    fontname = "helv"
-    # Try common Windows / Noto fonts for CJK; fall back to built-in (latin only).
+    fontname = "china-s"
+    # Try common Windows / Noto fonts for CJK; fall back to PyMuPDF built-in china-s.
     for candidate in (
         "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/simsun.ttc",
@@ -328,7 +328,7 @@ def create_sample_pdf(path: Path, text: str) -> None:
                 page.insert_font(fontname=fontname, fontfile=str(fp))
                 break
             except Exception:
-                fontname = "helv"
+                fontname = "china-s"
 
     y = 72.0
     for line in text.split("\n"):
