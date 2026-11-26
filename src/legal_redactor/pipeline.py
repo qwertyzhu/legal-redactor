@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -100,6 +101,10 @@ def _extract(path: Path, *, revisions: str = "accept") -> str:
     if suffix in TEXT_SUFFIXES or suffix == "":
         return text_io.extract_text(path)
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
+
+
+def _scan_page_notice(pages: list[int]) -> str:
+    return f"第 {'、'.join(map(str, pages))} 页没有文字层（扫描图片），未脱敏、无法通过文字校验。"
 
 
 def _apply(
@@ -242,6 +247,7 @@ def redact_file(
     revisions: str = "accept",
     ocr_images: str = "auto",
     redact_court_staff: bool | None = None,
+    sidecar_stem: str | None = None,
 ) -> RedactResult:
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -261,15 +267,16 @@ def redact_file(
             auto_confident = prof.auto_confident
     mode = mode.lower().strip()
 
+    source_text = None
     is_sandwich_pdf = False
     if input_path.suffix.lower() == ".pdf":
-        from .ocr_engine import pdf_has_full_page_scan, pdf_has_text_layer
+        from .ocr_engine import pdf_has_full_page_scan
 
-        # Default of 20 treats a one-line phone as "no text layer" and blocks
-        # metadata cleanup. Refuse only when extractable text is empty.
-        if not pdf_has_text_layer(input_path, min_chars=1):
+        source_text, scan_pages = pdf_io.extract_text_with_scan_pages(input_path)
+        if scan_pages or not source_text.strip():
+            notice = _scan_page_notice(scan_pages) if scan_pages else "这份 PDF 没有文字层。"
             raise ValueError(
-                "这份 PDF 没有文字层。给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
+                f"{notice}给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
                 "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
             )
         is_sandwich_pdf = pdf_has_full_page_scan(input_path)
@@ -289,6 +296,7 @@ def redact_file(
             f"output suffix {output_path.suffix!r} must match input suffix {input_path.suffix!r}"
         )
 
+    sidecar_stem = sidecar_stem or output_path.stem
     work_dir = Path(work_dir) if work_dir else output_path.parent
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -302,7 +310,8 @@ def redact_file(
         raise ValueError(f"revisions must be one of {REVISION_MODES}")
     if ocr_images not in OCR_IMAGE_MODES:
         raise ValueError(f"ocr_images must be one of {OCR_IMAGE_MODES}")
-    source_text = _extract(input_path, revisions=revisions)
+    if source_text is None:
+        source_text = _extract(input_path, revisions=revisions)
     only = prof.categories if prof is not None else None
     if prof is not None and prof.categories is None:
         keep |= prof.keep_categories
@@ -411,16 +420,16 @@ def redact_file(
         legacy_beside_output=bool(ledger_beside_output),
     )
     if ledger_beside_output and ledger is None:
-        ledger_target = work_dir / f"{output_path.stem}.ledger.json"
+        ledger_target = work_dir / f"{sidecar_stem}.ledger.json"
     ledger_payload = plan.to_dict()
     ledger_payload["input_path"] = str(input_path)
     ledger_payload["output_path"] = str(output_path)
     ledger_payload["profile"] = prof.name if prof else None
     ledger_path = write_ledger_payload(ledger_target, ledger_payload, encrypt=ledger_encrypt)
     if not ledger_beside_output:
-        write_ledger_pointer(work_dir, output_path.stem, ledger_path)
-    residual_path = work_dir / f"{output_path.stem}.residual.json"
-    suspects_path = work_dir / f"{output_path.stem}.suspects.json"
+        write_ledger_pointer(work_dir, sidecar_stem, ledger_path)
+    residual_path = work_dir / f"{sidecar_stem}.residual.json"
+    suspects_path = work_dir / f"{sidecar_stem}.suspects.json"
     residual.dump(residual_path)
     suspects_path.write_text(
         json.dumps(
@@ -438,7 +447,7 @@ def redact_file(
         encoding="utf-8",
     )
 
-    summary_path = work_dir / f"{output_path.stem}.summary.md"
+    summary_path = work_dir / f"{sidecar_stem}.summary.md"
     summary_path.write_text(
         _render_summary(
             input_path,
@@ -463,8 +472,8 @@ def redact_file(
         profile=prof.name if prof else None,
         part=_audit_part_label(input_path),
     )
-    audit_json_path = work_dir / f"{output_path.stem}.audit.json"
-    audit_md_path = work_dir / f"{output_path.stem}.audit.md"
+    audit_json_path = work_dir / f"{sidecar_stem}.audit.json"
+    audit_md_path = work_dir / f"{sidecar_stem}.audit.md"
     audit.dump_json(audit_json_path)
     audit.dump_md(audit_md_path)
 
@@ -609,10 +618,8 @@ def redact_tree(
         pre_entities_path = pre.entities_path
         effective_entities = pre.entities_path
 
-    results: list[RedactResult] = []
-    skipped: list[tuple[Path, str]] = []
+    batch_paths: list[tuple[Path, Path]] = []
     used_names: set[str] = set()
-
     for src in iter_batch_inputs(input_dir, recursive=recursive):
         name = f"{src.stem}.redacted-{mode}{src.suffix}"
         if name in used_names:
@@ -621,7 +628,19 @@ def redact_tree(
             safe = "__".join(rel.with_suffix("").parts)
             name = f"{safe}.redacted-{mode}{src.suffix}"
         used_names.add(name)
-        out = output_dir / name
+        batch_paths.append((src, output_dir / name))
+
+    stem_counts = Counter(out.stem for _, out in batch_paths)
+    results: list[RedactResult] = []
+    skipped: list[tuple[Path, str]] = []
+    used_sidecar_stems: set[str] = set()
+    for src, out in batch_paths:
+        sidecar_stem = out.name if stem_counts[out.stem] > 1 else out.stem
+        index = 2
+        while sidecar_stem in used_sidecar_stems:
+            sidecar_stem = f"{out.name}.{index}"
+            index += 1
+        used_sidecar_stems.add(sidecar_stem)
         try:
             result = redact_file(
                 input_path=src,
@@ -642,6 +661,7 @@ def redact_tree(
                 revisions=revisions,
                 ocr_images=ocr_images,
                 redact_court_staff=redact_court_staff,
+                sidecar_stem=sidecar_stem,
             )
             results.append(result)
         except Exception as exc:  # noqa: BLE001 - batch continues
@@ -664,6 +684,31 @@ def redact_tree(
         consistency_path=consistency_path,
         entities_consistent_path=entities_consistent_path,
     )
+
+
+def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
+    scan_pages: list[int] = []
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        text, scan_pages = pdf_io.extract_text_with_scan_pages(path)
+    elif suffix == ".docx":
+        # Superset view: deleted/inserted revision text is scanned too.
+        text = docx_io.extract_text(path, revisions="keep-and-redact")
+    else:
+        text = text_io.extract_text(path)
+
+    report = scan_residual(text, mode=mode, nl=True, **scan_options)
+    if scan_pages:
+        report.ok = False
+        report.status = "FAIL"
+        report.summary = f"residual scan FAILED for mode={mode}: PDF contains unverified scanned pages"
+        report.hits.append({
+            "category": "unverified_scan",
+            "text": _scan_page_notice(scan_pages),
+            "start": -1,
+            "end": -1,
+        })
+    return report
 
 
 def verify_tree(
@@ -695,15 +740,12 @@ def verify_tree(
     for path in iter_batch_inputs(input_dir, recursive=recursive):
         if path.name.endswith(sidecar_suffixes) or path.name.startswith(("entities.consistent", "consistency.report")):
             continue
-        # Superset view: deleted/inserted revision text is scanned too.
-        text = _extract(path, revisions="keep-and-redact")
-        report = scan_residual(
-            text,
+        report = verify_file(
+            path,
             mode=mode,
             keep_categories=keep,
             extra_categories=extra,
             only_categories=only_categories,
-            nl=True,
             allowlist=allow,
             redact_court_staff=bool(_ignored.get("redact_court_staff")),
         )

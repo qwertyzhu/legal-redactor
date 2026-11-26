@@ -40,6 +40,14 @@ def rapidocr_available() -> bool:
         return False
 
 
+def tesseract_available() -> bool:
+    try:
+        find_tesseract()
+        return True
+    except Exception:
+        return False
+
+
 def ocr_image_rapidocr(png_bytes: bytes) -> list[Any]:
     global _RAPIDOCR_ENGINE
     if _RAPIDOCR_ENGINE is None:

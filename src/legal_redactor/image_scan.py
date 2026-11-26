@@ -21,12 +21,9 @@ MIN_IMAGE_SIDE = 40  # skip icons/bullets
 
 def ocr_available() -> bool:
     try:
-        from .ocr_engine import find_tesseract, rapidocr_available
+        from .ocr_engine import rapidocr_available, tesseract_available
 
-        if rapidocr_available():
-            return True
-        find_tesseract()
-        return True
+        return rapidocr_available() or tesseract_available()
     except Exception:
         return False
 

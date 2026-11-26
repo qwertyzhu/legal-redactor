@@ -225,7 +225,30 @@ def test_revisions_extract_views(tmp_path: Path):
 def test_doctor_cli(capsys):
     assert main(["doctor", "--json"]) == 0
     info = json.loads(capsys.readouterr().out)
-    assert set(info) == {"tesseract", "opencv", "ner"}
+    assert set(info) == {"ocr", "rapidocr", "tesseract", "opencv", "ner"}
+
+
+@pytest.mark.parametrize(
+    "has_rapid,has_tess",
+    [(True, False), (False, True), (True, True), (False, False)],
+)
+def test_doctor_reports_actual_ocr_engines(capsys, monkeypatch, has_rapid, has_tess):
+    from legal_redactor import ocr_engine
+
+    monkeypatch.setattr(ocr_engine, "rapidocr_available", lambda: has_rapid)
+    if has_tess:
+        monkeypatch.setattr(ocr_engine, "find_tesseract", lambda explicit=None: "/usr/bin/tesseract")
+    else:
+        def _missing(explicit=None):
+            raise FileNotFoundError("tesseract not found")
+
+        monkeypatch.setattr(ocr_engine, "find_tesseract", _missing)
+
+    assert main(["doctor", "--json"]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["tesseract"] is has_tess
+    assert info["rapidocr"] is has_rapid
+    assert info["ocr"] is (has_rapid or has_tess)
 
 
 # ---------- 16. agent entry ----------

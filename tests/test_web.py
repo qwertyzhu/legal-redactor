@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import socket
+import subprocess
 import tempfile
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.request import Request, urlopen
 
 import docx
@@ -82,14 +85,44 @@ def test_get_root(web_server):
         assert "文档脱敏" in html
 
 
+def test_browser_pdf_scan_guard():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed for the browser JavaScript test")
+    script = Path(__file__).with_name("pdf_scan_web.cjs")
+    proc = subprocess.run([node, "--test", str(script)], capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_get_doctor(web_server):
     req = Request(f"{web_server}/api/doctor")
     with urlopen(req) as resp:
         assert resp.status == 200
         data = json.loads(resp.read().decode("utf-8"))
         assert "version" in data
+        assert "ocr" in data
+        assert "rapidocr" in data
         assert "tesseract" in data
         assert "opencv" in data
+
+
+def test_get_doctor_reports_actual_ocr_engines(web_server, monkeypatch):
+    from legal_redactor import ocr_engine
+
+    monkeypatch.setattr(ocr_engine, "rapidocr_available", lambda: True)
+
+    def _missing(explicit=None):
+        raise FileNotFoundError("tesseract not found")
+
+    monkeypatch.setattr(ocr_engine, "find_tesseract", _missing)
+
+    req = Request(f"{web_server}/api/doctor")
+    with urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["rapidocr"] is True
+        assert data["tesseract"] is False
+        assert data["ocr"] is True
 
 
 def test_redact_text_and_restore(web_server):
@@ -189,6 +222,30 @@ def test_inspect_and_redact_pdf(web_server):
         assert resp.status == 200
         ledger_data = json.loads(resp.read().decode("utf-8"))
         assert "entities" in ledger_data or "plan" in ledger_data
+
+
+def test_visual_scan_zero_hits_requires_manual_review(web_server, monkeypatch):
+    def no_ocr_matches(input_path, output_path, **kwargs):
+        shutil.copyfile(input_path, output_path)
+        return SimpleNamespace(hits=[])
+
+    monkeypatch.setattr("legal_redactor.scan_pdf.redact_scanned_pdf", no_ocr_matches)
+    with fitz.open() as source, fitz.open() as scanned:
+        page = source.new_page(width=150, height=100)
+        page.insert_text((10, 30), "Fictional scan")
+        scanned.new_page(width=150, height=100).insert_image(page.rect, pixmap=page.get_pixmap())
+        scan_bytes = scanned.tobytes()
+    ctype, body = _build_multipart(
+        {"mode": "production", "is_scanned_mode": "true"},
+        {"file": ("scan.pdf", scan_bytes, "application/pdf")},
+    )
+    req = Request(f"{web_server}/api/redact-file", data=body, headers={"Content-Type": ctype})
+    with urlopen(req) as resp:
+        result = json.load(resp)
+
+    assert result["hits_count"] == 0
+    assert result["status"] == "WARN"
+    assert result["download_url"]
 
 
 def test_redact_docx(web_server):
