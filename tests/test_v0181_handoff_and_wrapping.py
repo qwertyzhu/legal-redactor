@@ -83,6 +83,31 @@ def test_pdf_split_name_aliases_use_original_position_and_size(short_names_pdf, 
     ]
 
 
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_pdf_rotated_split_name_alias_stays_inside_redaction(short_names_pdf, tmp_path, rotation):
+    _, entities = short_names_pdf
+    src = tmp_path / "rotated.pdf"
+    out = tmp_path / "rotated.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        page.insert_text((100, 140), "上下李 明前后", fontname="china-s", rotate=rotation)
+        bounds = page.search_for("李 明")[0]
+        direction = page.get_text("dict")["blocks"][0]["lines"][0]["dir"]
+        doc.save(src)
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        lines = [line for block in doc[0].get_text("dict")["blocks"] for line in block["lines"]]
+        alias, = [
+            (fitz.Rect(span["bbox"]), line["dir"])
+            for line in lines for span in line["spans"] if span["text"] == "某乙"
+        ]
+        assert alias[0] in bounds
+        assert alias[1] == direction
+        text = doc[0].get_text()
+        assert "上下" in text and "前后" in text
+        assert "李" not in text and "明" not in text
+
+
 @pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])
 def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf, tmp_path, capsys, line):
     _, entities = short_names_pdf

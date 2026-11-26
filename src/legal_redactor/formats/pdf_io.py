@@ -16,7 +16,9 @@ _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "sub
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
-_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[tuple[float, float]]]
+_TextStyle = tuple[float, float, tuple[float, float]]
+_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
+_TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
 
 
 @dataclass
@@ -24,6 +26,7 @@ class _NameRect:
     rect: fitz.Rect
     baseline: float
     font_size: float
+    direction: tuple[float, float]
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -173,7 +176,9 @@ def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]
                     char = ch.get("c", "")
                     if not char or char.isspace():
                         continue
-                    chars.append((char, _NameRect(fitz.Rect(ch["bbox"]), ch["origin"][1], span["size"])))
+                    chars.append((char, _NameRect(
+                        fitz.Rect(ch["bbox"]), ch["origin"][1], span["size"], line["dir"],
+                    )))
             if chars:
                 lines.append((block_id, chars))
     return lines
@@ -190,14 +195,14 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     rects: list[fitz.Rect] = []
     rows: list[int] = []
     line_info: list[tuple[float, float, int]] = []
-    text_style: list[tuple[float, float]] = []
+    text_style: list[_TextStyle] = []
     for row, (block_id, line) in enumerate(_line_chars(page)):
         line_info.append((line[0][1].rect.x0, line[-1][1].rect.x1, block_id))
         for char, glyph in line:
             parts.append(char)
             rects.append(glyph.rect)
             rows.append(row)
-            text_style.append((glyph.baseline, glyph.font_size))
+            text_style.append((glyph.baseline, glyph.font_size, glyph.direction))
     return "".join(parts), rects, rows, line_info, text_style
 
 
@@ -299,10 +304,25 @@ def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) ->
     if not width:
         return
     def size(slot: _NameRect) -> float:
-        return min(slot.font_size, slot.rect.width / width)
+        rotation = _TEXT_ROTATIONS.get(slot.direction, 0)
+        advance = slot.rect.height if rotation in (90, 270) else slot.rect.width
+        return min(slot.font_size, advance / width)
 
     slot = max(rects, key=size)
     font_size = size(slot)
+    if slot.direction != (1.0, 0.0):
+        rotation = _TEXT_ROTATIONS.get(slot.direction, 0)
+        inner = slot.rect + (
+            slot.rect.width * 0.05, slot.rect.height * 0.05,
+            -slot.rect.width * 0.05, -slot.rect.height * 0.05,
+        )
+        while font_size >= 0.5 and not inner.is_empty:
+            if page.insert_textbox(
+                inner, lines, fontname=fontname, fontsize=font_size, rotate=rotation,
+            ) >= 0:
+                break
+            font_size *= 0.9
+        return
     baseline = slot.baseline
     lineheight = None
     if len(lines) > 1:
