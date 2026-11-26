@@ -80,7 +80,7 @@ class BatchRedactResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.results)
+        return not self.skipped and all(r.ok for r in self.results)
 
     @property
     def failed(self) -> list[RedactResult]:
