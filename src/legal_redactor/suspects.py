@@ -146,6 +146,12 @@ _ADDRESS_BEFORE_CLAUSE = re.compile(
     r"[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])"
     r"(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))"
 )
+_ADDRESS_REFERENCE = re.compile(r"^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))")
+_ADDRESS_COMPONENT = re.compile(
+    r"[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)"
+    r"|[0-9] *(?:号|室|层|幢|栋|弄|巷|单元)"
+    r"|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))"
+)
 
 _ORG_BLOCKLIST = frozenset(
     {
@@ -611,6 +617,10 @@ def detect_suspects(
         if boundary:
             val = val[:boundary.end()]
             address_pos = start + boundary.end()
+        reference = _ADDRESS_REFERENCE.match(val)
+        if reference or not _ADDRESS_COMPONENT.search(val):
+            address_pos = start + (reference.end() if reference else 0)
+            continue
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases

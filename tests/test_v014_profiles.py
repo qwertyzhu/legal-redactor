@@ -183,3 +183,19 @@ def test_publish_distinguishes_court_housing_from_court_venues(tmp_path: Path, t
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住北京市海淀区测试路27号为送达地址原告知悉该道路用途。", "住北京市海淀区为送达地址原告知悉该道路用途。"),
+        ("住北京市海淀区测试路27号院3号楼502室，送达地址为上述地址且该道路为公共道路。", "住北京市海淀区，送达地址为上述地址且该道路为公共道路。"),
+        ("送达地址为同上系诉讼文书使用的道路送达地址。", "送达地址为同上系诉讼文书使用的道路送达地址。"),
+        ("送达地址：同上。送达地址为上述地址。", "送达地址：同上。送达地址为上述地址。"),
+    ],
+)
+def test_publish_preserves_address_references_and_following_prose(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected

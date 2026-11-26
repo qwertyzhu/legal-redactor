@@ -69,6 +69,17 @@ test('publish redacts court housing but retains short court venues', () => {
   }
 });
 
+test('publish preserves address references and following prose', () => {
+  for (const [text, expected] of [
+    ['住北京市海淀区测试路27号为送达地址原告知悉该道路用途。', '住北京市海淀区为送达地址原告知悉该道路用途。'],
+    ['住北京市海淀区测试路27号院3号楼502室，送达地址为上述地址且该道路为公共道路。', '住北京市海淀区，送达地址为上述地址且该道路为公共道路。'],
+    ['送达地址为同上系诉讼文书使用的道路送达地址。', '送达地址为同上系诉讼文书使用的道路送达地址。'],
+    ['送达地址：同上。送达地址为上述地址。', '送达地址：同上。送达地址为上述地址。'],
+  ]) {
+    assert.equal(redact(text, { mode: 'publish' }), expected);
+  }
+});
+
 test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
   const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
   assert.equal(redact(text, { mode: 'production' }), text);
