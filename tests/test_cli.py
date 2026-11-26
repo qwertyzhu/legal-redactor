@@ -19,7 +19,7 @@ import pymupdf as fitz
 import pytest
 
 from legal_redactor import __version__
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "examples" / "fictional"
@@ -352,3 +352,143 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
         (tmp_path / "work" / f"{out.stem}.residual.json").read_text(encoding="utf-8")
     )
     assert residual["ok"] is True, residual
+
+
+_NATURAL_PARTIES = ("顾南枝", "沈测青禾")
+_PARTY_CLAUSE = "乙方应当在交付时签收。"
+_PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PARTIES[1]}\n{_PARTY_CLAUSE}"
+
+
+@pytest.fixture(params=["txt", "docx", "pdf"])
+def party_contract_file(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
+    src = tmp_path / f"party-contract.{request.param}"
+    if src.suffix == ".docx":
+        docx_io.create_sample_docx(src, _PARTY_CONTRACT)
+    elif src.suffix == ".pdf":
+        pdf_io.create_sample_pdf(src, _PARTY_CONTRACT)
+    else:
+        src.write_text(_PARTY_CONTRACT, encoding="utf-8")
+    return src
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "ai"), ("--profile", "publish")], ids=["ai", "publish"]
+)
+def test_cli_redacts_natural_person_parties(
+    party_contract_file: Path, profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    out = tmp_path / f"redacted{party_contract_file.suffix}"
+    result = _run_cli("redact", str(party_contract_file), *profile_args, "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    if out.suffix == ".docx":
+        text = docx_io.extract_text(out)
+    elif out.suffix == ".pdf":
+        text = pdf_io.extract_text(out)
+    else:
+        text = out.read_text(encoding="utf-8")
+    assert not {name for name in _NATURAL_PARTIES if name in text}, text
+    assert "乙方签字" in text and _PARTY_CLAUSE in text
+
+    verified = _run_cli("verify", str(out), *profile_args, "--strict", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "ai"), ("--profile", "publish")], ids=["ai", "publish"]
+)
+def test_cli_strict_verify_warns_on_natural_person_parties(
+    party_contract_file: Path, profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    result = _run_cli("verify", str(party_contract_file), *profile_args, "--strict", cwd=tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "status: WARN" in result.stdout
+    assert all(f"person: {name}" in result.stdout for name in _NATURAL_PARTIES)
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "production"), ("--profile", "judgment-online")],
+    ids=["production", "judgment-online"],
+)
+def test_cli_preserves_natural_person_parties_in_filing_modes(
+    profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    src = tmp_path / "party-contract.txt"
+    src.write_text(_PARTY_CONTRACT, encoding="utf-8")
+    out = tmp_path / "redacted.txt"
+    result = _run_cli("redact", str(src), *profile_args, "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == _PARTY_CONTRACT
+    verified = _run_cli("verify", str(out), *profile_args, "--strict", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+
+
+def test_cli_defers_party_name_that_also_appears_in_a_clause(tmp_path: Path) -> None:
+    text = "乙方：方可\n款到后乙方方可开票。"
+    src = tmp_path / "party-contract.txt"
+    src.write_text(text, encoding="utf-8")
+    out = tmp_path / "redacted.txt"
+    result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == text
+    assert "pending=1" in result.stdout
+    assert "须人工核对，不要直接补入 entities.json" in result.stdout
+    verified = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert verified.returncode == 1, verified.stdout + verified.stderr
+
+
+def test_cli_reports_unredacted_witness_within_planned_party_name(tmp_path: Path) -> None:
+    src = tmp_path / "party-contract.txt"
+    out = tmp_path / "redacted.txt"
+    src.write_text("甲方签字：沈测青禾\n证人沈测青出庭作证。", encoding="utf-8")
+    result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == "甲方签字：某甲\n证人沈测青出庭作证。"
+    assert "pending=1" in result.stdout
+    assert "handoff:    person\t沈测青" in result.stdout
+    assert "只把下面几条补进 entities.json" in result.stdout
+    verified = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert verified.returncode == 1, verified.stdout + verified.stderr
+    assert "person: 沈测青" in verified.stdout
+
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([{"original": "沈测青", "category": "person", "replacement": "某乙"}]),
+        encoding="utf-8",
+    )
+    rerun = _run_cli(
+        "redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out), cwd=tmp_path
+    )
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    assert out.read_text(encoding="utf-8") == "甲方签字：某甲\n证人某乙出庭作证。"
+
+
+def test_cli_defers_witness_name_that_is_also_clause_wording(tmp_path: Path) -> None:
+    src = tmp_path / "party-contract.txt"
+    out = tmp_path / "redacted.txt"
+    body = "\n证人方可出庭作证。\n款到后乙方方可开票。"
+    src.write_text(f"甲方签字：汤方可明{body}", encoding="utf-8")
+    result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == f"甲方签字：某甲{body}"
+    assert "pending=1" in result.stdout
+    assert "须人工核对，不要直接补入 entities.json" in result.stdout
+    assert "handoff:    person\t方可" in result.stdout
+    assert "只把下面几条补进" not in result.stdout
+
+
+def test_cli_defers_witness_name_that_is_also_wrapped_pdf_wording(tmp_path: Path) -> None:
+    src = tmp_path / "party-contract.pdf"
+    out = tmp_path / "redacted.pdf"
+    text = "甲方签字：慕容花开·阿青\n证人慕容花开，出庭作证。\n片名为慕容\n花开。"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), text, fontsize=12, fontname="china-s")
+        doc.save(src)
+    result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    redacted_text = pdf_io.extract_text(out)
+    assert "证人慕容花开，出庭作证。" in redacted_text
+    assert "片名为慕容\n花开。" in redacted_text
+    assert "handoff:    person\t慕容花开" in result.stdout
+    assert "须人工核对，不要直接补入 entities.json" in result.stdout
+    assert "只把下面几条补进" not in result.stdout
