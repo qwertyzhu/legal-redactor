@@ -384,6 +384,10 @@ header {
   background: var(--border);
 }
 
+@media (max-width: 380px) {
+  #btnDownloadAudit { padding-inline: 12px; }
+}
+
 .btn-block {
   width: 100%;
   margin-top: 24px;
@@ -789,10 +793,13 @@ footer {
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a id="btnDownloadFile" class="btn btn-primary" href="#" download>📥 下载脱敏后文档</a>
             <button id="btnDownloadMdText" class="btn btn-secondary hidden" onclick="downloadCurrentRedactedMd()">📝 下载脱敏纯文本 (.md · 推荐喂给 AI)</button>
-            <button id="btnDownloadAudit" class="btn btn-secondary" onclick="downloadCurrentAudit()">📄 下载审计报告 (.md)</button>
+            <button id="btnDownloadAudit" class="btn btn-secondary" aria-describedby="auditDownloadHint" onclick="downloadCurrentAudit()">📄 下载审计（含未脱敏原文）</button>
             <button id="btnDownloadLedger" class="btn btn-secondary" onclick="downloadCurrentLedger()">🔐 导出还原账本 (.json)</button>
           </div>
         </div>
+        <p id="auditDownloadHint" class="alert alert-warning" style="margin-top:0;margin-bottom:14px;">
+          <span>审计报告（.md）含<strong>未脱敏原文</strong>，请勿随脱敏文档一同外发。</span>
+        </p>
         <div id="pdfRasterNotice" class="alert alert-success hidden" style="margin-top:0;margin-bottom:14px;">
           <div>🔒 <strong>PDF 物理级栅格脱敏已完成：</strong>导出的 PDF 已通过 Canvas 像素重绘重建，原文件底层文字流、隐藏图层与元数据已 100% 物理清除（不可复制原字）。若需发给在线大模型分析，建议同时点击上方「下载脱敏纯文本 (.md)」，省 Token 且识别更准。</div>
         </div>
@@ -1845,7 +1852,18 @@ function collectParagraphSegments(pEl) {
   return groups;
 }
 
-// DOCX 纯浏览器 DOM 级原位脱敏（支持跨 run 拼接、清理修订及元数据）
+function scrubStructuralPii(text) {
+  if (!text) return text;
+  return text
+    .replace(/(?<=:\/\/)([^/\s:@]{1,64}:[^/\s@]{4,64})@/g, '[参数]@')
+    .replace(/([?&](?:access_token|refresh_token|id_token|token|password|passwd|pwd|secret|session|sid|api_key|apikey|key|auth|cookie)=)([^&#\s<>"'\]）)，。；、]{4,})/gi, '$1[参数]')
+    .replace(/(?<!\d)[1-9]\d{5}[\s-]?(?:19|20)\d{2}[\s-]?(?:0[1-9]|1[0-2])[\s-]?(?:0[1-9]|[12]\d|3[01])[\s-]?\d{3}[\s-]?[\dXx](?!\d)/g, '[身份证号]')
+    .replace(/(?<!\d)1[3-9](?:[\s\u3000-]{0,2}\d){9}(?!\d)/g, '[手机号]')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[邮箱]')
+    .replace(/(?<!\d)(?:0\d{2,3}(?:[\s\u3000-]*\d){7,8}|[48]00(?:[\s\u3000-]*\d){7})(?!\d)/g, '[电话]');
+}
+
+// DOCX 纯浏览器 DOM 级原位脱敏（支持跨 run 拼接、清理修订、元数据及外链）
 async function redactDocx(arrayBuffer, options) {
   const zip = await JSZip.loadAsync(arrayBuffer);
   const parser = new DOMParser();
@@ -1883,21 +1901,107 @@ async function redactDocx(arrayBuffer, options) {
     zip.file(part.name, serializer.serializeToString(part.xmlDoc));
   }
 
+  const clearCoreTags = new Set(['title', 'subject', 'description', 'keywords', 'category', 'contentStatus']);
+  const skipCoreTags = new Set(['created', 'modified', 'lastPrinted', 'revision']);
   if (zip.file('docProps/core.xml')) {
     const coreDoc = parser.parseFromString(await zip.file('docProps/core.xml').async('string'), 'application/xml');
     for (const el of Array.from(coreDoc.getElementsByTagName('*'))) {
       const tag = localTagName(el);
       if (tag === 'creator' || tag === 'lastModifiedBy') el.textContent = '作者';
-      else if (el.textContent && el.children.length === 0) el.textContent = applyPlanToText(el.textContent, plan);
+      else if (clearCoreTags.has(tag)) el.textContent = '';
+      else if (!skipCoreTags.has(tag) && el.textContent && el.children.length === 0) {
+        el.textContent = scrubStructuralPii(applyPlanToText(el.textContent, plan));
+      }
     }
     zip.file('docProps/core.xml', serializer.serializeToString(coreDoc));
   }
   if (zip.file('docProps/app.xml')) {
     const appDoc = parser.parseFromString(await zip.file('docProps/app.xml').async('string'), 'application/xml');
     for (const el of Array.from(appDoc.getElementsByTagName('*'))) {
-      if (['Company', 'Manager', 'HyperlinkBase'].includes(localTagName(el))) el.textContent = '';
+      if (['Company', 'Manager', 'CompanyDoc', 'HyperlinkBase'].includes(localTagName(el))) el.textContent = '';
     }
     zip.file('docProps/app.xml', serializer.serializeToString(appDoc));
+  }
+  if (zip.file('docProps/custom.xml')) {
+    const customDoc = parser.parseFromString(await zip.file('docProps/custom.xml').async('string'), 'application/xml');
+    const root = customDoc.documentElement;
+    if (root) {
+      while (root.firstChild) root.removeChild(root.firstChild);
+    }
+    zip.file('docProps/custom.xml', serializer.serializeToString(customDoc));
+  }
+  const dropHttp = (options.mode || 'ai') !== 'production';
+  const relsNames = Object.keys(zip.files).filter(f => /^word\/_rels\/.*\.rels$/.test(f));
+  for (const relName of relsNames) {
+    const relDoc = parser.parseFromString(await zip.file(relName).async('string'), 'application/xml');
+    let relChanged = false;
+    for (const el of Array.from(relDoc.getElementsByTagName('*'))) {
+      if (localTagName(el) !== 'Relationship') continue;
+      const target = el.getAttribute('Target') || '';
+      if (/^(?:mailto|tel):/i.test(target)) {
+        el.setAttribute('Target', '#');
+        relChanged = true;
+      } else if (el.getAttribute('TargetMode') === 'External') {
+        if (dropHttp) {
+          el.setAttribute('Target', '#');
+          relChanged = true;
+        } else if (target) {
+          let scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
+          if (scrubbed.includes('%')) {
+            const secretKeyRe = /^(?:access_token|refresh_token|id_token|token|password|passwd|pwd|secret|session|sid|api_key|apikey|key|auth|cookie)$/i;
+            const scrubPart = (part, escapeSlash, escapeQuery) => {
+              try {
+                const decoded = decodeURIComponent(part);
+                if (decoded === part) return part;
+                let cleaned = scrubStructuralPii(applyPlanToText(decoded, plan));
+                if (cleaned === decoded) return part;
+                if (escapeSlash) cleaned = cleaned.replace(/\//g, '%2F');
+                if (escapeQuery) cleaned = cleaned.replace(/&/g, '%26').replace(/#/g, '%23');
+                return cleaned;
+              } catch (_) {
+                return part;
+              }
+            };
+            const hashIdx = scrubbed.indexOf('#');
+            const beforeHash = hashIdx >= 0 ? scrubbed.slice(0, hashIdx) : scrubbed;
+            const frag = hashIdx >= 0 ? '#' + scrubPart(scrubbed.slice(hashIdx + 1), false, false) : '';
+            const qIdx = beforeHash.indexOf('?');
+            const base = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
+            const query = qIdx >= 0
+              ? '?' + beforeHash.slice(qIdx + 1).split('&').map(item => {
+                  const eq = item.indexOf('=');
+                  if (eq >= 0) {
+                    const k = item.slice(0, eq);
+                    const v = item.slice(eq + 1);
+                    let dk = k;
+                    let dv = v;
+                    try { dk = decodeURIComponent(k); } catch (_) {}
+                    try { dv = decodeURIComponent(v); } catch (_) {}
+                    if (secretKeyRe.test(dk) && dv.length >= 4) {
+                      return dk + '=[参数]';
+                    }
+                    return scrubPart(k, false, true) + '=' + scrubPart(v, false, true);
+                  }
+                  return scrubPart(item, false, true);
+                }).join('&')
+              : '';
+            const schemeIdx = base.indexOf('://');
+            const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : 0;
+            const rebuiltBase = pathStart >= 0
+              ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true, false)).join('/')
+              : base;
+            scrubbed = rebuiltBase + query + frag;
+          }
+          if (scrubbed !== target) {
+            el.setAttribute('Target', scrubbed);
+            relChanged = true;
+          }
+        }
+      }
+    }
+    if (relChanged) {
+      zip.file(relName, serializer.serializeToString(relDoc));
+    }
   }
 
   const blob = await zip.generateAsync({
