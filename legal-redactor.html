@@ -1667,19 +1667,22 @@ function buildRedactionPlan(text, options) {
       const addressRegex = /(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地|住|现住|户籍地|经常居住地)[：:\s]*([一-鿿0-9A-Za-z（）()·\- ]{6,80}?[号室层幢栋弄巷街路道村组区县市省镇乡][一-鿿0-9A-Za-z（）()·\- ]{0,30})/g;
       const addressBeforeClause = /[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))/;
       const addressReference = /^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))/;
-      const addressComponent = /[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)|[0-9] *(?:号|室|层|幢|栋|弄|巷|单元)|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))/;
+      const addressComponent = /[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)|[0-9零〇一二两三四五六七八九十百千] *(?:号|室|层|幢|栋|弄|巷|单元)|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))/;
       const residenceComponent = /宿舍|小区|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])/;
+      let scannedUntil = 0;
       while ((m = addressRegex.exec(text)) !== null) {
         const match = m[1];
         const start = addressRegex.lastIndex - match.trimStart().length;
         let address = match.trim();
+        const rescanned = m.index < scannedUntil;
+        scannedUntil = Math.max(scannedUntil, addressRegex.lastIndex);
         const boundary = address.match(addressBeforeClause);
         if (boundary) {
           address = address.slice(0, boundary.index + boundary[0].length);
           addressRegex.lastIndex = start + address.length;
         }
         const reference = address.match(addressReference);
-        if (reference || !addressComponent.test(address)) {
+        if (reference || (rescanned && !addressComponent.test(address))) {
           addressRegex.lastIndex = start + (reference ? reference[0].length : 0);
           continue;
         }

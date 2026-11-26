@@ -149,7 +149,7 @@ _ADDRESS_BEFORE_CLAUSE = re.compile(
 _ADDRESS_REFERENCE = re.compile(r"^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))")
 _ADDRESS_COMPONENT = re.compile(
     r"[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)"
-    r"|[0-9] *(?:号|室|层|幢|栋|弄|巷|单元)"
+    r"|[0-9零〇一二两三四五六七八九十百千] *(?:号|室|层|幢|栋|弄|巷|单元)"
     r"|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))"
 )
 _RESIDENCE_COMPONENT = re.compile(r"宿舍|小区|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])")
@@ -609,17 +609,20 @@ def detect_suspects(
         )
 
     address_pos = 0
+    scanned_until = 0
     while m := _ADDRESS.search(text, address_pos):
         captured = m.group(1)
         start = m.end(1) - len(captured.lstrip())
         val = captured.strip()
         address_pos = m.end()
+        rescanned = m.start() < scanned_until
+        scanned_until = max(scanned_until, address_pos)
         boundary = _ADDRESS_BEFORE_CLAUSE.search(val)
         if boundary:
             val = val[:boundary.end()]
             address_pos = start + boundary.end()
         reference = _ADDRESS_REFERENCE.match(val)
-        if reference or not _ADDRESS_COMPONENT.search(val):
+        if reference or (rescanned and not _ADDRESS_COMPONENT.search(val)):
             address_pos = start + (reference.end() if reference else 0)
             continue
         if len(val) < 6 or val in skip:

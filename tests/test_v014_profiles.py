@@ -203,3 +203,11 @@ def test_publish_preserves_address_references_and_following_prose(tmp_path: Path
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize("address", ["和平路二十七号", "绿洲公寓第二栋"])
+def test_publish_redacts_numbered_addresses_without_an_administrative_area(tmp_path: Path, address: str):
+    src = _src(tmp_path, f"住{address}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "住某地址"

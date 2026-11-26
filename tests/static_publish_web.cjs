@@ -84,6 +84,12 @@ test('publish preserves address references and following prose', () => {
   }
 });
 
+test('publish recognizes locally numbered addresses without administrative areas', () => {
+  for (const address of ['和平路二十七号', '绿洲公寓第二栋']) {
+    assert.equal(redact(`住${address}`, { mode: 'publish' }), '住某地址');
+  }
+});
+
 test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
   const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
   assert.equal(redact(text, { mode: 'production' }), text);
