@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import _print_handoff, main
@@ -13,6 +15,62 @@ from legal_redactor.suspects import Suspect, detect_suspects
 ORG = "北京星澜影业有限公司"
 WRAPPED_ORG = "西安云海数字娱乐发行股份有限公司"
 PERSON = "王建国"
+
+
+@pytest.fixture
+def short_names_pdf(tmp_path):
+    src = tmp_path / "wrap_clean.pdf"
+    entities = tmp_path / "ent3.json"
+    entities.write_text(
+        json.dumps({"entities": [
+            {"original": "郝测一", "category": "person"},
+            {"original": "李明", "category": "person"},
+        ]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=400)
+        page.insert_text((24, 40), "被告郝测\n一于2024年签署", fontname="china-s")
+        page.insert_text((24, 85), "签字确认：郝 测 一", fontname="china-s")
+        page.insert_text((24, 115), "另一签字：李 明", fontname="china-s")
+        page.insert_text((24, 145), "到会人员：李明", fontname="china-s")
+        page.insert_text((24, 185), "审查依据所列李", fontname="china-s")
+        page.insert_text((24, 245), "明细另附", fontname="china-s")
+        page.insert_text((24, 300), "卷内目录附录李", fontname="china-s")
+        page.insert_text((110, 315), "明细另附", fontname="china-s")
+        page.insert_text((180, 300), "明细另附", fontname="china-s")
+        doc.save(src)
+    return src, entities
+
+
+def test_pdf_wrapped_and_spaced_short_names_are_redacted(short_names_pdf, tmp_path, capsys):
+    src, entities = short_names_pdf
+    out = tmp_path / "wrap_clean.ai.pdf"
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "郝 测 一" not in text
+    assert "李 明" not in text
+    assert "李明" not in text
+    assert "一于2024年签署" not in text
+    assert "于2024年签署" in text
+    assert "卷内目录附录李" in text
+    assert text.count("明细另附") == 3
+    assert main(["verify", str(out), "--mode", "ai", "--strict", "--entities", str(entities)]) == 0
+    assert "status: PASS" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])
+def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf, tmp_path, capsys, line):
+    _, entities = short_names_pdf
+    src = tmp_path / "residual.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), line, fontname="china-s")
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 2
+    printed = capsys.readouterr().out
+    assert "unreplaced_entity: 郝测一" in printed
 
 
 def _suspect(text: str, category: str = "organization") -> Suspect:
