@@ -209,7 +209,7 @@ legal-redactor verify ./matters-redacted/ --mode ai
 - `*.suspects.json` — 自然语言疑似实体提示（**不会自动替换**）
 - `*.summary.md` — 可读对照表
 
-批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。
+批量时还会在 work dir 生成 `entities.consistent.json` 与 `consistency.report.*`。即使启用 `--ledger-encrypt`，这两类文件仍为明文并包含原始实体，仅供本地使用。
 
 扫描件说明见 `skills/legal-document-redactor/references/scanned-pdf.md`。  
 `entities.json` 可从模板复制：`skills/legal-document-redactor/references/entities.template.json`。  
