@@ -373,3 +373,29 @@ def test_shipped_cli_docx_charts_and_smartart(
     assert restore.returncode == 0, restore.stderr + restore.stdout
     with zipfile.ZipFile(restored) as archive:
         assert secret in "".join(etree.fromstring(archive.read(part)).itertext())
+
+
+@pytest.mark.parametrize("container", ["numCache", "numLit"])
+def test_shipped_cli_docx_chart_preserves_numeric_measurements(tmp_path: Path, container: str) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    part = "word/charts/chart1.xml"
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(
+            part,
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            f"<c:{container}><c:pt idx=\"0\"><c:v>13700003333</c:v></c:pt></c:{container}></c:chartSpace>",
+        )
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        assert b"<c:v>13700003333</c:v>" in archive.read(part)
+
+    for docx in (src, out):
+        verify = _run_cli("verify", str(docx), "--mode", "ai", "--strict", cwd=tmp_path)
+        assert verify.returncode == 0, verify.stderr + verify.stdout

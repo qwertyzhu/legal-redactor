@@ -27,10 +27,14 @@ W = "{%s}" % W_NS
 _TEXT_PART_RE = re.compile(
     r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
-_CHART_VALUE_TAGS = {
-    "{http://schemas.openxmlformats.org/drawingml/2006/chart}v",
-    "{http://purl.oclc.org/ooxml/drawingml/chart}v",
-}
+_CHART_NAMESPACES = (
+    "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "http://purl.oclc.org/ooxml/drawingml/chart",
+)
+_CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
+_CHART_NUMERIC_TAGS = tuple(
+    f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
+)
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 
 
@@ -272,6 +276,8 @@ def _process_xml_bytes(
             if text:
                 texts.append(text)
         elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
+            if next(node.iterancestors(*_CHART_NUMERIC_TAGS), None) is not None:
+                continue
             text = node.text
             if mapping is not None:
                 updated = apply_mapping_to_text(text, mapping)
