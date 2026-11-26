@@ -187,7 +187,8 @@ def test_restore_pdf_keeps_repeated_letters_in_tight_email(tmp_path: Path):
     assert sorted(pdf_io.extract_text(restored).split()) == ["Adjacent", email]
 
 
-def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path):
+@pytest.mark.parametrize("second_row", [False, True])
+def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path, second_row: bool):
     src = tmp_path / "redacted.pdf"
     restored = tmp_path / "restored.pdf"
     ledger = tmp_path / "ledger.json"
@@ -201,11 +202,22 @@ def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path):
         page.insert_text((72, 72), "邮箱：[邮箱]", fontsize=9, fontname="china-s")
         placeholder, = page.search_for("[邮箱]")
         page.insert_text((placeholder.x1 + 2, 72), "Adjacent", fontsize=9)
+        if second_row:
+            page.insert_text((72, 87), "L         Lower", fontsize=24)
         doc.save(src)
 
     assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
     with fitz.open(restored) as doc:
-        assert f"邮箱：{email}" in doc[0].get_text(sort=True)
+        page = doc[0]
+        if not second_row:
+            assert f"邮箱：{email}" in page.get_text(sort=True)
+        baselines = {
+            span["text"].strip(): span["origin"][1]
+            for block in page.get_text("dict")["blocks"]
+            for line in block["lines"]
+            for span in line["spans"]
+        }
+        assert baselines[email] == pytest.approx(baselines["邮箱："])
 
 
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):

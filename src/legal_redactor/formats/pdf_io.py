@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -238,15 +239,31 @@ def _restoration_obstacles(page: fitz.Page) -> list[fitz.Rect]:
     return occupied
 
 
-def _horizontal_text_spans(page: fitz.Page) -> list[tuple[fitz.Rect, float]]:
-    flags = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+def _horizontal_text_chars(page: fitz.Page) -> list[list[tuple[str, fitz.Rect, float]]]:
+    flags = fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES
     return [
-        (fitz.Rect(span["bbox"]), span["origin"][1])
-        for block in page.get_text("dict", flags=flags)["blocks"]
+        [
+            (char["c"], fitz.Rect(char["bbox"]), char["origin"][1])
+            for span in line["spans"]
+            for char in span["chars"]
+            if not char["c"].isspace()
+        ]
+        for block in page.get_text("rawdict", flags=flags)["blocks"]
         for line in block.get("lines", ())
         if line["dir"] == (1, 0)
-        for span in line["spans"]
     ]
+
+
+def _placeholder_baseline(
+    lines: list[list[tuple[str, fitz.Rect, float]]], rect: fitz.Rect, placeholder: str,
+) -> float | None:
+    target = re.compile(re.escape("".join(placeholder.split())), re.IGNORECASE)
+    for line in lines:
+        chars = [(char, y) for char, bbox, y in line if rect.intersects(bbox)]
+        match = target.search("".join(char for char, _ in chars))
+        if match is not None and chars:
+            return chars[match.start()][1]
+    return None
 
 
 def _insert_fitted_text(
@@ -309,7 +326,7 @@ def redact_pdf(
 
         for page in doc:
             claimed_rects: list[fitz.Rect] = []
-            fitted_text: list[tuple[fitz.Rect, str]] = []
+            fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: tuple[str, list[fitz.Rect], list[int]] | None = None
             for original, replacement in ordered_mapping:
                 if not original:
@@ -327,7 +344,7 @@ def redact_pdf(
                     claimed_rects.append(rect)
                     text = replacement if carries_text else ""
                     if fit_replacements and text:
-                        fitted_text.append((rect, text))
+                        fitted_text.append((rect, original, text))
                         text = ""
                     page.add_redact_annot(
                         rect,
@@ -338,15 +355,12 @@ def redact_pdf(
                         fontname=_redaction_fontname(replacement),
                     )
             if claimed_rects:
-                spans = _horizontal_text_spans(page) if fitted_text else []
+                lines = _horizontal_text_chars(page) if fitted_text else []
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             if fitted_text:
                 occupied = claimed_rects + _restoration_obstacles(page)
-                for rect, text in fitted_text:
-                    _, baseline = max(
-                        (((rect & span_rect).get_area(), y) for span_rect, y in spans if rect.intersects(span_rect)),
-                        default=(0, None),
-                    )
+                for rect, original, text in fitted_text:
+                    baseline = _placeholder_baseline(lines, rect, original)
                     _insert_fitted_text(page, rect, text, occupied, baseline)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
