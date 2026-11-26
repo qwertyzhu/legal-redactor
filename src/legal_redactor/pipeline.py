@@ -384,6 +384,7 @@ def redact_file(
     # 北京朗岳网络科技有限公司 across a line break keeps coming back as
     # 朗岳网络科技有限公司 and the handoff loop never converges.
     planned = [e.original for e in plan.entities if e.original]
+    planned_party_names = [e.original for e in plan.entities if e.notes in CONTRACT_PARTY_REASONS]
     if planned:
         suspects = [
             s
@@ -391,6 +392,9 @@ def redact_file(
             if not (
                 s.reason not in CONTRACT_PARTY_REASONS
                 and s.text
+                and not (
+                    s.category == "person" and any(s.text in name for name in planned_party_names)
+                )
                 and any(
                     s.text != original and (s.text in original or original in s.text)
                     for original in planned

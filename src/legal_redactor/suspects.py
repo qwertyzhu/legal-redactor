@@ -624,17 +624,23 @@ def detect_suspects(
     candidates.sort(key=lambda s: (-len(s.text), s.start))
     chosen: list[Suspect] = []
     seen: set[str] = set()
+    seen_party_names: set[str] = set()
     occupied: list[tuple[int, int]] = []
     for s in candidates:
         if s.text in seen or s.text in skip:
             continue
-        if s.reason not in CONTRACT_PARTY_REASONS and any(
-            s.text != t and s.text in t for t in seen
+        is_party_field = s.reason in CONTRACT_PARTY_REASONS
+        if (
+            not is_party_field
+            and any(s.text in t for t in seen)
+            and not (s.category == "person" and any(s.text in name for name in seen_party_names))
         ):
             continue
         if any(not (s.end <= a or s.start >= b) for a, b in occupied):
             continue
         seen.add(s.text)
+        if is_party_field:
+            seen_party_names.add(s.text)
         occupied.append((s.start, s.end))
         chosen.append(s)
 

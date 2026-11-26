@@ -46,6 +46,12 @@ def test_contract_party_labels_distinguish_overlapping_names():
     assert apply_mapping_to_text(text, plan.mapping()) == "甲方：某甲\n乙方：某乙"
 
 
+def test_signature_name_does_not_hide_a_shorter_name_in_another_field():
+    text = "乙方签字：沈测青禾\n姓名：沈测青\n联系人：沈测"
+    plan = build_plan(text, mode="ai", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == "乙方签字：某甲\n姓名：某乙\n联系人：某丙"
+
+
 def test_contract_party_labels_do_not_replace_four_character_obligations():
     text = "甲方：欧阳测青\n乙方：包工包料"
     plan = build_plan(text, mode="ai", auto_confident=True)
