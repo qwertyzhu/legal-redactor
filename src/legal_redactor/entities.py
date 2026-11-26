@@ -67,6 +67,7 @@ class RedactionPlan:
 from .suspects import (
     AMBIGUOUS_CONTRACT_PARTY,
     COMPOUND_SURNAMES as _COMPOUND_SURNAMES,
+    CONTRACT_PARTY_REASONS,
     SURNAMES as _SURNAMES,
     has_surname as _has_surname,
 )
@@ -408,9 +409,13 @@ def build_plan(
     if auto_confident:
         from .suspects import detect_suspects
 
-        for suspect in detect_suspects(
-            text, known=already | preserve_set, allowlist=allow_set
-        ):
+        suspects = detect_suspects(text, known=already | preserve_set, allowlist=allow_set)
+        party_names = (
+            {s.text for s in suspects if s.reason in CONTRACT_PARTY_REASONS}
+            if mode == "production"
+            else set()
+        )
+        for suspect in suspects:
             if suspect.text in already or suspect.text in preserve_set:
                 continue
             if suspect.role_hint == "court_staff" and not redact_court_staff:
@@ -426,6 +431,7 @@ def build_plan(
                     suspect.category == "person"
                     and suspect.role_hint == "third_party"
                     and redact_third_party
+                    and not any(suspect.text in name for name in party_names)
                 )
                 address = suspect.category == "address" and truncate_addresses
                 if not third and not address:

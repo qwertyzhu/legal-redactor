@@ -61,3 +61,21 @@ def test_contract_party_labels_do_not_replace_four_character_obligations():
 def test_signature_fields_preserve_signing_and_stamp_instructions():
     text = "甲方签字：盖章生效\n乙方签名：盖章确认\n丙方签字：加盖公章"
     assert not detect_suspects(text)
+
+
+def test_contact_match_does_not_hide_ambiguous_party_field():
+    text = "联系人：方可\n甲方签字：汤方可明\n乙方：方可\n款到后乙方方可开票。"
+    plan = build_plan(text, mode="ai", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == text.replace("汤方可明", "某甲")
+
+
+def test_production_witness_alias_does_not_clobber_part_of_signature():
+    text = "甲方签字：沈测青禾\n证人：沈测青\n证人：王测峰"
+    plan = build_plan(text, mode="production", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == text.replace("王测峰", "某甲")
+
+
+def test_shorter_word_in_narrative_is_not_promoted_by_a_signature():
+    text = "甲方签字：白天明\n本合同约定员工白天在岗。"
+    plan = build_plan(text, mode="ai", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == text.replace("白天明", "某甲")

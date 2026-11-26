@@ -18,7 +18,7 @@ from .ledger_store import (
 from .profiles_loader import Profile, resolve_profile
 from .formats import docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
-from .suspects import CONTRACT_PARTY_REASONS, Suspect, detect_suspects
+from .suspects import CONTRACT_PARTY_REASONS, EXPLICIT_PERSON_REASONS, Suspect, detect_suspects
 from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
@@ -393,7 +393,8 @@ def redact_file(
                 s.reason not in CONTRACT_PARTY_REASONS
                 and s.text
                 and not (
-                    s.category == "person" and any(s.text in name for name in planned_party_names)
+                    s.reason in EXPLICIT_PERSON_REASONS
+                    and any(s.text in name for name in planned_party_names)
                 )
                 and any(
                     s.text != original and (s.text in original or original in s.text)
