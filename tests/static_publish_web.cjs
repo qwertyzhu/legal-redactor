@@ -22,6 +22,17 @@ test('publish masks names that are exactly a compound surname', () => {
   assert.equal(redact('原告欧阳', { mode: 'publish' }), '原告欧某');
 });
 
+test('publish falls back to the city instead of retaining a named development', () => {
+  for (const [address, expected] of [
+    ['苏州市阳光小区5栋', '苏州市'],
+    ['苏州市星河园区8号楼', '苏州市'],
+    ['苏州市云桥社区6号', '苏州市'],
+    ['上海市浦东新区晨光小区3栋', '上海市浦东新区'],
+  ]) {
+    assert.equal(redact(`住${address}`, { mode: 'publish' }), `住${expected}`);
+  }
+});
+
 test('publish fuzzes numerical and personal financial-uppercase amounts like the CLI', () => {
   const text = '工资人民币500,000元（伍拾万元整）。索赔3.5万元（叁万伍仟元整）。';
   assert.equal(redact(text, { mode: 'publish' }), '工资数十万元（数十万元）。索赔数万元（叁万伍仟元整）。');

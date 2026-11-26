@@ -137,3 +137,19 @@ def test_publish_never_keeps_a_full_compound_surname_name(tmp_path: Path, name: 
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == f"原告{expected}"
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("苏州市阳光小区5栋", "苏州市"),
+        ("苏州市星河园区8号楼", "苏州市"),
+        ("苏州市云桥社区6号", "苏州市"),
+        ("上海市浦东新区晨光小区3栋", "上海市浦东新区"),
+    ],
+)
+def test_publish_uses_city_when_there_is_no_district(tmp_path: Path, address: str, expected: str):
+    src = _src(tmp_path, f"住{address}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"住{expected}"
