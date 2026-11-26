@@ -6,6 +6,7 @@ legal-redactor redact contract.docx --mode ai --auto-confident -o out.docx
 legal-redactor redact contract.docx --mode production --keep-categories uscc -o out.docx
 legal-redactor redact contract.docx --mode ai --allowlist allow.txt -o out.docx
 legal-redactor verify out.docx --mode ai --strict   # 交付前用这条：0=PASS, 1=WARN, 2=FAIL
+legal-redactor verify out.pdf --mode ai --strict --entities entities.json  # 核对实体表中的短中文姓名（含空格、折行）
 legal-redactor verify out.docx --mode ai            # 不加 --strict 时 WARN 也是 0
 legal-redactor redact contract.docx --profile publish -o out.docx          # 对外改写，不是上网
 legal-redactor redact judgment.docx --profile judgment-online -o out.docx  # 上网；第八条人员 role=article8

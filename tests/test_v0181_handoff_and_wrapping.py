@@ -39,6 +39,7 @@ def short_names_pdf(tmp_path):
         page.insert_text((24, 300), "卷内目录附录李", fontname="china-s")
         page.insert_text((110, 315), "明细另附", fontname="china-s")
         page.insert_text((180, 300), "明细另附", fontname="china-s")
+        page.insert_text((24, 360), "经办人李\n明在场", fontname="china-s")
         doc.save(src)
     return src, entities
 
@@ -53,6 +54,8 @@ def test_pdf_wrapped_and_spaced_short_names_are_redacted(short_names_pdf, tmp_pa
     assert "李 明" not in text
     assert "李明" not in text
     assert "一于2024年签署" not in text
+    assert "明在场" not in text
+    assert "在场" in text
     assert "于2024年签署" in text
     assert "卷内目录附录李" in text
     assert text.count("明细另附") == 3

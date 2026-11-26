@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
+
+_SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
+_CharIndex = tuple[str, list[fitz.Rect], list[int], list[float]]
+
+
+def is_short_cjk_name(text: str) -> bool:
+    return _SHORT_CJK_NAME.fullmatch("".join(text.split())) is not None
 
 
 def extract_text(path: Path) -> str:
@@ -101,10 +109,8 @@ def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
     return lines
 
 
-def _page_char_index(
-    page: "fitz.Page",
-) -> tuple[str, list["fitz.Rect"], list[int]]:
-    """Whitespace-free text of a page plus each character's rect and line number.
+def _page_char_index(page: "fitz.Page") -> _CharIndex:
+    """Whitespace-free page text, character rects and row numbers, and row starts.
 
     Court PDFs wrap a long party name across a line break, and `Page.search_for`
     only matches inside one line, so that occurrence survives the replacement.
@@ -113,36 +119,57 @@ def _page_char_index(
     parts: list[str] = []
     rects: list[fitz.Rect] = []
     rows: list[int] = []
+    lefts: list[float] = []
     for row, line in enumerate(_line_chars(page)):
+        lefts.append(line[0][1].x0)
         for char, rect in line:
             parts.append(char)
             rects.append(rect)
             rows.append(row)
-    return "".join(parts), rects, rows
+    return "".join(parts), rects, rows, lefts
+
+
+def _short_name_is_local(
+    rects: list["fitz.Rect"], rows: list[int], lefts: list[float], start: int, end: int
+) -> bool:
+    for i in range(start + 1, end):
+        prev, curr = rects[i - 1], rects[i]
+        width = max(prev.width, curr.width)
+        if rows[i] == rows[i - 1]:
+            if not 0 <= curr.x0 - prev.x0 <= prev.width + width:
+                return False
+        elif not (
+            rows[i] == rows[i - 1] + 1
+            and 0 < curr.y0 - prev.y0 <= 2 * max(prev.height, curr.height)
+            and abs(curr.x0 - lefts[rows[i - 1]]) <= width
+        ):
+            return False
+    return True
 
 
 def _wrapped_rects(
-    index: tuple[str, list["fitz.Rect"], list[int]],
+    index: _CharIndex,
     original: str,
     *,
     allow_single_line: bool = False,
 ) -> list[tuple["fitz.Rect", bool]]:
-    """Rects for occurrences of `original` that span a line break.
+    """Rects for occurrences of `original` split by whitespace or line breaks.
 
     Returns ``[(rect, carries_replacement_text), ...]`` so the caller paints the
     alias once, on the first line of the wrapped run.
     """
-    text, rects, rows = index
+    text, rects, rows, lefts = index
     target = "".join(original.split())
-    if len(target) < 4:
+    short_name = is_short_cjk_name(target)
+    if len(target) < 4 and not short_name:
         return []
     out: list[tuple[fitz.Rect, bool]] = []
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
-        if len(span_rows) == len(target):
+        if not short_name or _short_name_is_local(rects, rows, lefts, start, start + len(target)):
             unique_rows = sorted(set(span_rows))
-            if len(unique_rows) > 1 or allow_single_line:
+            if len(unique_rows) > 1 or allow_single_line or short_name:
                 for n, row in enumerate(unique_rows):
                     line_rects = [
                         rects[i] for i in range(start, start + len(target)) if rows[i] == row
@@ -153,6 +180,20 @@ def _wrapped_rects(
                     out.append((union, n == 0))
         start = text.find(target, start + 1)
     return out
+
+
+def matched_short_names(path: Path, originals: set[str]) -> set[str]:
+    pending = set(originals)
+    matches: set[str] = set()
+    with fitz.open(str(path)) as doc:
+        for page in doc:
+            index = _page_char_index(page)
+            found = {name for name in pending if _wrapped_rects(index, name)}
+            matches.update(found)
+            pending.difference_update(found)
+            if not pending:
+                break
+    return matches
 
 
 def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
@@ -191,7 +232,7 @@ def redact_pdf(
         for page in doc:
             found_any = False
             claimed_rects: list[fitz.Rect] = []
-            index: tuple[str, list[fitz.Rect], list[int]] | None = None
+            index: _CharIndex | None = None
             for original, replacement in ordered_mapping:
                 if not original:
                     continue
@@ -209,8 +250,7 @@ def redact_pdf(
                         fontname=_redaction_fontname(replacement),
                     )
                     found_any = True
-                # Names and addresses wrapped across a line break: search_for
-                # cannot see them, so redact those occurrences per line.
+                # search_for misses names split by spaces or line breaks.
                 if index is None:
                     index = _page_char_index(page)
                 for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):

@@ -372,7 +372,9 @@ def redact_file(
     add_unreplaced(
         residual,
         unreplaced_originals(
-            output_text, mapping, join_lines=input_path.suffix.lower() == ".pdf"
+            output_text,
+            mapping,
+            pdf_path=output_path if input_path.suffix.lower() == ".pdf" else None,
         ),
     )
 
@@ -680,7 +682,14 @@ def redact_tree(
     )
 
 
-def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
+def verify_file(
+    path: Path,
+    mode: str,
+    *,
+    entities_path: Path | None = None,
+    alias_style: str = "generic",
+    **scan_options: Any,
+) -> ResidualReport:
     scan_pages: list[int] = []
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -692,6 +701,17 @@ def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
         text = text_io.extract_text(path)
 
     report = scan_residual(text, mode=mode, nl=True, **scan_options)
+    if suffix == ".pdf" and entities_path is not None and not scan_pages:
+        plan = build_plan(
+            text,
+            mode=mode,
+            entities_file=entities_path,
+            allowlist=scan_options.get("allowlist"),
+            preserve=list(scan_options.get("known") or ()),
+            alias_style=alias_style,
+        )
+        short_names = [(o, r) for o, r in plan.mapping() if pdf_io.is_short_cjk_name(o)]
+        add_unreplaced(report, unreplaced_originals(text, short_names, pdf_path=path))
     if scan_pages:
         report.ok = False
         report.status = "FAIL"
@@ -713,6 +733,9 @@ def verify_tree(
     extra_categories: list[str] | set[str] | None = None,
     recursive: bool = False,
     only_categories: set[str] | None = None,
+    entities_path: Path | None = None,
+    alias_style: str = "generic",
+    known: set[str] | None = None,
     **_ignored: Any,
 ) -> dict[str, Any]:
     """Residual-scan every supported file under a directory.
@@ -741,6 +764,9 @@ def verify_tree(
             extra_categories=extra,
             only_categories=only_categories,
             allowlist=allow,
+            entities_path=entities_path,
+            alias_style=alias_style,
+            known=known,
             redact_court_staff=bool(_ignored.get("redact_court_staff")),
         )
         rows.append(
