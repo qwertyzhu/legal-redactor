@@ -129,3 +129,11 @@ def test_publish_keeps_clause_after_numbered_address(tmp_path: Path, text: str, 
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(("name", "expected"), [("欧阳", "欧某"), ("欧阳明", "欧阳某")])
+def test_publish_never_keeps_a_full_compound_surname_name(tmp_path: Path, name: str, expected: str):
+    src = _src(tmp_path, f"原告{name}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"原告{expected}"

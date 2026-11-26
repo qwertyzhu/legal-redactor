@@ -1614,7 +1614,7 @@ function buildRedactionPlan(text, options) {
       const name = m[2];
       if (name && hasValidSurname(name) && !['公司', '有限', '组织', '协会', '政府', '法院', '事务所'].some(w => name.includes(w))) {
         const repl = mode === 'publish'
-          ? (COMPOUND_SURNAMES.find(s => name.startsWith(s)) || name[0]) + '某'
+          ? (COMPOUND_SURNAMES.find(s => name.length > s.length && name.startsWith(s)) || name[0]) + '某'
           : (ALIASES[aliasIdx % ALIASES.length] || ('某人' + (aliasIdx + 1)));
         aliasIdx++;
         addHit(name, repl, 'person', 'party');

@@ -18,6 +18,10 @@ test('publish keeps compound surnames and truncates labeled addresses', () => {
     '被告王某，住所地江苏省苏州市昆山市。');
 });
 
+test('publish masks names that are exactly a compound surname', () => {
+  assert.equal(redact('原告欧阳', { mode: 'publish' }), '原告欧某');
+});
+
 test('publish fuzzes numerical and personal financial-uppercase amounts like the CLI', () => {
   const text = '工资人民币500,000元（伍拾万元整）。索赔3.5万元（叁万伍仟元整）。';
   assert.equal(redact(text, { mode: 'publish' }), '工资数十万元（数十万元）。索赔数万元（叁万伍仟元整）。');

@@ -117,7 +117,7 @@ def _stable_alias(category: str, index: int) -> str:
 
 def _court_person_alias(name: str) -> str:
     for compound in _COMPOUND_SURNAMES:
-        if name.startswith(compound):
+        if len(name) > len(compound) and name.startswith(compound):
             return f"{compound}某"
     if name:
         return f"{name[0]}某"
