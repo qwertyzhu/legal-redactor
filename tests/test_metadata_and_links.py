@@ -312,6 +312,33 @@ def test_verify_does_not_bridge_digits_across_body_and_metadata(tmp_path: Path):
     assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 0
 
 
+def test_production_extra_url_category_strips_http_links(tmp_path: Path):
+    clean_url = "https://example-fictional.test/evidence/2"
+    src_docx = tmp_path / "url_optin.docx"
+    _make_docx_with_hidden_pii(src_docx, http_target=clean_url)
+    out_docx = tmp_path / "url_optin.redacted.docx"
+    res_docx = redact_file(
+        src_docx, mode="production", extra_categories={"url"}, output_path=out_docx
+    )
+    assert res_docx.residual.ok, res_docx.residual.hits
+    with zipfile.ZipFile(out_docx) as z:
+        assert clean_url not in z.read("word/_rels/document.xml.rels").decode("utf-8")
+
+    src_pdf = tmp_path / "url_optin.pdf"
+    _make_pdf_with_hidden_pii(src_pdf, http_uri=clean_url)
+    out_pdf = tmp_path / "url_optin.redacted.pdf"
+    res_pdf = redact_file(
+        src_pdf, mode="production", extra_categories={"url"}, output_path=out_pdf
+    )
+    assert res_pdf.residual.ok, res_pdf.residual.hits
+    doc = fitz.open(out_pdf)
+    try:
+        uris = [lnk.get("uri") or "" for page in doc for lnk in page.get_links()]
+    finally:
+        doc.close()
+    assert not any(clean_url in u for u in uris)
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

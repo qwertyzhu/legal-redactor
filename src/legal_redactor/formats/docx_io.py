@@ -530,7 +530,10 @@ def redact_docx(
             warn.append(
                 "DOCX-FIELD: 域代码未替换（交叉引用、文件名域）。页码域忽略。导出前看一眼域结果里有没有人名。"
             )
-        drop_http = (not preserve_hyperlinks) and (mode.lower().strip() != "production")
+        strip_urls = bool(image_categories and "url" in image_categories)
+        drop_http = (not preserve_hyperlinks) and (
+            mode.lower().strip() != "production" or strip_urls
+        )
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
             for item in zin.infolist():
                 data = zin.read(item.filename)

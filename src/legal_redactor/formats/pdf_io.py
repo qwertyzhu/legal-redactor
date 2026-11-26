@@ -297,7 +297,10 @@ def redact_pdf(
             meta[key] = ""
         doc.set_metadata(meta)
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
-        drop_http = (not preserve_hyperlinks) and (mode.lower().strip() != "production")
+        strip_urls = bool(image_categories and "url" in image_categories)
+        drop_http = (not preserve_hyperlinks) and (
+            mode.lower().strip() != "production" or strip_urls
+        )
         _scrub_pdf_links(doc, mapping, warnings, drop_http=drop_http)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
