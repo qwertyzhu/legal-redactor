@@ -295,6 +295,8 @@ def redact_file(
         raise ValueError(
             f"output suffix {output_path.suffix!r} must match input suffix {input_path.suffix!r}"
         )
+    if output_path.exists() and output_path.samefile(input_path):
+        raise ValueError(f"输出路径不能与输入文件相同：{output_path}；脱敏稿须另存，原件保持不变。")
 
     sidecar_stem = sidecar_stem or output_path.stem
     work_dir = Path(work_dir) if work_dir else output_path.parent
