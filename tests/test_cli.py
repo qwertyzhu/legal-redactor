@@ -275,8 +275,9 @@ def test_shipped_cli_production_redact_survives_cp1252_stdio(tmp_path: Path) -> 
     assert residual["ok"] is True, residual
 
 
+@pytest.mark.parametrize("output", ["./{}", "missing/../{}"])
 @pytest.mark.parametrize("suffix", [".docx", ".pdf", ".txt"])
-def test_cli_refuses_to_overwrite_input(tmp_path: Path, suffix: str) -> None:
+def test_cli_refuses_to_overwrite_input(tmp_path: Path, suffix: str, output: str) -> None:
     src = tmp_path / f"same{suffix}"
     if suffix == ".docx":
         docx_io.create_sample_docx(src, SAMPLE)
@@ -288,7 +289,7 @@ def test_cli_refuses_to_overwrite_input(tmp_path: Path, suffix: str) -> None:
         src.write_text(SAMPLE, encoding="utf-8")
     original = src.read_bytes()
 
-    proc = _run_cli("redact", src.name, "--mode", "ai", "-o", f"./{src.name}", cwd=tmp_path)
+    proc = _run_cli("redact", src.name, "--mode", "ai", "-o", output.format(src.name), cwd=tmp_path)
 
     assert proc.returncode == 1, proc.stderr + proc.stdout
     assert "输出路径不能与输入文件相同" in proc.stderr
