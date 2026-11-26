@@ -205,7 +205,7 @@ Each successful `redact` also writes:
 - `*.suspects.json` — natural-language entity **hints** (not auto-redacted)
 - `*.summary.md` — human-readable table
 
-Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir.
+Batch also writes `entities.consistent.json` + `consistency.report.*` under the work dir. These remain plaintext and contain original entities even with `--ledger-encrypt`; keep them local.
 
 Scanned workflow: `skills/legal-document-redactor/references/scanned-pdf.md`.  
 Entity starter: `skills/legal-document-redactor/references/entities.template.json`.  

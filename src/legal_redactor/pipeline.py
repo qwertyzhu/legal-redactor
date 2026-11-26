@@ -732,9 +732,9 @@ def redact_tree(
     consistency_path = None
     entities_consistent_path = pre_entities_path
     if results:
-        from .consistency import unify_from_ledgers
+        from .consistency import unify_ledger_paths
 
-        report = unify_from_ledgers(work_root, work_root, mode=mode)
+        report = unify_ledger_paths((r.ledger_path for r in results), work_root, mode=mode)
         consistency_path = report.report_path
         # Prefer post-ledger path; keep pre-unify path if post missing
         entities_consistent_path = report.entities_path or pre_entities_path
