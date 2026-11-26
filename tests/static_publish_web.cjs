@@ -23,6 +23,16 @@ test('publish fuzzes numerical and personal financial-uppercase amounts like the
   assert.equal(redact(text, { mode: 'publish' }), '工资数十万元（数十万元）。索赔数万元（叁万伍仟元整）。');
 });
 
+test('publish keeps clauses immediately after numbered addresses', () => {
+  for (const [text, expected] of [
+    ['住北京市海淀区中关村大街27号院3号楼502室为约定送达地址', '住北京市海淀区为约定送达地址'],
+    ['送达地址为北京市海淀区中关村大街27号，该地址为约定送达地址。', '送达地址为北京市海淀区，该地址为约定送达地址。'],
+    ['住北京市海淀区测试路27号院为民小区3栋2单元作为通讯地址', '住北京市海淀区作为通讯地址'],
+  ]) {
+    assert.equal(redact(text, { mode: 'publish' }), expected);
+  }
+});
+
 test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
   const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
   assert.equal(redact(text, { mode: 'production' }), text);

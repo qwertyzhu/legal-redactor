@@ -142,6 +142,10 @@ _ADDRESS = re.compile(
     rf"[一-鿿0-9A-Za-z（）()·\- ]{{0,30}}"
     rf")"
 )
+_ADDRESS_BEFORE_CLAUSE = re.compile(
+    r"[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])"
+    r"(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))"
+)
 
 _ORG_BLOCKLIST = frozenset(
     {
@@ -599,6 +603,9 @@ def detect_suspects(
 
     for m in _ADDRESS.finditer(text):
         val = m.group(1).strip().rstrip("，,。；;、")
+        boundary = _ADDRESS_BEFORE_CLAUSE.search(val)
+        if boundary:
+            val = val[:boundary.end()]
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases

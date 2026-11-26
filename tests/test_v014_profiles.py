@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from legal_redactor.cli import main
 from legal_redactor.patterns import detect_structural
 from legal_redactor.pipeline import redact_file
@@ -112,3 +114,18 @@ def test_publish_keeps_county_level_city_whole(tmp_path: Path):
     assert "江苏省苏州市昆山市" in res.output_text
     assert "河南省郑州市" in res.output_text
     assert "测试路" not in res.output_text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住北京市海淀区中关村大街27号院3号楼502室为约定送达地址", "住北京市海淀区为约定送达地址"),
+        ("送达地址为北京市海淀区中关村大街27号，该地址为约定送达地址。", "送达地址为北京市海淀区，该地址为约定送达地址。"),
+        ("住北京市海淀区测试路27号院为民小区3栋2单元作为通讯地址", "住北京市海淀区作为通讯地址"),
+    ],
+)
+def test_publish_keeps_clause_after_numbered_address(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected
