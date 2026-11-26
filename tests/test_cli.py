@@ -401,6 +401,40 @@ def test_shipped_cli_docx_chart_preserves_numeric_measurements(tmp_path: Path, c
         assert verify.returncode == 0, verify.stderr + verify.stdout
 
 
+def test_shipped_cli_docx_chart_redacts_numeric_category_labels(tmp_path: Path) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    part = "word/charts/chart1.xml"
+    ns = {"c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(
+            part,
+            f'<c:chartSpace xmlns:c="{ns["c"]}"><c:chart><c:plotArea><c:barChart><c:ser>'
+            '<c:cat><c:numRef><c:f>Sheet1!$A$2</c:f><c:numCache><c:pt idx="0"><c:v>13700003333</c:v>'
+            '</c:pt></c:numCache></c:numRef></c:cat>'
+            '<c:val><c:numLit><c:pt idx="0"><c:v>13700003333</c:v></c:pt></c:numLit></c:val>'
+            '</c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>',
+        )
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 2, before.stderr + before.stdout
+    assert "mobile: 13700003333" in before.stdout
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        chart = etree.fromstring(archive.read(part))
+    assert chart.findtext(".//c:cat//c:v", namespaces=ns) == "[手机号]"
+    assert chart.findtext(".//c:val//c:v", namespaces=ns) == "13700003333"
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout
+
+
 @pytest.mark.parametrize("separate_parts", [False, True], ids=["same-chart", "separate-charts"])
 def test_shipped_cli_docx_chart_keeps_labels_separate(tmp_path: Path, separate_parts: bool) -> None:
     src = tmp_path / "original.docx"

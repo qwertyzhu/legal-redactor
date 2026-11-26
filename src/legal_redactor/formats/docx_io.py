@@ -36,6 +36,7 @@ _CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
 _CHART_NUMERIC_TAGS = tuple(
     f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
 )
+_CHART_LABEL_TAGS = tuple(f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("cat", "tx"))
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 _HYPERLINK_FIELD_RE = re.compile(r'(?i)(\bHYPERLINK\s+")([^"]+)(")')
 
@@ -309,7 +310,10 @@ def _process_xml_bytes(
             if text:
                 texts.append(text)
         elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
-            if next(node.iterancestors(*_CHART_NUMERIC_TAGS), None) is not None:
+            if (
+                next(node.iterancestors(*_CHART_NUMERIC_TAGS), None) is not None
+                and next(node.iterancestors(*_CHART_LABEL_TAGS), None) is None
+            ):
                 continue
             text = node.text
             if mapping is not None:
