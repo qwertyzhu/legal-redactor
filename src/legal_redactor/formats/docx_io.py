@@ -17,7 +17,7 @@ from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
-from . import scrub_external_url, scrub_structural_text
+from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -405,7 +405,7 @@ def extract_metadata_and_links(path: Path) -> str:
                                     chunks.append(decoded)
             except etree.XMLSyntaxError:
                 pass
-    return "\n".join(chunks)
+    return FIELD_BOUNDARY.join(chunks)
 
 
 def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:

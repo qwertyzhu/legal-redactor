@@ -300,6 +300,18 @@ def test_restore_file_preserves_pdf_and_docx_hyperlinks(tmp_path: Path):
     assert clean_url in rels
 
 
+def test_verify_does_not_bridge_digits_across_body_and_metadata(tmp_path: Path):
+    src = tmp_path / "split_digits.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Item 138", fontsize=11)
+    doc.set_metadata({"title": "00001111"})
+    doc.save(src)
+    doc.close()
+
+    assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 0
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

@@ -8,7 +8,7 @@ from urllib.parse import unquote
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
-from . import scrub_external_url, scrub_structural_text
+from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})

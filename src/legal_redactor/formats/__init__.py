@@ -5,6 +5,10 @@ from urllib.parse import unquote
 from ..entities import apply_mapping_to_text
 from ..patterns import detect_structural, structural_placeholder
 
+# Non-whitespace record separator between independent body/metadata/link fields
+# so spaced patterns (e.g. mobile regex allowing \s) cannot bridge across fields.
+FIELD_BOUNDARY = "\n\x1e\n"
+
 URL_SECRET_CATEGORIES = frozenset(
     {
         "url_secret",

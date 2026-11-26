@@ -16,7 +16,7 @@ from .ledger_store import (
     write_ledger_pointer,
 )
 from .profiles_loader import Profile, resolve_profile
-from .formats import docx_io, pdf_io, text_io
+from .formats import FIELD_BOUNDARY, docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
 from .suspects import Suspect, detect_suspects
 from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
@@ -116,7 +116,7 @@ def extract_for_verify(path: Path, *, revisions: str = "keep-and-redact") -> str
     body = _extract(path, revisions=revisions)
     hidden = _extract_hidden(path)
     if hidden:
-        return f"{body}\n{hidden}" if body else hidden
+        return f"{body}{FIELD_BOUNDARY}{hidden}" if body else hidden
     return body
 
 
@@ -370,7 +370,7 @@ def redact_file(
         mode=mode,
     )
     hidden_output = _extract_hidden(output_path)
-    verify_text = f"{output_text}\n{hidden_output}" if hidden_output else output_text
+    verify_text = f"{output_text}{FIELD_BOUNDARY}{hidden_output}" if hidden_output else output_text
     residual = scan_residual(
         verify_text,
         mode=mode,
