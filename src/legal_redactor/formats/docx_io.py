@@ -16,7 +16,7 @@ from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
-from ..patterns import detect_structural, structural_placeholder
+from . import scrub_external_url, scrub_structural_text
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -293,6 +293,63 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
     return "\n".join(chunks)
 
 
+_CLEAR_CORE_PROPS = frozenset(
+    {"title", "subject", "description", "keywords", "category", "contentStatus"}
+)
+_SKIP_CORE_PROPS = frozenset({"created", "modified", "lastPrinted", "revision"})
+
+
+def extract_metadata_and_links(path: Path) -> str:
+    """Extract DOCX metadata values and external hyperlink targets for residual verification."""
+    chunks: list[str] = []
+    with zipfile.ZipFile(path, "r") as zin:
+        names = zin.namelist()
+        if "docProps/core.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/core.xml"))
+                for el in root.iter():
+                    local = _local(el.tag)
+                    if local in _SKIP_CORE_PROPS:
+                        continue
+                    if el.text and el.text.strip() and el.text.strip() != "作者":
+                        chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        if "docProps/app.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/app.xml"))
+                for el in root.iter():
+                    if _local(el.tag) in {"Company", "Manager", "CompanyDoc", "HyperlinkBase"}:
+                        if el.text and el.text.strip():
+                            chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        if "docProps/custom.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/custom.xml"))
+                for el in root.iter():
+                    if el.text and el.text.strip():
+                        chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        for name in sorted(n for n in names if n.startswith("word/_rels/") and n.endswith(".rels")):
+            try:
+                root = etree.fromstring(zin.read(name))
+                for el in root.iter():
+                    if _local(el.tag) != "Relationship":
+                        continue
+                    target = (el.get("Target") or "").strip()
+                    if not target or target == "#":
+                        continue
+                    if el.get("TargetMode") == "External" or target.lower().startswith(
+                        ("mailto:", "tel:", "http://", "https://")
+                    ):
+                        chunks.append(target)
+            except etree.XMLSyntaxError:
+                pass
+    return "\n".join(chunks)
+
+
 def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
     try:
         root = etree.fromstring(data)
@@ -303,10 +360,15 @@ def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
         if local in {"creator", "lastModifiedBy"}:
             el.text = "作者"
             continue
+        if local in _CLEAR_CORE_PROPS:
+            el.text = ""
+            continue
+        if local in _SKIP_CORE_PROPS:
+            continue
         if el.text and isinstance(el.text, str) and el.text.strip():
-            el.text = apply_mapping_to_text(el.text, mapping)
+            el.text = scrub_structural_text(apply_mapping_to_text(el.text, mapping))
         if el.tail and isinstance(el.tail, str) and el.tail.strip():
-            el.tail = apply_mapping_to_text(el.tail, mapping)
+            el.tail = scrub_structural_text(apply_mapping_to_text(el.tail, mapping))
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -362,7 +424,7 @@ def _scrub_rels(
         if _local(el.tag) != "Relationship":
             continue
         target = el.get("Target") or ""
-        if target.lower().startswith("mailto:"):
+        if target.lower().startswith(("mailto:", "tel:")):
             el.set("Target", "#")
             changed = True
         elif el.get("TargetMode") == "External":
@@ -370,16 +432,7 @@ def _scrub_rels(
                 el.set("Target", "#")
                 changed = True
             elif target:
-                redacted_target = apply_mapping_to_text(target, mapping or [])
-                # Also strip structural URL credentials/tokens/phones hidden only in rels Target
-                url_pairs = [
-                    (h.text, structural_placeholder(h.category, h.text, 0))
-                    for h in detect_structural(redacted_target)
-                    if h.auto_replace and h.category in {"url_secret", "mobile", "id_card", "email"}
-                ]
-                if url_pairs:
-                    url_pairs.sort(key=lambda p: len(p[0]), reverse=True)
-                    redacted_target = apply_mapping_to_text(redacted_target, url_pairs)
+                redacted_target = scrub_external_url(target, mapping)
                 if redacted_target != target:
                     el.set("Target", redacted_target)
                     changed = True
@@ -434,9 +487,8 @@ def redact_docx(
                 elif name == "docProps/custom.xml":
                     data = _clean_custom_props(data)
                 elif name.startswith("word/_rels/") and name.endswith(".rels"):
-                    if not preserve_hyperlinks:
-                        drop_http = mode.lower().strip() != "production"
-                        data = _scrub_rels(data, mapping, drop_http=drop_http)
+                    drop_http = (not preserve_hyperlinks) and (mode.lower().strip() != "production")
+                    data = _scrub_rels(data, mapping, drop_http=drop_http)
                 elif name in ("word/settings.xml", "word/people.xml"):
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)

@@ -877,9 +877,9 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"    - {h['category']}: {h['text']}")
                 status = payload["status"]
             else:
-                from .pipeline import resolve_allowlist
+                from .pipeline import extract_for_verify, resolve_allowlist
 
-                text = _extract_any(src, revisions="keep-and-redact")
+                text = extract_for_verify(src, revisions="keep-and-redact")
                 report = scan_residual(
                     text,
                     mode=vmode,

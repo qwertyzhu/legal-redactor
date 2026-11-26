@@ -102,6 +102,24 @@ def _extract(path: Path, *, revisions: str = "accept") -> str:
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
 
 
+def _extract_hidden(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        return docx_io.extract_metadata_and_links(path)
+    if suffix == ".pdf":
+        return pdf_io.extract_metadata_and_links(path)
+    return ""
+
+
+def extract_for_verify(path: Path, *, revisions: str = "keep-and-redact") -> str:
+    """Extract visible text plus metadata and hyperlink targets for residual verification."""
+    body = _extract(path, revisions=revisions)
+    hidden = _extract_hidden(path)
+    if hidden:
+        return f"{body}\n{hidden}" if body else hidden
+    return body
+
+
 def _apply(
     path: Path,
     output: Path,
@@ -134,9 +152,11 @@ def _apply(
             output,
             mapping,
             warnings=warnings,
+            preserve_hyperlinks=preserve_hyperlinks,
             preserve_bookmarks=preserve_bookmarks,
             ocr_images=ocr_images,
             image_categories=image_categories,
+            mode=mode,
         )
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
@@ -349,8 +369,10 @@ def redact_file(
         ),
         mode=mode,
     )
+    hidden_output = _extract_hidden(output_path)
+    verify_text = f"{output_text}\n{hidden_output}" if hidden_output else output_text
     residual = scan_residual(
-        output_text,
+        verify_text,
         mode=mode,
         keep_categories=keep,
         extra_categories=extra,
@@ -689,8 +711,8 @@ def verify_tree(
     for path in iter_batch_inputs(input_dir, recursive=recursive):
         if path.name.endswith(sidecar_suffixes) or path.name.startswith(("entities.consistent", "consistency.report")):
             continue
-        # Superset view: deleted/inserted revision text is scanned too.
-        text = _extract(path, revisions="keep-and-redact")
+        # Superset view: deleted/inserted revision text plus metadata & links are scanned too.
+        text = extract_for_verify(path, revisions="keep-and-redact")
         report = scan_residual(
             text,
             mode=mode,
