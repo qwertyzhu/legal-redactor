@@ -100,3 +100,15 @@ def test_publish_still_renames_everyone(tmp_path: Path):
     assert "张某" in res.output_text
     assert "赵测审" in res.output_text
     assert "测试路88号" not in res.output_text
+
+
+def test_publish_keeps_county_level_city_whole(tmp_path: Path):
+    src = _src(
+        tmp_path,
+        "原告：张测伟，住江苏省苏州市昆山市玉山镇测试路88号。\n"
+        "被告：李测强，住河南省郑州市测试路9号。\n",
+    )
+    res = redact_file(src, mode="ai", output_path=tmp_path / "p.md", profile="publish")
+    assert "江苏省苏州市昆山市" in res.output_text
+    assert "河南省郑州市" in res.output_text
+    assert "测试路" not in res.output_text

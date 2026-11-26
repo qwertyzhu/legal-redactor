@@ -130,7 +130,13 @@ def _district_address(addr: str) -> str:
     match = re.search(r"^(.{2,20}?(?<!自治)(?:区|县|旗))", head)
     if match:
         return match.group(1)
-    match = re.search(r"^(.{2,12}?(?:市|州|盟))", head)
+    # 州 alone is part of a name (苏州, 郑州); only 自治州 is a prefecture unit.
+    # A county-level city (昆山市) after the prefecture is still 县 level;
+    # 超市/菜市/门市部… are landmarks, not cities.
+    match = re.search(
+        r"^(.{2,12}?(?:市|自治州|盟)(?:[^市县区旗镇乡村街道路号]{2,4}?(?<![超菜夜集早花鱼])市(?!部))?)",
+        head,
+    )
     if match:
         return match.group(1)
     return "某地址"
