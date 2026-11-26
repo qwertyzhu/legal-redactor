@@ -165,32 +165,33 @@ def _wrapped_rects(
     original: str,
     *,
     allow_single_line: bool = False,
-) -> list[tuple["fitz.Rect", bool]]:
+) -> list[list["fitz.Rect"]]:
     """Rects for occurrences of `original` split by whitespace or line breaks.
 
-    Returns ``[(rect, carries_replacement_text), ...]`` so the caller paints the
-    alias once, on the first line of the wrapped run.
+    Each match has one rect per line.
     """
     text, rects, rows, line_info = index
     target = "".join(original.split())
     short_name = is_short_cjk_name(target)
     if len(target) < 4 and not short_name:
         return []
-    out: list[tuple[fitz.Rect, bool]] = []
+    out: list[list[fitz.Rect]] = []
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
         if not short_name or _short_name_is_local(rects, rows, line_info, start, start + len(target)):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
-                for n, row in enumerate(unique_rows):
+                match: list[fitz.Rect] = []
+                for row in unique_rows:
                     line_rects = [
                         rects[i] for i in range(start, start + len(target)) if rows[i] == row
                     ]
                     union = fitz.Rect(line_rects[0])
                     for rect in line_rects[1:]:
                         union |= rect
-                    out.append((union, n == 0))
+                    match.append(union)
+                out.append(match)
         start = text.find(target, start + 1)
     return out
 
@@ -219,6 +220,25 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
+def _paint_wrapped_alias(page: "fitz.Page", rects: list["fitz.Rect"], alias: str) -> None:
+    lines = alias.splitlines()
+    fontname = _redaction_fontname(alias)
+    width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
+    if not width:
+        return
+    font = fitz.Font(fontname=fontname)
+    lineheight = font.ascender - font.descender
+    height = lineheight * len(lines)
+
+    def size(rect: fitz.Rect) -> float:
+        return min(9, rect.width / width, rect.height / height)
+
+    rect = max(rects, key=size)
+    fontsize = size(rect)
+    baseline = rect.y0 + (rect.height - fontsize * height) / 2 + fontsize * font.ascender
+    page.insert_text((rect.x0, baseline), lines, fontname=fontname, fontsize=fontsize, lineheight=lineheight)
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -245,6 +265,7 @@ def redact_pdf(
         for page in doc:
             found_any = False
             claimed_rects: list[fitz.Rect] = []
+            wrapped_aliases: list[tuple[list[fitz.Rect], str]] = []
             index: _CharIndex | None = None
             for original, replacement in ordered_mapping:
                 if not original:
@@ -266,21 +287,29 @@ def redact_pdf(
                 # search_for misses names split by spaces or line breaks.
                 if index is None:
                     index = _page_char_index(page)
-                for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):
-                    if _overlaps_claimed(rect, claimed_rects):
-                        continue
-                    claimed_rects.append(rect)
-                    page.add_redact_annot(
-                        rect,
-                        text=replacement if carries_text else "",
-                        fill=(1, 1, 1),
-                        text_color=(0, 0, 0),
-                        fontsize=9,
-                        fontname=_redaction_fontname(replacement),
-                    )
-                    found_any = True
+                for match in _wrapped_rects(index, original, allow_single_line=not rects):
+                    paint_after = len(match) > 1 and is_short_cjk_name(original)
+                    applied = []
+                    for i, rect in enumerate(match):
+                        if _overlaps_claimed(rect, claimed_rects):
+                            continue
+                        claimed_rects.append(rect)
+                        applied.append(rect)
+                        page.add_redact_annot(
+                            rect,
+                            text=replacement if i == 0 and not paint_after else "",
+                            fill=(1, 1, 1),
+                            text_color=(0, 0, 0),
+                            fontsize=9,
+                            fontname=_redaction_fontname(replacement),
+                        )
+                        found_any = True
+                    if paint_after and applied:
+                        wrapped_aliases.append((applied, replacement))
             if found_any:
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                for rects, alias in wrapped_aliases:
+                    _paint_wrapped_alias(page, rects, alias)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 

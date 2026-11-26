@@ -115,6 +115,27 @@ def test_pdf_short_names_do_not_join_aligned_text_blocks(short_names_pdf, tmp_pa
         assert doc[0].get_text() == "附录李\n明细另附\n"
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "alias"),
+    [("郝", "测一", "某甲"), ("李", "明", "某乙")],
+)
+def test_pdf_alias_survives_small_wrapped_name_rect(short_names_pdf, tmp_path, first, second, alias):
+    _, entities = short_names_pdf
+    src = tmp_path / "small.pdf"
+    out = tmp_path / "small.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), f"记录中提及{first}\n{second}于当天到场", fontsize=7, fontname="china-s")
+        doc.save(src)
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert text.count(alias) == 1
+    assert first not in text
+    assert second not in text
+    assert "于当天到场" in text
+
+
 def _suspect(text: str, category: str = "organization") -> Suspect:
     return Suspect(text=text, category=category, reason="org_suffix", start=0, end=len(text))
 
