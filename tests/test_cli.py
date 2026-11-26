@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from legal_redactor import __version__
@@ -79,6 +80,40 @@ def test_cli_help_lists_redact_scan_verify() -> None:
     assert "--redact-party" in scan_help.stdout
     assert "--party-spec" in scan_help.stdout
     assert "甲方" in scan_help.stdout and "乙方" in scan_help.stdout
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
+@pytest.mark.parametrize("allow_residual", [False, True])
+def test_cli_batch_reports_skipped_scan(
+    tmp_path: Path, json_output: bool, allow_residual: bool
+) -> None:
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "plain.txt").write_text("Fictional sample\n", encoding="utf-8")
+    scan = inputs / "scan.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 16, 16), 0)
+        image.clear_with(255)
+        page.insert_image(page.rect, pixmap=image)
+        doc.save(scan)
+
+    output = tmp_path / "output"
+    flags = (["--json"] if json_output else []) + (["--allow-residual"] if allow_residual else [])
+    proc = _run_cli("redact", str(inputs), "--mode", "ai", "-o", str(output), *flags)
+
+    assert (output / "plain.redacted-ai.txt").is_file()
+    assert not (output / "scan.redacted-ai.pdf").exists()
+    if json_output:
+        batch = json.loads(proc.stdout)
+        assert [entry["status"] for entry in batch["files"]] == ["PASS"]
+        assert [entry["input"] for entry in batch["skipped"]] == [str(scan)]
+        assert "没有文字层" in batch["skipped"][0]["reason"]
+        assert (batch["ok"], proc.returncode) == (False, 1)
+    else:
+        assert "[SKIP] scan.pdf:" in proc.stderr
+        assert proc.returncode == 1
+        assert "无待补实体。到此停止" not in proc.stdout
 
 
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:
