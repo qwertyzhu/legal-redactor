@@ -154,7 +154,10 @@ def test_pdf_metadata_and_links_stripped_all_modes(tmp_path: Path, profile: str)
 
 
 def test_pdf_preserve_hyperlinks_keeps_clean_url_but_scrubs_secrets(tmp_path: Path):
-    src = _make_pdf_with_hidden_pii(tmp_path / "keep.pdf")
+    src = _make_pdf_with_hidden_pii(
+        tmp_path / "keep.pdf",
+        http_uri="https://example-fictional.test/doc?token=tok999999&phone=13600004444&page=2",
+    )
     out = tmp_path / "keep.out.pdf"
     redact_file(src, mode="ai", output_path=out, preserve_hyperlinks=True)
     doc = fitz.open(str(out))
@@ -162,7 +165,7 @@ def test_pdf_preserve_hyperlinks_keeps_clean_url_but_scrubs_secrets(tmp_path: Pa
         link_uris = [lk.get("uri", "") for p in doc for lk in p.get_links() if lk.get("uri")]
     finally:
         doc.close()
-    assert any("https://example-fictional.test/doc" in u for u in link_uris)
+    assert any("https://example-fictional.test/doc?token=[参数]" in u and "&page=2" in u for u in link_uris)
     joined = "\n".join(link_uris)
     assert "13600004444" not in joined
     assert "tok999999" not in joined

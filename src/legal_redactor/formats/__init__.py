@@ -18,6 +18,13 @@ URL_SECRET_CATEGORIES = frozenset(
 )
 
 
+def _replacement_for_hit(category: str, text: str) -> str:
+    if category == "url_secret" and text.startswith(("?", "&")) and "=" in text:
+        prefix = text.split("=", 1)[0] + "="
+        return prefix + structural_placeholder(category, text, 0)
+    return structural_placeholder(category, text, 0)
+
+
 def scrub_structural_text(
     text: str, *, categories: set[str] | frozenset[str] | None = None
 ) -> str:
@@ -25,7 +32,7 @@ def scrub_structural_text(
     if not text:
         return text
     pairs = [
-        (h.text, structural_placeholder(h.category, h.text, 0))
+        (h.text, _replacement_for_hit(h.category, h.text))
         for h in detect_structural(text)
         if h.auto_replace
         and h.category != "url"
