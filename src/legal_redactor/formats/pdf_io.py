@@ -51,6 +51,17 @@ def extract_metadata_and_links(path: Path) -> str:
         doc.close()
 
 
+def extract_text_with_scan_pages(path: Path) -> tuple[str, list[int]]:
+    """Return text and 1-based pages with raster content but no extractable text."""
+    parts: list[str] = []
+    scan_pages: list[int] = []
+    with fitz.open(str(path)) as doc:
+        for page in doc:
+            text = page.get_text("text")
+            parts.append(text)
+            if not text.strip() and page.get_image_info():
+                scan_pages.append(page.number + 1)
+    return "\n".join(parts), scan_pages
 def _has_text_layer(doc: fitz.Document) -> bool:
     for page in doc:
         if page.get_text("text").strip():
