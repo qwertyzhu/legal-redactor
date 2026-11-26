@@ -287,3 +287,16 @@ def test_redact_docx(web_server):
         # Production mode preserves party王五 and keep_categories preserves uscc
         assert "王五" in full_text
         assert "91330100MA2B123456" in full_text
+
+
+def test_web_redact_fails_for_docx_image_pii(web_server, docx_with_image_pii):
+    src = docx_with_image_pii
+    ctype, body = _build_multipart(
+        {"mode": "ai"},
+        {"file": (src.name, src.read_bytes(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    req = Request(f"{web_server}/api/redact-file", data=body, headers={"Content-Type": ctype})
+    with urlopen(req) as resp:
+        data = json.load(resp)
+    assert (data["ok"], data["status"]) == (False, "FAIL")
+    assert any("IMAGE-PII word/media/image1.png" in warning for warning in data["warnings"])
