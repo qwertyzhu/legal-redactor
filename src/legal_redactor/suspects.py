@@ -152,6 +152,7 @@ _ADDRESS_COMPONENT = re.compile(
     r"|[0-9] *(?:号|室|层|幢|栋|弄|巷|单元)"
     r"|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))"
 )
+_RESIDENCE_COMPONENT = re.compile(r"宿舍|小区|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])")
 
 _ORG_BLOCKLIST = frozenset(
     {
@@ -624,7 +625,7 @@ def detect_suspects(
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases
-        if len(val) < 12 and re.search(r"法院(?:内|[东西南北]?门(?:口)?|旁|附近|对面)?$", val):
+        if len(val) < 12 and "法院" in val and not _RESIDENCE_COMPONENT.search(val):
             continue
         candidates.append(
             Suspect(
