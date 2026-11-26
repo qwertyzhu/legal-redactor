@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from legal_redactor.cli import main
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
 from legal_redactor.ledger_store import load_ledger, restore_text
 from legal_redactor.pipeline import redact_file
 from legal_redactor.profiles_loader import list_profiles, load_profile
@@ -91,6 +91,27 @@ def test_restore_docx(tmp_path: Path):
     restored = tmp_path / "d.restored.docx"
     assert main(["restore", str(res.output_path), "--ledger", str(res.ledger_path), "-o", str(restored)]) == 0
     assert "张测伟" in docx_io.extract_text(restored)
+
+
+@pytest.mark.parametrize(("label", "original", "placeholder"), [
+    ("邮箱", "restore.roundtrip@example.test", "[邮箱]"),
+    ("银行账号", "622202123456789012", "[账号]"),
+])
+def test_restore_pdf(tmp_path: Path, label: str, original: str, placeholder: str):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    pdf_io.create_sample_pdf(src, f"{label}：{original}")
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    redacted_text = pdf_io.extract_text(redacted)
+    assert original not in redacted_text
+    assert placeholder in redacted_text
+
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    restored_text = pdf_io.extract_text(restored)
+    assert original in restored_text
+    assert placeholder not in restored_text
 
 
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):

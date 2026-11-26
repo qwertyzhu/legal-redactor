@@ -239,7 +239,7 @@ def restore_file(
     if suffix == ".docx":
         text = docx_io.redact_docx(input_path, output_path, mapping)
     elif suffix == ".pdf":
-        text = pdf_io.redact_pdf(input_path, output_path, mapping)
+        text = pdf_io.redact_pdf(input_path, output_path, mapping, fit_replacements=True)
     else:
         text = text_io.redact_text(input_path, output_path, mapping)
     # Extra text-level pass for anything mapping missed in structured formats

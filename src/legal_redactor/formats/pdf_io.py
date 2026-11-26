@@ -152,6 +152,21 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
+def _insert_fitted_text(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
+    fontname = _redaction_fontname(text)
+    font = fitz.Font(fontname)
+    lines = text.splitlines()
+    line_height = font.ascender - font.descender
+    fontsize = min(9, rect.height / (len(lines) * line_height))
+    width = max(fitz.get_text_length(line, fontname, fontsize) for line in lines)
+    scale_x = min(1, rect.width / width)
+    y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2
+    for line in lines:
+        point = fitz.Point(rect.x0, y + font.ascender * fontsize)
+        page.insert_text(point, line, fontname=fontname, fontsize=fontsize, morph=(point, fitz.Matrix(scale_x, 1)))
+        y += line_height * fontsize
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -162,6 +177,7 @@ def redact_pdf(
     preserve_bookmarks: bool = False,
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    fit_replacements: bool = False,
 ) -> str:
     warn = warnings if warnings is not None else []
     ordered_mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
@@ -176,45 +192,39 @@ def redact_pdf(
             )
 
         for page in doc:
-            found_any = False
             claimed_rects: list[fitz.Rect] = []
+            fitted_text: list[tuple[fitz.Rect, str]] = []
             index: tuple[str, list[fitz.Rect], list[int]] | None = None
             for original, replacement in ordered_mapping:
                 if not original:
                     continue
                 rects = page.search_for(original)
-                for rect in rects:
-                    if _overlaps_claimed(rect, claimed_rects):
-                        continue
-                    claimed_rects.append(rect)
-                    page.add_redact_annot(
-                        rect,
-                        text=replacement,
-                        fill=(1, 1, 1),
-                        text_color=(0, 0, 0),
-                        fontsize=9,
-                        fontname=_redaction_fontname(replacement),
-                    )
-                    found_any = True
                 # Names and addresses wrapped across a line break: search_for
                 # cannot see them, so redact those occurrences per line.
                 if index is None:
                     index = _page_char_index(page)
-                for rect, carries_text in _wrapped_rects(index, original, allow_single_line=not rects):
+                matches = [(rect, True) for rect in rects]
+                matches.extend(_wrapped_rects(index, original, allow_single_line=not rects))
+                for rect, carries_text in matches:
                     if _overlaps_claimed(rect, claimed_rects):
                         continue
                     claimed_rects.append(rect)
+                    text = replacement if carries_text else ""
+                    if fit_replacements and text:
+                        fitted_text.append((rect, text))
+                        text = ""
                     page.add_redact_annot(
                         rect,
-                        text=replacement if carries_text else "",
+                        text=text,
                         fill=(1, 1, 1),
                         text_color=(0, 0, 0),
                         fontsize=9,
                         fontname=_redaction_fontname(replacement),
                     )
-                    found_any = True
-            if found_any:
+            if claimed_rects:
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                for rect, text in fitted_text:
+                    _insert_fitted_text(page, rect, text)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
