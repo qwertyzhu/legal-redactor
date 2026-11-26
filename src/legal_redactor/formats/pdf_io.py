@@ -46,7 +46,7 @@ def extract_metadata_and_links(path: Path) -> str:
                 file_target = (link.get("file") or "").strip()
                 if file_target:
                     parts.append(file_target)
-        return "\n".join(parts)
+        return FIELD_BOUNDARY.join(parts)
     finally:
         doc.close()
 
