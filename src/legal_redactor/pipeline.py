@@ -410,7 +410,10 @@ def redact_file(
             and s.text in residual_names
             and any(s.text != name and s.text in name for name in planned_party_names)
         ):
-            pending.append(replace(s, reason=AMBIGUOUS_CONTRACT_PARTY))
+            if output_text.count(s.text) == 1:
+                pending.append(s)
+            else:
+                pending.append(replace(s, reason=AMBIGUOUS_CONTRACT_PARTY))
         elif not s.text or not any(
             s.text != original and (s.text in original or original in s.text)
             for original in planned

@@ -397,9 +397,21 @@ def test_cli_reports_unredacted_witness_within_planned_party_name(tmp_path: Path
     assert out.read_text(encoding="utf-8") == "甲方签字：某甲\n证人沈测青出庭作证。"
     assert "pending=1" in result.stdout
     assert "handoff:    person\t沈测青" in result.stdout
+    assert "只把下面几条补进 entities.json" in result.stdout
     verified = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
     assert verified.returncode == 1, verified.stdout + verified.stderr
     assert "person: 沈测青" in verified.stdout
+
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([{"original": "沈测青", "category": "person", "replacement": "某乙"}]),
+        encoding="utf-8",
+    )
+    rerun = _run_cli(
+        "redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out), cwd=tmp_path
+    )
+    assert rerun.returncode == 0, rerun.stdout + rerun.stderr
+    assert out.read_text(encoding="utf-8") == "甲方签字：某甲\n证人某乙出庭作证。"
 
 
 def test_cli_defers_witness_name_that_is_also_clause_wording(tmp_path: Path) -> None:
