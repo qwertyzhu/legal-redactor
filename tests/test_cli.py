@@ -15,8 +15,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from legal_redactor import __version__
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "examples" / "fictional"
@@ -205,3 +207,72 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
         (tmp_path / "work" / f"{out.stem}.residual.json").read_text(encoding="utf-8")
     )
     assert residual["ok"] is True, residual
+
+
+_NATURAL_PARTIES = ("顾南枝", "沈测禾")
+_PARTY_CLAUSE = "乙方应当在交付时签收。"
+_PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PARTIES[1]}\n{_PARTY_CLAUSE}"
+
+
+@pytest.fixture(params=["txt", "docx", "pdf"])
+def party_contract_file(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
+    src = tmp_path / f"party-contract.{request.param}"
+    if src.suffix == ".docx":
+        docx_io.create_sample_docx(src, _PARTY_CONTRACT)
+    elif src.suffix == ".pdf":
+        pdf_io.create_sample_pdf(src, _PARTY_CONTRACT)
+    else:
+        src.write_text(_PARTY_CONTRACT, encoding="utf-8")
+    return src
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "ai"), ("--profile", "publish")], ids=["ai", "publish"]
+)
+def test_cli_redacts_natural_person_parties(
+    party_contract_file: Path, profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    out = tmp_path / f"redacted{party_contract_file.suffix}"
+    result = _run_cli("redact", str(party_contract_file), *profile_args, "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    if out.suffix == ".docx":
+        text = docx_io.extract_text(out)
+    elif out.suffix == ".pdf":
+        text = pdf_io.extract_text(out)
+    else:
+        text = out.read_text(encoding="utf-8")
+    assert not {name for name in _NATURAL_PARTIES if name in text}, text
+    assert "乙方签字" in text and _PARTY_CLAUSE in text
+
+    verified = _run_cli("verify", str(out), *profile_args, "--strict", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "ai"), ("--profile", "publish")], ids=["ai", "publish"]
+)
+def test_cli_strict_verify_warns_on_natural_person_parties(
+    party_contract_file: Path, profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    result = _run_cli("verify", str(party_contract_file), *profile_args, "--strict", cwd=tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "status: WARN" in result.stdout
+    assert all(f"person: {name}" in result.stdout for name in _NATURAL_PARTIES)
+
+
+@pytest.mark.parametrize(
+    "profile_args", [("--mode", "production"), ("--profile", "judgment-online")],
+    ids=["production", "judgment-online"],
+)
+def test_cli_preserves_natural_person_parties_in_filing_modes(
+    profile_args: tuple[str, str], tmp_path: Path
+) -> None:
+    src = tmp_path / "party-contract.txt"
+    src.write_text(_PARTY_CONTRACT, encoding="utf-8")
+    out = tmp_path / "redacted.txt"
+    result = _run_cli("redact", str(src), *profile_args, "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == _PARTY_CONTRACT
+    verified = _run_cli("verify", str(out), *profile_args, "--strict", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
