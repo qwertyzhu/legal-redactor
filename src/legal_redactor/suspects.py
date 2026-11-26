@@ -216,11 +216,13 @@ _PERSON_STOPWORDS = frozenset(
 )
 
 # Colon required. These words also appear in statutes and argument (作者认为、权利人主张).
+# Contract parties also need a field boundary to avoid treating clauses as names.
 _LABELED_PERSON = re.compile(
-    r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)"
-    r"\s*[：:]\s*"
+    r"(?:(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)\s*[：:]\s*"
+    r"|(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*签[字名])?[^\S\n]*[：:][^\S\n]*)"
     rf"(?P<name>{_PERSON_NAME_PAT})"
-    r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))"
+    r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))",
+    re.MULTILINE,
 )
 _LABELED_LATIN = re.compile(
     r"(?:法定代表人|授权代表|姓名|著作权人|权利人|制片人|导演|编剧)"
