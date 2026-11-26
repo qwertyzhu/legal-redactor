@@ -215,13 +215,24 @@ _PERSON_STOPWORDS = frozenset(
     }
 )
 
+_LABELED_PERSON_END = r"(?=(?:[，,。；;、\s\d）)]|男|女|联系|电话|手机|身份证|$))"
 # Colon required. These words also appear in statutes and argument (作者认为、权利人主张).
 _LABELED_PERSON = re.compile(
-    r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)"
-    r"\s*[：:]\s*"
-    rf"(?P<name>{_PERSON_NAME_PAT})"
-    r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))"
+    r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)\s*[：:]\s*"
+    rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}"
 )
+# A bare party label can also introduce a duty (乙方：包工包料).
+_CONTRACT_PARTY_PERSON = re.compile(
+    r"(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*(?P<signature>签[字名]))?"
+    r"[^\S\n]*[：:][^\S\n]*"
+    rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}",
+    re.MULTILINE,
+)
+_SIGNING_INSTRUCTION = re.compile(r"(?:盖章|用印|签[字名章])(?:生效|确认|有效|为准)|加盖[公印]章")
+CONTRACT_PARTY_LABEL = "contract_party_label"
+AMBIGUOUS_CONTRACT_PARTY = "ambiguous_contract_party"
+CONTRACT_PARTY_REASONS = frozenset({CONTRACT_PARTY_LABEL, AMBIGUOUS_CONTRACT_PARTY})
+EXPLICIT_PERSON_REASONS = frozenset({"role_labeled", "labeled_person", "latin_labeled"})
 _LABELED_LATIN = re.compile(
     r"(?:法定代表人|授权代表|姓名|著作权人|权利人|制片人|导演|编剧)"
     r"\s*[：:]\s*"
@@ -361,6 +372,40 @@ def _person_ok(val: str) -> bool:
     return not val.endswith(("公司", "法院", "银行", "事务所"))
 
 
+def _contract_party_candidates(text: str, skip: set[str]) -> list[Suspect]:
+    matches = []
+    outside_names = []
+    end = 0
+    for m in _CONTRACT_PARTY_PERSON.finditer(text):
+        val = m.group("name")
+        if (
+            val in skip or not _person_ok(val) or not _has_surname(val)
+            or _SIGNING_INSTRUCTION.fullmatch(val)
+        ):
+            continue
+        if (
+            not m.group("signature")
+            and len(val) == 4
+            and not val.startswith(_COMPOUND_SURNAMES)
+            and not any(dot in val for dot in "·•")
+        ):
+            continue
+        matches.append(m)
+        outside_names.append(text[end : m.start("name")])
+        end = m.end("name")
+    if not matches:
+        return []
+    outside_names.append(text[end:])
+    unlabeled = "\n".join(outside_names)
+    candidates = []
+    for m in matches:
+        val = m.group("name")
+        # Literal replacement would also rewrite a word like 方可 in contract clauses.
+        reason = AMBIGUOUS_CONTRACT_PARTY if len(val) == 2 and val in unlabeled else CONTRACT_PARTY_LABEL
+        candidates.append(Suspect(val, "person", reason, m.start("name"), m.end("name"), "party"))
+    return candidates
+
+
 def detect_suspects(
     text: str,
     *,
@@ -422,7 +467,7 @@ def detect_suspects(
             Suspect(
                 text=val,
                 category="person",
-                reason="role_anchored",
+                reason="role_labeled" if has_delim else "role_anchored",
                 start=m.start("name"),
                 end=m.end("name"),
                 role_hint=_role_hint_for_person(context),
@@ -478,6 +523,8 @@ def detect_suspects(
                 role_hint="party",
             )
         )
+
+    candidates.extend(_contract_party_candidates(text, skip))
 
     for m in _LABELED_LATIN.finditer(text):
         val = re.sub(r"\s+", " ", m.group("name").strip())
@@ -578,19 +625,30 @@ def detect_suspects(
         or not any(o != s.text and s.text.endswith(o) for o in orgs)
     ]
 
-    # De-dupe by text; prefer longer strings; drop substring overlaps.
-    candidates.sort(key=lambda s: (-len(s.text), s.start))
+    # Keep a manual-review candidate over an equal automatic match elsewhere.
+    candidates.sort(key=lambda s: (-len(s.text), s.reason != AMBIGUOUS_CONTRACT_PARTY, s.start))
     chosen: list[Suspect] = []
     seen: set[str] = set()
+    seen_party_names: set[str] = set()
     occupied: list[tuple[int, int]] = []
     for s in candidates:
         if s.text in seen or s.text in skip:
             continue
-        if any(s.text != t and s.text in t for t in seen):
+        is_party_field = s.reason in CONTRACT_PARTY_REASONS
+        if (
+            not is_party_field
+            and any(s.text in t for t in seen)
+            and not (
+                s.reason in EXPLICIT_PERSON_REASONS
+                and any(s.text in name for name in seen_party_names)
+            )
+        ):
             continue
         if any(not (s.end <= a or s.start >= b) for a, b in occupied):
             continue
         seen.add(s.text)
+        if is_party_field:
+            seen_party_names.add(s.text)
         occupied.append((s.start, s.end))
         chosen.append(s)
 
