@@ -15,6 +15,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pymupdf as fitz
+import pytest
+
 from legal_redactor import __version__
 from legal_redactor.formats import docx_io
 
@@ -77,6 +80,67 @@ def test_cli_help_lists_redact_scan_verify() -> None:
     assert "--redact-party" in scan_help.stdout
     assert "--party-spec" in scan_help.stdout
     assert "甲方" in scan_help.stdout and "乙方" in scan_help.stdout
+
+
+def _write_pdf_with_scan(path: Path, *, text_cover: bool) -> int:
+    with fitz.open() as source, fitz.open() as pdf:
+        page = source.new_page()
+        page.insert_text((36, 50), "Synthetic attachment: test@example.com")
+        if text_cover:
+            pdf.new_page().insert_text((36, 50), "Case cover with extractable text")
+        pdf.new_page().insert_image(page.rect, pixmap=page.get_pixmap())
+        pdf.save(path)
+        return pdf.page_count
+
+
+@pytest.mark.parametrize("mode", ["ai", "production"])
+@pytest.mark.parametrize("text_cover", [False, True], ids=["scan-only", "mixed"])
+def test_cli_redact_rejects_pdf_with_uncovered_scan_pages(
+    tmp_path: Path, mode: str, text_cover: bool
+) -> None:
+    src = tmp_path / "scan.pdf"
+    scan_page = _write_pdf_with_scan(src, text_cover=text_cover)
+    out = tmp_path / "redacted.pdf"
+
+    proc = _run_cli("redact", str(src), "--mode", mode, "-o", str(out))
+
+    assert proc.returncode == 1, proc.stderr + proc.stdout
+    assert f"第 {scan_page} 页" in proc.stderr
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("text_cover", [False, True], ids=["scan-only", "mixed"])
+@pytest.mark.parametrize("batch", [False, True], ids=["file", "directory"])
+def test_cli_verify_strict_fails_with_uncovered_scan_pages(
+    tmp_path: Path, text_cover: bool, batch: bool
+) -> None:
+    src = tmp_path / "scan.pdf"
+    scan_page = _write_pdf_with_scan(src, text_cover=text_cover)
+
+    proc = _run_cli("verify", str(tmp_path if batch else src), "--mode", "ai", "--strict", "--json")
+
+    assert proc.returncode == 2, proc.stderr + proc.stdout
+    report = json.loads(proc.stdout)
+    assert report["status"] == "FAIL"
+    row = report["results"][0] if batch else report
+    assert row["hits"][0]["category"] == "unverified_scan"
+    assert f"第 {scan_page} 页" in row["hits"][0]["text"]
+
+
+def test_cli_redacts_and_verifies_text_pdf_with_blank_page(tmp_path: Path) -> None:
+    src = tmp_path / "text.pdf"
+    with fitz.open() as pdf:
+        pdf.new_page().insert_text((36, 50), "Contact: test@example.com")
+        pdf.new_page()
+        pdf.save(src)
+    out = tmp_path / "redacted.pdf"
+
+    redact = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out))
+    verify = _run_cli("verify", str(out), "--mode", "ai", "--strict")
+
+    assert redact.returncode == 0, redact.stderr + redact.stdout
+    assert verify.returncode == 0, verify.stderr + verify.stdout
+    assert "status: PASS" in verify.stdout
 
 
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:

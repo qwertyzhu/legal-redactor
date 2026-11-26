@@ -102,6 +102,10 @@ def _extract(path: Path, *, revisions: str = "accept") -> str:
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
 
 
+def _scan_page_notice(pages: list[int]) -> str:
+    return f"第 {'、'.join(map(str, pages))} 页没有文字层（扫描图片），未脱敏、无法通过文字校验。"
+
+
 def _apply(
     path: Path,
     output: Path,
@@ -261,15 +265,16 @@ def redact_file(
             auto_confident = prof.auto_confident
     mode = mode.lower().strip()
 
+    source_text = None
     is_sandwich_pdf = False
     if input_path.suffix.lower() == ".pdf":
-        from .ocr_engine import pdf_has_full_page_scan, pdf_has_text_layer
+        from .ocr_engine import pdf_has_full_page_scan
 
-        # Default of 20 treats a one-line phone as "no text layer" and blocks
-        # metadata cleanup. Refuse only when extractable text is empty.
-        if not pdf_has_text_layer(input_path, min_chars=1):
+        source_text, scan_pages = pdf_io.extract_text_with_scan_pages(input_path)
+        if scan_pages or not source_text.strip():
+            notice = _scan_page_notice(scan_pages) if scan_pages else "这份 PDF 没有文字层。"
             raise ValueError(
-                "这份 PDF 没有文字层。给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
+                f"{notice}给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
                 "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
             )
         is_sandwich_pdf = pdf_has_full_page_scan(input_path)
@@ -302,7 +307,8 @@ def redact_file(
         raise ValueError(f"revisions must be one of {REVISION_MODES}")
     if ocr_images not in OCR_IMAGE_MODES:
         raise ValueError(f"ocr_images must be one of {OCR_IMAGE_MODES}")
-    source_text = _extract(input_path, revisions=revisions)
+    if source_text is None:
+        source_text = _extract(input_path, revisions=revisions)
     only = prof.categories if prof is not None else None
     if prof is not None and prof.categories is None:
         keep |= prof.keep_categories
@@ -660,6 +666,31 @@ def redact_tree(
     )
 
 
+def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
+    scan_pages: list[int] = []
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        text, scan_pages = pdf_io.extract_text_with_scan_pages(path)
+    elif suffix == ".docx":
+        # Superset view: deleted/inserted revision text is scanned too.
+        text = docx_io.extract_text(path, revisions="keep-and-redact")
+    else:
+        text = text_io.extract_text(path)
+
+    report = scan_residual(text, mode=mode, nl=True, **scan_options)
+    if scan_pages:
+        report.ok = False
+        report.status = "FAIL"
+        report.summary = f"residual scan FAILED for mode={mode}: PDF contains unverified scanned pages"
+        report.hits.append({
+            "category": "unverified_scan",
+            "text": _scan_page_notice(scan_pages),
+            "start": -1,
+            "end": -1,
+        })
+    return report
+
+
 def verify_tree(
     input_dir: Path,
     mode: str,
@@ -689,15 +720,12 @@ def verify_tree(
     for path in iter_batch_inputs(input_dir, recursive=recursive):
         if path.name.endswith(sidecar_suffixes) or path.name.startswith(("entities.consistent", "consistency.report")):
             continue
-        # Superset view: deleted/inserted revision text is scanned too.
-        text = _extract(path, revisions="keep-and-redact")
-        report = scan_residual(
-            text,
+        report = verify_file(
+            path,
             mode=mode,
             keep_categories=keep,
             extra_categories=extra,
             only_categories=only_categories,
-            nl=True,
             allowlist=allow,
             redact_court_staff=bool(_ignored.get("redact_court_staff")),
         )
