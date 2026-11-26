@@ -9,6 +9,8 @@ import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import _print_handoff, main
+from legal_redactor.formats.pdf_io import redact_pdf
+from legal_redactor.ledger_store import restore_text
 from legal_redactor.patterns import detect_structural
 from legal_redactor.suspects import Suspect, detect_suspects
 
@@ -106,6 +108,21 @@ def test_pdf_rotated_split_name_alias_stays_inside_redaction(short_names_pdf, tm
         text = doc[0].get_text()
         assert "上下" in text and "前后" in text
         assert "李" not in text and "明" not in text
+
+
+@pytest.mark.parametrize("alias", ["Alias number seventeen", "很长的替身 测试代号"])
+def test_pdf_rotated_split_name_keeps_exact_alias_for_restore(tmp_path, alias):
+    src = tmp_path / "rotated.pdf"
+    out = tmp_path / "rotated.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        page.insert_text((100, 140), "上下李 明前后", fontname="china-s", rotate=270)
+        doc.save(src)
+    text = redact_pdf(src, out, [("李明", alias)])
+    assert alias in text.splitlines()
+    restored, _ = restore_text(text, {"entities": [{"original": "李明", "replacement": alias}]})
+    assert alias not in restored
+    assert "李明" in restored
 
 
 @pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])

@@ -303,35 +303,29 @@ def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) ->
     width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
     if not width:
         return
-    def size(slot: _NameRect) -> float:
-        rotation = _TEXT_ROTATIONS.get(slot.direction, 0)
-        advance = slot.rect.height if rotation in (90, 270) else slot.rect.width
-        return min(slot.font_size, advance / width)
+    font = fitz.Font(fontname=fontname)
+    lineheight = font.ascender - font.descender
+    height = lineheight * len(lines)
 
-    slot = max(rects, key=size)
-    font_size = size(slot)
-    if slot.direction != (1.0, 0.0):
+    def layout(slot: _NameRect) -> tuple[float, tuple[float, float], int]:
+        rect = slot.rect
         rotation = _TEXT_ROTATIONS.get(slot.direction, 0)
-        inner = slot.rect + (
-            slot.rect.width * 0.05, slot.rect.height * 0.05,
-            -slot.rect.width * 0.05, -slot.rect.height * 0.05,
-        )
-        while font_size >= 0.5 and not inner.is_empty:
-            if page.insert_textbox(
-                inner, lines, fontname=fontname, fontsize=font_size, rotate=rotation,
-            ) >= 0:
-                break
-            font_size *= 0.9
-        return
-    baseline = slot.baseline
-    lineheight = None
-    if len(lines) > 1:
-        font = fitz.Font(fontname=fontname)
-        lineheight = font.ascender - font.descender
-        height = lineheight * len(lines)
-        font_size = min(font_size, slot.rect.height / height)
-        baseline = slot.rect.y0 + (slot.rect.height - font_size * height) / 2 + font_size * font.ascender
-    page.insert_text((slot.rect.x0, baseline), lines, fontname=fontname, fontsize=font_size, lineheight=lineheight)
+        if slot.direction == (1.0, 0.0) and len(lines) == 1:
+            return min(slot.font_size, rect.width / width), (rect.x0, slot.baseline), rotation
+        advance, cross = (rect.height, rect.width) if rotation in (90, 270) else (rect.width, rect.height)
+        size = min(slot.font_size, 0.99 * advance / width, cross / height)
+        offset = (cross - size * height) / 2 + size * font.ascender
+        origin = {
+            0: (rect.x0, rect.y0 + offset),
+            90: (rect.x0 + offset, rect.y1),
+            180: (rect.x1, rect.y1 - offset),
+            270: (rect.x1 - offset, rect.y0),
+        }[rotation]
+        return size, origin, rotation
+
+    font_size, origin, rotation = max(map(layout, rects), key=lambda placement: placement[0])
+    if font_size > 0:
+        page.insert_text(origin, lines, fontsize=font_size, lineheight=lineheight, fontname=fontname, rotate=rotation)
 
 
 def redact_pdf(
