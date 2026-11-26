@@ -215,7 +215,7 @@ def test_verify_catches_pdf_metadata_and_link_pii(tmp_path: Path):
 
 
 def test_percent_encoded_phone_in_preserved_links_scrubbed_and_verified(tmp_path: Path):
-    encoded_url = "https://example-fictional.test/doc?phone=136%200000%204444"
+    encoded_url = "https://example-fictional.test/a%2Fb/doc?phone=136%200000%204444"
     src_docx = _make_docx_with_hidden_pii(tmp_path / "enc.docx", title="", subject="", keywords="", http_target=encoded_url, mailto_target="https://example-fictional.test/ok")
     src_pdf = _make_pdf_with_hidden_pii(tmp_path / "enc.pdf", title="", subject="", keywords="", http_uri=encoded_url, mailto_uri="https://example-fictional.test/ok")
 
@@ -230,6 +230,7 @@ def test_percent_encoded_phone_in_preserved_links_scrubbed_and_verified(tmp_path
     with zipfile.ZipFile(out_docx) as z:
         rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
     assert "136%200000%204444" not in rels and "136 0000 4444" not in rels
+    assert "https://example-fictional.test/a%2Fb/doc" in rels
 
     doc = fitz.open(str(out_pdf))
     try:
@@ -237,6 +238,7 @@ def test_percent_encoded_phone_in_preserved_links_scrubbed_and_verified(tmp_path
     finally:
         doc.close()
     assert "136%200000%204444" not in uris and "136 0000 4444" not in uris
+    assert "https://example-fictional.test/a%2Fb/doc" in uris
 
 
 def test_docx_hyperlink_field_instr_verified_and_scrubbed(tmp_path: Path):

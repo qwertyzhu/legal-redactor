@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from ..entities import apply_mapping_to_text
 from ..patterns import detect_structural, structural_placeholder
@@ -50,15 +50,38 @@ def scrub_structural_text(
     return apply_mapping_to_text(text, pairs)
 
 
+def _scrub_encoded_part(
+    part: str, mapping: list[tuple[str, str]], *, escape_slash: bool = False
+) -> str:
+    decoded = unquote(part)
+    if decoded == part:
+        return part
+    scrubbed = scrub_structural_text(
+        apply_mapping_to_text(decoded, mapping), categories=URL_SECRET_CATEGORIES
+    )
+    if scrubbed == decoded:
+        return part
+    return scrubbed.replace("/", "%2F") if escape_slash else scrubbed
+
+
 def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None) -> str:
     """Apply planned mapping and strip structural PII/tokens inside a preserved URL."""
-    redacted = apply_mapping_to_text(target, mapping or [])
+    pairs = mapping or []
+    redacted = apply_mapping_to_text(target, pairs)
     scrubbed = scrub_structural_text(redacted, categories=URL_SECRET_CATEGORIES)
-    decoded = unquote(scrubbed)
-    if decoded != scrubbed:
-        decoded_scrubbed = scrub_structural_text(
-            apply_mapping_to_text(decoded, mapping or []), categories=URL_SECRET_CATEGORIES
-        )
-        if decoded_scrubbed != decoded:
-            return decoded_scrubbed
-    return scrubbed
+    if "%" not in scrubbed:
+        return scrubbed
+    parts = urlsplit(scrubbed)
+    new_path = "/".join(
+        _scrub_encoded_part(seg, pairs, escape_slash=True) for seg in parts.path.split("/")
+    )
+    new_query_items = []
+    for item in parts.query.split("&") if parts.query else []:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            new_query_items.append(f"{k}={_scrub_encoded_part(v, pairs)}")
+        else:
+            new_query_items.append(_scrub_encoded_part(item, pairs))
+    new_query = "&".join(new_query_items)
+    new_fragment = _scrub_encoded_part(parts.fragment, pairs)
+    return urlunsplit((parts.scheme, parts.netloc, new_path, new_query, new_fragment))

@@ -1934,13 +1934,38 @@ async function redactDocx(arrayBuffer, options) {
           relChanged = true;
         } else if (target) {
           let scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
-          try {
-            const decoded = decodeURIComponent(scrubbed);
-            if (decoded !== scrubbed) {
-              const decodedScrubbed = scrubStructuralPii(applyPlanToText(decoded, plan));
-              if (decodedScrubbed !== decoded) scrubbed = decodedScrubbed;
-            }
-          } catch (_) {}
+          if (scrubbed.includes('%')) {
+            const scrubPart = (part, escapeSlash) => {
+              try {
+                const decoded = decodeURIComponent(part);
+                if (decoded === part) return part;
+                const cleaned = scrubStructuralPii(applyPlanToText(decoded, plan));
+                if (cleaned === decoded) return part;
+                return escapeSlash ? cleaned.replace(/\//g, '%2F') : cleaned;
+              } catch (_) {
+                return part;
+              }
+            };
+            const hashIdx = scrubbed.indexOf('#');
+            const beforeHash = hashIdx >= 0 ? scrubbed.slice(0, hashIdx) : scrubbed;
+            const frag = hashIdx >= 0 ? '#' + scrubPart(scrubbed.slice(hashIdx + 1), false) : '';
+            const qIdx = beforeHash.indexOf('?');
+            const base = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
+            const query = qIdx >= 0
+              ? '?' + beforeHash.slice(qIdx + 1).split('&').map(item => {
+                  const eq = item.indexOf('=');
+                  return eq >= 0
+                    ? item.slice(0, eq + 1) + scrubPart(item.slice(eq + 1), false)
+                    : scrubPart(item, false);
+                }).join('&')
+              : '';
+            const schemeIdx = base.indexOf('://');
+            const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : base.indexOf('/');
+            const rebuiltBase = pathStart >= 0
+              ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true)).join('/')
+              : base;
+            scrubbed = rebuiltBase + query + frag;
+          }
           if (scrubbed !== target) {
             el.setAttribute('Target', scrubbed);
             relChanged = true;
