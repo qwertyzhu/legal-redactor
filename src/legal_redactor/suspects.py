@@ -215,15 +215,19 @@ _PERSON_STOPWORDS = frozenset(
     }
 )
 
+_LABELED_PERSON_END = r"(?=(?:[，,。；;、\s\d）)]|男|女|联系|电话|手机|身份证|$))"
 # Colon required. These words also appear in statutes and argument (作者认为、权利人主张).
-# Contract parties also need a field boundary to avoid treating clauses as names.
 _LABELED_PERSON = re.compile(
-    r"(?:(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)\s*[：:]\s*"
-    r"|(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*签[字名])?[^\S\n]*[：:][^\S\n]*)"
-    rf"(?P<name>{_PERSON_NAME_PAT})"
-    r"(?=(?:[，,。；;、\s\d）)\n]|男|女|联系|电话|手机|身份证|$))",
+    r"(?:姓名|著作权人|权利人|制片人|出品人|上传者|经营者|开发者|作者)\s*[：:]\s*"
+    rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}"
+)
+# A bare party label can also introduce a duty (乙方：包工包料).
+_CONTRACT_PARTY_PERSON = re.compile(
+    r"(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*签[字名])?[^\S\n]*[：:][^\S\n]*"
+    rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}",
     re.MULTILINE,
 )
+CONTRACT_PARTY_LABEL = "contract_party_label"
 _LABELED_LATIN = re.compile(
     r"(?:法定代表人|授权代表|姓名|著作权人|权利人|制片人|导演|编剧)"
     r"\s*[：:]\s*"
@@ -481,6 +485,18 @@ def detect_suspects(
             )
         )
 
+    for m in _CONTRACT_PARTY_PERSON.finditer(text):
+        val = m.group("name")
+        if val in skip or not _person_ok(val) or not _has_surname(val):
+            continue
+        if len(val) == 4 and not val.startswith(_COMPOUND_SURNAMES) and not any(
+            dot in val for dot in "·•"
+        ):
+            continue
+        candidates.append(
+            Suspect(val, "person", CONTRACT_PARTY_LABEL, m.start("name"), m.end("name"), "party")
+        )
+
     for m in _LABELED_LATIN.finditer(text):
         val = re.sub(r"\s+", " ", m.group("name").strip())
         if len(val) < 2 or val in skip:
@@ -588,7 +604,7 @@ def detect_suspects(
     for s in candidates:
         if s.text in seen or s.text in skip:
             continue
-        if any(s.text != t and s.text in t for t in seen):
+        if s.reason != CONTRACT_PARTY_LABEL and any(s.text != t and s.text in t for t in seen):
             continue
         if any(not (s.end <= a or s.start >= b) for a, b in occupied):
             continue

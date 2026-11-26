@@ -38,3 +38,15 @@ def test_contract_party_labels_require_field_boundary_and_colon():
     }
     assert suspects["付测远"] == suspects["陆测青"] == ("person", "party")
     assert suspects["澜岫测试有限公司"][0] == "organization"
+
+
+def test_contract_party_labels_distinguish_overlapping_names():
+    text = "甲方：顾南枝\n乙方：顾南"
+    plan = build_plan(text, mode="ai", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == "甲方：某甲\n乙方：某乙"
+
+
+def test_contract_party_labels_do_not_replace_four_character_obligations():
+    text = "甲方：欧阳测青\n乙方：包工包料"
+    plan = build_plan(text, mode="ai", auto_confident=True)
+    assert apply_mapping_to_text(text, plan.mapping()) == "甲方：某甲\n乙方：包工包料"
