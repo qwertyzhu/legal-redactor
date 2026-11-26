@@ -147,6 +147,9 @@ _ADDRESS_BEFORE_CLAUSE = re.compile(
     r"(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))"
 )
 _ADDRESS_REFERENCE = re.compile(r"^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))")
+_ADDRESS_REFERENCE_DETAIL = re.compile(
+    r"(?: *第?[0-9零〇一二两三四五六七八九十百千]+ *(?:号[院楼]?|单元|[栋幢座层室]))+"
+)
 _ADDRESS_COMPONENT = re.compile(
     r"[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)"
     r"|[0-9零〇一二两三四五六七八九十百千] *(?:号|室|层|幢|栋|弄|巷|单元)"
@@ -622,10 +625,17 @@ def detect_suspects(
             val = val[:boundary.end()]
             address_pos = start + boundary.end()
         reference = _ADDRESS_REFERENCE.match(val)
-        if reference or (rescanned and not _ADDRESS_COMPONENT.search(val)):
-            address_pos = start + (reference.end() if reference else 0)
+        if reference:
+            detail = _ADDRESS_REFERENCE_DETAIL.match(val, reference.end())
+            address_pos = start + (detail.end() if detail else reference.end())
+            if not detail:
+                continue
+            val = detail.group().lstrip()
+            start = address_pos - len(val)
+        elif rescanned and not _ADDRESS_COMPONENT.search(val):
+            address_pos = start
             continue
-        if len(val) < 6 or val in skip:
+        if (len(val) < 6 and not reference) or val in skip:
             continue
         # Skip pure court venue phrases
         if len(val) < 12 and "法院" in val and not _RESIDENCE_COMPONENT.search(val):
