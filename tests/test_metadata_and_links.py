@@ -369,6 +369,20 @@ def test_production_extra_url_preserves_external_linked_image_rel(tmp_path: Path
     assert "https://example-fictional.test/evidence/3" not in rels
 
 
+def test_credential_bearing_url_with_escaped_path_does_not_crash(tmp_path: Path):
+    cred_url = "https://user:13900001111@example-fictional.test/a%2Fb/doc"
+    src_docx = _make_docx_with_hidden_pii(
+        tmp_path / "cred.docx", title="", subject="", keywords="", http_target=cred_url
+    )
+    out_docx = tmp_path / "cred.out.docx"
+    res = redact_file(src_docx, mode="production", output_path=out_docx)
+    assert res.residual.ok, res.residual.hits
+    with zipfile.ZipFile(out_docx) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert "13900001111" not in rels
+    assert "/a%2Fb/doc" in rels
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

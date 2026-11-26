@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import unquote
 
 from ..entities import apply_mapping_to_text
 from ..patterns import detect_structural, structural_placeholder
@@ -71,17 +71,27 @@ def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None
     scrubbed = scrub_structural_text(redacted, categories=URL_SECRET_CATEGORIES)
     if "%" not in scrubbed:
         return scrubbed
-    parts = urlsplit(scrubbed)
-    new_path = "/".join(
-        _scrub_encoded_part(seg, pairs, escape_slash=True) for seg in parts.path.split("/")
-    )
-    new_query_items = []
-    for item in parts.query.split("&") if parts.query else []:
-        if "=" in item:
-            k, v = item.split("=", 1)
-            new_query_items.append(f"{k}={_scrub_encoded_part(v, pairs)}")
-        else:
-            new_query_items.append(_scrub_encoded_part(item, pairs))
-    new_query = "&".join(new_query_items)
-    new_fragment = _scrub_encoded_part(parts.fragment, pairs)
-    return urlunsplit((parts.scheme, parts.netloc, new_path, new_query, new_fragment))
+    before_hash, hash_sep, fragment = scrubbed.partition("#")
+    base, q_sep, query = before_hash.partition("?")
+    scheme_idx = base.find("://")
+    path_start = base.find("/", scheme_idx + 3) if scheme_idx >= 0 else base.find("/")
+    if path_start >= 0:
+        prefix, path = base[:path_start], base[path_start:]
+        new_base = prefix + "/".join(
+            _scrub_encoded_part(seg, pairs, escape_slash=True) for seg in path.split("/")
+        )
+    else:
+        new_base = base
+    if q_sep:
+        new_query_items = []
+        for item in query.split("&"):
+            if "=" in item:
+                k, v = item.split("=", 1)
+                new_query_items.append(f"{k}={_scrub_encoded_part(v, pairs)}")
+            else:
+                new_query_items.append(_scrub_encoded_part(item, pairs))
+        new_query = "?" + "&".join(new_query_items)
+    else:
+        new_query = ""
+    new_frag = f"#{_scrub_encoded_part(fragment, pairs)}" if hash_sep else ""
+    return f"{new_base}{new_query}{new_frag}"
