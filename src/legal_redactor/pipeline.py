@@ -17,7 +17,7 @@ from .ledger_store import (
     write_ledger_pointer,
 )
 from .profiles_loader import Profile, resolve_profile
-from .formats import docx_io, pdf_io, text_io
+from .formats import FIELD_BOUNDARY, docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
 from .suspects import Suspect, detect_suspects
 from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
@@ -103,10 +103,26 @@ def _extract(path: Path, *, revisions: str = "accept") -> str:
     raise ValueError(f"unsupported file type: {suffix or '(none)'}")
 
 
+def _extract_hidden(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        return docx_io.extract_metadata_and_links(path)
+    if suffix == ".pdf":
+        return pdf_io.extract_metadata_and_links(path)
+    return ""
+
+
+def extract_for_verify(path: Path, *, revisions: str = "keep-and-redact") -> str:
+    """Extract visible text plus metadata and hyperlink targets for residual verification."""
+    body = _extract(path, revisions=revisions)
+    hidden = _extract_hidden(path)
+    if hidden:
+        return f"{body}{FIELD_BOUNDARY}{hidden}" if body else hidden
+    return body
+
+
 def _scan_page_notice(pages: list[int]) -> str:
     return f"第 {'、'.join(map(str, pages))} 页没有文字层（扫描图片），未脱敏、无法通过文字校验。"
-
-
 def _apply(
     path: Path,
     output: Path,
@@ -139,9 +155,11 @@ def _apply(
             output,
             mapping,
             warnings=warnings,
+            preserve_hyperlinks=preserve_hyperlinks,
             preserve_bookmarks=preserve_bookmarks,
             ocr_images=ocr_images,
             image_categories=image_categories,
+            mode=mode,
         )
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
@@ -358,8 +376,10 @@ def redact_file(
         ),
         mode=mode,
     )
+    hidden_output = _extract_hidden(output_path)
+    verify_text = f"{output_text}{FIELD_BOUNDARY}{hidden_output}" if hidden_output else output_text
     residual = scan_residual(
-        output_text,
+        verify_text,
         mode=mode,
         keep_categories=keep,
         extra_categories=extra,
@@ -690,6 +710,9 @@ def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
         text = docx_io.extract_text(path, revisions="keep-and-redact")
     else:
         text = text_io.extract_text(path)
+    hidden = _extract_hidden(path)
+    if hidden:
+        text = f"{text}{FIELD_BOUNDARY}{hidden}" if text else hidden
 
     report = scan_residual(text, mode=mode, nl=True, **scan_options)
     if scan_pages:

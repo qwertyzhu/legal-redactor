@@ -11,12 +11,13 @@ from __future__ import annotations
 import re
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
-from ..patterns import detect_structural, structural_placeholder
+from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -35,9 +36,24 @@ _CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
 _CHART_NUMERIC_TAGS = tuple(
     f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
 )
-# Invisible, non-whitespace boundary for detectors that match across newlines.
-_CHART_TEXT_SEPARATOR = "\n\u2063\n"
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
+_HYPERLINK_FIELD_RE = re.compile(r'(?i)(\bHYPERLINK\s+")([^"]+)(")')
+
+
+def _scrub_hyperlink_instr(
+    instr: str, mapping: list[tuple[str, str]], *, drop_http: bool
+) -> str:
+    def _repl(match: re.Match[str]) -> str:
+        prefix, target, suffix = match.group(1), match.group(2), match.group(3)
+        if target.lower().startswith(("mailto:", "tel:")):
+            return f"{prefix}#{suffix}"
+        if target.lower().startswith(("http://", "https://")) or "://" in target:
+            if drop_http:
+                return f"{prefix}#{suffix}"
+            return f"{prefix}{scrub_external_url(target, mapping)}{suffix}"
+        return match.group(0)
+
+    return _HYPERLINK_FIELD_RE.sub(_repl, instr)
 
 
 def _local(tag: str) -> str:
@@ -263,12 +279,27 @@ _REVISION_SPLIT_WARN: list[str] = []
 
 
 def _process_xml_bytes(
-    name: str, data: bytes, mapping: list[tuple[str, str]] | None, revisions: str = "accept"
+    name: str,
+    data: bytes,
+    mapping: list[tuple[str, str]] | None,
+    revisions: str = "accept",
+    *,
+    drop_http: bool = True,
 ) -> tuple[bytes, str]:
     root = etree.fromstring(data)
     _flatten_revisions(root, revisions)
     if mapping is not None:
         _scrub_authors_and_rsids(root)
+        for el in root.iter():
+            local = _local(el.tag)
+            if local in ("instrText", "delInstrText") and el.text and "HYPERLINK" in el.text.upper():
+                el.text = _scrub_hyperlink_instr(el.text, mapping, drop_http=drop_http)
+            elif local == "fldSimple":
+                for attr in list(el.attrib):
+                    if _local(attr) == "instr" and "HYPERLINK" in (el.attrib[attr] or "").upper():
+                        el.attrib[attr] = _scrub_hyperlink_instr(
+                            el.attrib[attr], mapping, drop_http=drop_http
+                        )
 
     texts: list[str] = []
     chart = name.startswith("word/charts/")
@@ -295,7 +326,7 @@ def _process_xml_bytes(
         standalone=True,
     )
     if chart and any(text.strip() for text in texts):
-        return out, _CHART_TEXT_SEPARATOR.join(("", *texts, ""))
+        return out, FIELD_BOUNDARY.join(("", *texts, ""))
     return out, "\n".join(texts)
 
 
@@ -311,6 +342,89 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
     return "\n".join(chunks)
 
 
+_CLEAR_CORE_PROPS = frozenset(
+    {"title", "subject", "description", "keywords", "category", "contentStatus"}
+)
+_SKIP_CORE_PROPS = frozenset({"created", "modified", "lastPrinted", "revision"})
+
+
+def extract_metadata_and_links(path: Path) -> str:
+    """Extract DOCX metadata values and external hyperlink targets for residual verification."""
+    chunks: list[str] = []
+    with zipfile.ZipFile(path, "r") as zin:
+        names = zin.namelist()
+        if "docProps/core.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/core.xml"))
+                for el in root.iter():
+                    local = _local(el.tag)
+                    if local in _SKIP_CORE_PROPS:
+                        continue
+                    if el.text and el.text.strip() and el.text.strip() != "作者":
+                        chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        if "docProps/app.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/app.xml"))
+                for el in root.iter():
+                    if _local(el.tag) in {"Company", "Manager", "CompanyDoc", "HyperlinkBase"}:
+                        if el.text and el.text.strip():
+                            chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        if "docProps/custom.xml" in names:
+            try:
+                root = etree.fromstring(zin.read("docProps/custom.xml"))
+                for el in root.iter():
+                    if el.text and el.text.strip():
+                        chunks.append(el.text.strip())
+            except etree.XMLSyntaxError:
+                pass
+        for name in sorted(n for n in names if n.startswith("word/_rels/") and n.endswith(".rels")):
+            try:
+                root = etree.fromstring(zin.read(name))
+                for el in root.iter():
+                    if _local(el.tag) != "Relationship":
+                        continue
+                    target = (el.get("Target") or "").strip()
+                    if not target or target == "#":
+                        continue
+                    if el.get("TargetMode") == "External" or target.lower().startswith(
+                        ("mailto:", "tel:", "http://", "https://")
+                    ):
+                        chunks.append(target)
+                        decoded = unquote(target)
+                        if decoded != target:
+                            chunks.append(decoded)
+            except etree.XMLSyntaxError:
+                pass
+        for name in sorted(n for n in names if _TEXT_PART_RE.match(n)):
+            try:
+                root = etree.fromstring(zin.read(name))
+                for el in root.iter():
+                    local = _local(el.tag)
+                    instr_val = ""
+                    if local in ("instrText", "delInstrText") and el.text:
+                        instr_val = el.text
+                    elif local == "fldSimple":
+                        for attr, val in el.attrib.items():
+                            if _local(attr) == "instr" and val:
+                                instr_val = val
+                                break
+                    if instr_val and "HYPERLINK" in instr_val.upper():
+                        for m in _HYPERLINK_FIELD_RE.finditer(instr_val):
+                            target = m.group(2).strip()
+                            if target and target != "#":
+                                chunks.append(target)
+                                decoded = unquote(target)
+                                if decoded != target:
+                                    chunks.append(decoded)
+            except etree.XMLSyntaxError:
+                pass
+    return FIELD_BOUNDARY.join(chunks)
+
+
 def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
     try:
         root = etree.fromstring(data)
@@ -321,10 +435,15 @@ def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
         if local in {"creator", "lastModifiedBy"}:
             el.text = "作者"
             continue
+        if local in _CLEAR_CORE_PROPS:
+            el.text = ""
+            continue
+        if local in _SKIP_CORE_PROPS:
+            continue
         if el.text and isinstance(el.text, str) and el.text.strip():
-            el.text = apply_mapping_to_text(el.text, mapping)
+            el.text = scrub_structural_text(apply_mapping_to_text(el.text, mapping))
         if el.tail and isinstance(el.tail, str) and el.tail.strip():
-            el.tail = apply_mapping_to_text(el.tail, mapping)
+            el.tail = scrub_structural_text(apply_mapping_to_text(el.tail, mapping))
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -380,24 +499,17 @@ def _scrub_rels(
         if _local(el.tag) != "Relationship":
             continue
         target = el.get("Target") or ""
-        if target.lower().startswith("mailto:"):
+        if target.lower().startswith(("mailto:", "tel:")):
             el.set("Target", "#")
             changed = True
         elif el.get("TargetMode") == "External":
-            if drop_http:
+            rel_type = (el.get("Type") or "").lower()
+            is_http = target.lower().startswith(("http://", "https://"))
+            if drop_http and (is_http or rel_type.endswith("/hyperlink")):
                 el.set("Target", "#")
                 changed = True
             elif target:
-                redacted_target = apply_mapping_to_text(target, mapping or [])
-                # Also strip structural URL credentials/tokens/phones hidden only in rels Target
-                url_pairs = [
-                    (h.text, structural_placeholder(h.category, h.text, 0))
-                    for h in detect_structural(redacted_target)
-                    if h.auto_replace and h.category in {"url_secret", "mobile", "id_card", "email"}
-                ]
-                if url_pairs:
-                    url_pairs.sort(key=lambda p: len(p[0]), reverse=True)
-                    redacted_target = apply_mapping_to_text(redacted_target, url_pairs)
+                redacted_target = scrub_external_url(target, mapping)
                 if redacted_target != target:
                     el.set("Target", redacted_target)
                     changed = True
@@ -437,12 +549,16 @@ def redact_docx(
             warn.append(
                 "DOCX-FIELD: 域代码未替换（交叉引用、文件名域）。页码域忽略。导出前看一眼域结果里有没有人名。"
             )
+        strip_urls = bool(image_categories and "url" in image_categories)
+        drop_http = (not preserve_hyperlinks) and (
+            mode.lower().strip() != "production" or strip_urls
+        )
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zout:
             for item in zin.infolist():
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(name, data, mapping, revisions)
+                    data, text = _process_xml_bytes(name, data, mapping, revisions, drop_http=drop_http)
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":
@@ -452,9 +568,7 @@ def redact_docx(
                 elif name == "docProps/custom.xml":
                     data = _clean_custom_props(data)
                 elif name.startswith("word/_rels/") and name.endswith(".rels"):
-                    if not preserve_hyperlinks:
-                        drop_http = mode.lower().strip() != "production"
-                        data = _scrub_rels(data, mapping, drop_http=drop_http)
+                    data = _scrub_rels(data, mapping, drop_http=drop_http)
                 elif name in ("word/settings.xml", "word/people.xml"):
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)
