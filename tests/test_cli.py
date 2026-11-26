@@ -82,6 +82,34 @@ def test_cli_help_lists_redact_scan_verify() -> None:
     assert "甲方" in scan_help.stdout and "乙方" in scan_help.stdout
 
 
+@pytest.mark.parametrize(
+    ("encoding", "note"),
+    [("gbk", ""), ("gb18030", "𠮷"), ("utf-8", "𠮷")],
+    ids=["gbk", "gb18030", "utf8"],
+)
+def test_cli_redacts_encoded_text(tmp_path: Path, encoding: str, note: str) -> None:
+    src = tmp_path / "input.txt"
+    text = f"联系电话：{MOBILE}\r\n卷宗备注：保留原文{note}\n结束。\r"
+    src.write_bytes(text.encode(encoding))
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_bytes().decode("utf-8") == text.replace(MOBILE, "[手机号]")
+
+
+def test_cli_rejects_undecodable_text(tmp_path: Path) -> None:
+    src = tmp_path / "input.txt"
+    src.write_bytes(b"\x81")
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 1, proc.stderr + proc.stdout
+    assert not out.exists()
+
+
 def _write_pdf_with_scan(path: Path, *, text_cover: bool) -> int:
     with fitz.open() as source, fitz.open() as pdf:
         page = source.new_page()
