@@ -305,7 +305,7 @@ def test_verify_does_not_bridge_digits_across_body_and_metadata(tmp_path: Path):
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((72, 72), "Item 138", fontsize=11)
-    doc.set_metadata({"title": "00001111"})
+    doc.set_metadata({"title": "00001111", "subject": "010", "keywords": "12345678"})
     doc.save(src)
     doc.close()
 
