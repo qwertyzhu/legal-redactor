@@ -486,7 +486,9 @@ def _scrub_rels(
             el.set("Target", "#")
             changed = True
         elif el.get("TargetMode") == "External":
-            if drop_http:
+            rel_type = (el.get("Type") or "").lower()
+            is_http = target.lower().startswith(("http://", "https://"))
+            if drop_http and (is_http or rel_type.endswith("/hyperlink")):
                 el.set("Target", "#")
                 changed = True
             elif target:

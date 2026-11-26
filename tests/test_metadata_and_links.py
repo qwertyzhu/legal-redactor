@@ -339,6 +339,34 @@ def test_production_extra_url_category_strips_http_links(tmp_path: Path):
     assert not any(clean_url in u for u in uris)
 
 
+def test_production_extra_url_preserves_external_linked_image_rel(tmp_path: Path):
+    base = tmp_path / "img_base.docx"
+    docx_io.create_sample_docx(base, "正文不含号码")
+    src = tmp_path / "linked_img.docx"
+    with zipfile.ZipFile(base) as zin, zipfile.ZipFile(src, "w") as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/_rels/document.xml.rels":
+                rel_xml = (
+                    b'<Relationship Id="rIdImg1" '
+                    b'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+                    b'Target="file:///local/exhibit.png" TargetMode="External"/>'
+                    b'<Relationship Id="rIdLink1" '
+                    b'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+                    b'Target="https://example-fictional.test/evidence/3" TargetMode="External"/>'
+                )
+                data = data.replace(b"</Relationships>", rel_xml + b"</Relationships>")
+            zout.writestr(item, data)
+
+    out = tmp_path / "linked_img.redacted.docx"
+    res = redact_file(src, mode="production", extra_categories={"url"}, output_path=out)
+    assert res.residual.ok, res.residual.hits
+    with zipfile.ZipFile(out) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert "file:///local/exhibit.png" in rels
+    assert "https://example-fictional.test/evidence/3" not in rels
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")
