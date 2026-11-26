@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -15,7 +16,14 @@ _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "sub
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
-_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]]]
+_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[tuple[float, float]]]
+
+
+@dataclass
+class _NameRect:
+    rect: fitz.Rect
+    baseline: float
+    font_size: float
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -153,19 +161,19 @@ def _scrub_pdf_links(
         warn.append(f"pdf: {scrubbed} external link target(s) scrubbed")
 
 
-def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, "fitz.Rect"]]]]:
-    """Per-line non-space characters with their rects, in reading order."""
-    lines: list[tuple[int, list[tuple[str, fitz.Rect]]]] = []
+def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]]]]:
+    """Per-line non-space characters with their layout, in reading order."""
+    lines: list[tuple[int, list[tuple[str, _NameRect]]]] = []
     raw = page.get_text("rawdict")
     for block_id, block in enumerate(raw.get("blocks", [])):
         for line in block.get("lines", []):
-            chars: list[tuple[str, fitz.Rect]] = []
+            chars: list[tuple[str, _NameRect]] = []
             for span in line.get("spans", []):
                 for ch in span.get("chars", []):
                     char = ch.get("c", "")
                     if not char or char.isspace():
                         continue
-                    chars.append((char, fitz.Rect(ch["bbox"])))
+                    chars.append((char, _NameRect(fitz.Rect(ch["bbox"]), ch["origin"][1], span["size"])))
             if chars:
                 lines.append((block_id, chars))
     return lines
@@ -182,13 +190,15 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     rects: list[fitz.Rect] = []
     rows: list[int] = []
     line_info: list[tuple[float, float, int]] = []
+    text_style: list[tuple[float, float]] = []
     for row, (block_id, line) in enumerate(_line_chars(page)):
-        line_info.append((line[0][1].x0, line[-1][1].x1, block_id))
-        for char, rect in line:
+        line_info.append((line[0][1].rect.x0, line[-1][1].rect.x1, block_id))
+        for char, glyph in line:
             parts.append(char)
-            rects.append(rect)
+            rects.append(glyph.rect)
             rows.append(row)
-    return "".join(parts), rects, rows, line_info
+            text_style.append((glyph.baseline, glyph.font_size))
+    return "".join(parts), rects, rows, line_info, text_style
 
 
 def _short_name_is_local(
@@ -226,32 +236,33 @@ def _wrapped_rects(
     original: str,
     *,
     allow_single_line: bool = False,
-) -> list[list["fitz.Rect"]]:
+) -> list[list[_NameRect]]:
     """Rects for occurrences of `original` split by whitespace or line breaks.
 
     Each match has one rect per line.
     """
-    text, rects, rows, line_info = index
+    text, rects, rows, line_info, text_style = index
     target = "".join(original.split())
     short_name = is_short_cjk_name(target)
     if len(target) < 4 and not short_name:
         return []
-    out: list[list[fitz.Rect]] = []
+    out: list[list[_NameRect]] = []
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
         if not short_name or _short_name_is_local(rects, rows, line_info, start, start + len(target)):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
-                match: list[fitz.Rect] = []
+                match: list[_NameRect] = []
                 for row in unique_rows:
-                    line_rects = [
-                        rects[i] for i in range(start, start + len(target)) if rows[i] == row
+                    line_indices = [
+                        i for i in range(start, start + len(target)) if rows[i] == row
                     ]
-                    union = fitz.Rect(line_rects[0])
-                    for rect in line_rects[1:]:
-                        union |= rect
-                    match.append(union)
+                    first = line_indices[0]
+                    union = fitz.Rect(rects[first])
+                    for i in line_indices[1:]:
+                        union |= rects[i]
+                    match.append(_NameRect(union, *text_style[first]))
                 out.append(match)
         start = text.find(target, start + 1)
     return out
@@ -281,23 +292,26 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
-def _paint_wrapped_alias(page: "fitz.Page", rects: list["fitz.Rect"], alias: str) -> None:
+def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
     lines = alias.splitlines()
     fontname = _redaction_fontname(alias)
     width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
     if not width:
         return
-    font = fitz.Font(fontname=fontname)
-    lineheight = font.ascender - font.descender
-    height = lineheight * len(lines)
+    def size(slot: _NameRect) -> float:
+        return min(slot.font_size, slot.rect.width / width)
 
-    def size(rect: fitz.Rect) -> float:
-        return min(9, rect.width / width, rect.height / height)
-
-    rect = max(rects, key=size)
-    fontsize = size(rect)
-    baseline = rect.y0 + (rect.height - fontsize * height) / 2 + fontsize * font.ascender
-    page.insert_text((rect.x0, baseline), lines, fontname=fontname, fontsize=fontsize, lineheight=lineheight)
+    slot = max(rects, key=size)
+    font_size = size(slot)
+    baseline = slot.baseline
+    lineheight = None
+    if len(lines) > 1:
+        font = fitz.Font(fontname=fontname)
+        lineheight = font.ascender - font.descender
+        height = lineheight * len(lines)
+        font_size = min(font_size, slot.rect.height / height)
+        baseline = slot.rect.y0 + (slot.rect.height - font_size * height) / 2 + font_size * font.ascender
+    page.insert_text((slot.rect.x0, baseline), lines, fontname=fontname, fontsize=font_size, lineheight=lineheight)
 
 
 def redact_pdf(
@@ -327,7 +341,7 @@ def redact_pdf(
         for page in doc:
             found_any = False
             claimed_rects: list[fitz.Rect] = []
-            wrapped_aliases: list[tuple[list[fitz.Rect], str]] = []
+            split_aliases: list[tuple[list[_NameRect], str]] = []
             index: _CharIndex | None = None
             for original, replacement in ordered_mapping:
                 if not original:
@@ -350,13 +364,14 @@ def redact_pdf(
                 if index is None:
                     index = _page_char_index(page)
                 for match in _wrapped_rects(index, original, allow_single_line=not rects):
-                    paint_after = len(match) > 1 and is_short_cjk_name(original)
-                    applied = []
-                    for i, rect in enumerate(match):
+                    paint_after = is_short_cjk_name(original)
+                    applied: list[_NameRect] = []
+                    for i, slot in enumerate(match):
+                        rect = slot.rect
                         if _overlaps_claimed(rect, claimed_rects):
                             continue
                         claimed_rects.append(rect)
-                        applied.append(rect)
+                        applied.append(slot)
                         page.add_redact_annot(
                             rect,
                             text=replacement if i == 0 and not paint_after else "",
@@ -367,11 +382,11 @@ def redact_pdf(
                         )
                         found_any = True
                     if paint_after and applied:
-                        wrapped_aliases.append((applied, replacement))
+                        split_aliases.append((applied, replacement))
             if found_any:
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-                for rects, alias in wrapped_aliases:
-                    _paint_wrapped_alias(page, rects, alias)
+                for slots, alias in split_aliases:
+                    _paint_split_alias(page, slots, alias)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 

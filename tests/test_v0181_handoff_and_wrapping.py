@@ -63,6 +63,26 @@ def test_pdf_wrapped_and_spaced_short_names_are_redacted(short_names_pdf, tmp_pa
     assert "status: PASS" in capsys.readouterr().out
 
 
+def test_pdf_split_name_aliases_use_original_position_and_size(short_names_pdf, tmp_path):
+    src, entities = short_names_pdf
+    out = tmp_path / "positioned.ai.pdf"
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        aliases = [
+            (*char["origin"], span["size"])
+            for block in doc[0].get_text("rawdict")["blocks"]
+            for line in block["lines"]
+            for span in line["spans"]
+            for char in span["chars"]
+            if char["c"] == "某" and char["origin"][1] < 130
+        ]
+    assert sorted(aliases, key=lambda item: item[1]) == [
+        pytest.approx((46, 40, 11)),
+        pytest.approx((79, 85, 11)),
+        pytest.approx((79, 115, 11)),
+    ]
+
+
 @pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])
 def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf, tmp_path, capsys, line):
     _, entities = short_names_pdf
