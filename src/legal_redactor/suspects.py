@@ -228,6 +228,7 @@ _CONTRACT_PARTY_PERSON = re.compile(
     rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}",
     re.MULTILINE,
 )
+_SIGNING_INSTRUCTION = re.compile(r"(?:盖章|用印|签[字名章])(?:生效|确认|有效|为准)|加盖[公印]章")
 CONTRACT_PARTY_LABEL = "contract_party_label"
 AMBIGUOUS_CONTRACT_PARTY = "ambiguous_contract_party"
 CONTRACT_PARTY_REASONS = frozenset({CONTRACT_PARTY_LABEL, AMBIGUOUS_CONTRACT_PARTY})
@@ -376,7 +377,10 @@ def _contract_party_candidates(text: str, skip: set[str]) -> list[Suspect]:
     end = 0
     for m in _CONTRACT_PARTY_PERSON.finditer(text):
         val = m.group("name")
-        if val in skip or not _person_ok(val) or not _has_surname(val):
+        if (
+            val in skip or not _person_ok(val) or not _has_surname(val)
+            or _SIGNING_INSTRUCTION.fullmatch(val)
+        ):
             continue
         if (
             not m.group("signature")

@@ -56,3 +56,8 @@ def test_contract_party_labels_do_not_replace_four_character_obligations():
     text = "甲方：欧阳测青\n乙方：包工包料"
     plan = build_plan(text, mode="ai", auto_confident=True)
     assert apply_mapping_to_text(text, plan.mapping()) == "甲方：某甲\n乙方：包工包料"
+
+
+def test_signature_fields_preserve_signing_and_stamp_instructions():
+    text = "甲方签字：盖章生效\n乙方签名：盖章确认\n丙方签字：加盖公章"
+    assert not detect_suspects(text)
