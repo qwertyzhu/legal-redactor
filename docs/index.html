@@ -2308,18 +2308,20 @@ function startRestore() {
     originalsByToken.get(replacement).add(original);
   }
 
-  const tokens = [...originalsByToken.keys()]
-    .sort((a, b) => b.length - a.length)
-    .map(token => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const reversePlan = Array.from(originalsByToken, ([token, originals]) => ({
+    original: token,
+    replacement: originals.size === 1 ? originals.values().next().value : token,
+  })).sort((a, b) => b.original.length - a.original.length);
+
   const ambiguous = new Set();
-  document.getElementById('restoreOutput').value = tokens.length
-    ? text.replace(new RegExp(tokens.join('|'), 'g'), token => {
-        const originals = originalsByToken.get(token);
-        if (originals.size === 1) return originals.values().next().value;
-        ambiguous.add(token);
-        return token;
-      })
-    : text;
+  let out = '';
+  let last = 0;
+  for (const { start, end, original, replacement } of findMappingSpans(text, reversePlan)) {
+    if (original === replacement) ambiguous.add(original);
+    out += text.slice(last, start) + replacement;
+    last = end;
+  }
+  document.getElementById('restoreOutput').value = out + text.slice(last);
 
   const warnings = document.getElementById('restoreWarnings');
   warnings.textContent = ambiguous.size

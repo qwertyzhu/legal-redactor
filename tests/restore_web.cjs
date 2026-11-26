@@ -73,3 +73,18 @@ test('static restore accepts numeric values from a custom ledger', () => {
   assert.equal(document.getElementById('restoreOutput').value, '编号 20240001。');
   assert.equal(document.getElementById('restoreWarnings').classList.contains('hidden'), true);
 });
+
+test('static restore gives longer overlapping tokens precedence', () => {
+  const { context, document } = loadRedactor();
+  document.getElementById('restoreLedgerInput').value = JSON.stringify({ entities: [
+    { original: '短替身原文', replacement: 'AB' },
+    { original: '长替身原文', replacement: 'BCD' },
+    { original: '另一短替身原文', replacement: 'AX' },
+    { original: '第一个原文', replacement: 'XYZ' },
+    { original: '第二个原文', replacement: 'XYZ' },
+  ] });
+  document.getElementById('restoreSourceInput').value = 'ABCD / AXYZ / AX';
+  context.startRestore();
+  assert.equal(document.getElementById('restoreOutput').value, 'A长替身原文 / AXYZ / 另一短替身原文');
+  assert.match(document.getElementById('restoreWarnings').textContent, /XYZ.*未还原/);
+});
