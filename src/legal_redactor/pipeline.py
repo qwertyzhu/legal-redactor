@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -605,11 +606,8 @@ def redact_tree(
         pre_entities_path = pre.entities_path
         effective_entities = pre.entities_path
 
-    results: list[RedactResult] = []
-    skipped: list[tuple[Path, str]] = []
+    batch_paths: list[tuple[Path, Path]] = []
     used_names: set[str] = set()
-    used_sidecar_stems: set[str] = set()
-
     for src in iter_batch_inputs(input_dir, recursive=recursive):
         name = f"{src.stem}.redacted-{mode}{src.suffix}"
         if name in used_names:
@@ -618,14 +616,18 @@ def redact_tree(
             safe = "__".join(rel.with_suffix("").parts)
             name = f"{safe}.redacted-{mode}{src.suffix}"
         used_names.add(name)
-        out = output_dir / name
-        sidecar_stem = out.stem
-        if sidecar_stem in used_sidecar_stems:
-            sidecar_stem = out.name
-            index = 2
-            while sidecar_stem in used_sidecar_stems:
-                sidecar_stem = f"{out.name}.{index}"
-                index += 1
+        batch_paths.append((src, output_dir / name))
+
+    stem_counts = Counter(out.stem for _, out in batch_paths)
+    results: list[RedactResult] = []
+    skipped: list[tuple[Path, str]] = []
+    used_sidecar_stems: set[str] = set()
+    for src, out in batch_paths:
+        sidecar_stem = out.name if stem_counts[out.stem] > 1 else out.stem
+        index = 2
+        while sidecar_stem in used_sidecar_stems:
+            sidecar_stem = f"{out.name}.{index}"
+            index += 1
         used_sidecar_stems.add(sidecar_stem)
         try:
             result = redact_file(

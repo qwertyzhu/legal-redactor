@@ -73,13 +73,47 @@ def test_batch_same_stem_keeps_each_documents_ledger_and_audit(tmp_path: Path):
     for suffix in ("ledger.json", "audit.json", "audit.md"):
         assert len(list(private.glob(f"*.{suffix}"))) == 3, suffix
     for result in batch.results:
-        for path in (result.ledger_path, result.audit_json_path):
-            assert path is not None and path.parent == private
+        for path, suffix in (
+            (result.ledger_path, "ledger.json"),
+            (result.audit_json_path, "audit.json"),
+        ):
+            assert path == private / f"{result.output_path.name}.{suffix}"
             payload = json.loads(path.read_text(encoding="utf-8"))
             assert payload["input_path"] == str(result.input_path)
             assert payload["output_path"] == str(result.output_path)
-        assert result.audit_md_path is not None
+        assert result.audit_md_path == private / f"{result.output_path.name}.audit.md"
         assert f"`{result.input_path}`" in result.audit_md_path.read_text(encoding="utf-8")
+
+
+def test_batch_rerun_does_not_reassign_sidecars_when_adding_same_stem(tmp_path: Path):
+    src = tmp_path / "case"
+    out = tmp_path / "out"
+    src.mkdir()
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((72, 72), "Synthetic PDF contract")
+        pdf.save(src / "contract.pdf")
+
+    first = redact_tree(src, mode="production", output_dir=out)
+    assert first.ok and not first.skipped
+    (pdf_result,) = first.results
+    legacy_stem = src / ".redactor" / "contract.redacted-production"
+    assert pdf_result.ledger_path == Path(f"{legacy_stem}.ledger.json")
+    assert pdf_result.audit_json_path == Path(f"{legacy_stem}.audit.json")
+    assert pdf_result.audit_md_path == Path(f"{legacy_stem}.audit.md")
+    original_sidecars = {
+        path: path.read_bytes()
+        for path in (pdf_result.ledger_path, pdf_result.audit_json_path, pdf_result.audit_md_path)
+    }
+
+    docx = Document()
+    docx.add_paragraph("Synthetic DOCX contract")
+    docx.save(src / "contract.docx")
+    second = redact_tree(src, mode="production", output_dir=out)
+
+    assert second.ok and not second.skipped
+    assert len(second.results) == 2
+    for path, original in original_sidecars.items():
+        assert path.read_bytes() == original, path.name
 
 
 def test_cli_directory_does_not_merge_unrelated_files(tmp_path: Path, monkeypatch):
