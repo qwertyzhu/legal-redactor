@@ -65,6 +65,7 @@ class RedactionPlan:
 
 
 from .suspects import (
+    AMBIGUOUS_CONTRACT_PARTY,
     COMPOUND_SURNAMES as _COMPOUND_SURNAMES,
     SURNAMES as _SURNAMES,
     has_surname as _has_surname,
@@ -417,6 +418,8 @@ def build_plan(
                 continue
             if suspect.reason == "org_suffix_unanchored":
                 # No left boundary found: likely clause text, not a name. Review only.
+                continue
+            if suspect.reason == AMBIGUOUS_CONTRACT_PARTY:
                 continue
             if mode == "production":
                 third = (

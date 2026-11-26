@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__
 from .formats import docx_io, pdf_io, text_io
 from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_tree
+from .suspects import AMBIGUOUS_CONTRACT_PARTY
 from .verify import scan_residual
 
 
@@ -487,6 +488,16 @@ def _print_handoff(
     if not pending:
         print("handoff:    无待补实体。到此停止，不要打开原文、脱敏稿或 ledger。")
         return
+    ambiguous = [s for s in pending if s.reason == AMBIGUOUS_CONTRACT_PARTY]
+    if ambiguous:
+        print("handoff:    以下二字姓名也出现在合同方字段之外，须人工核对，不要直接补入 entities.json。")
+        for item in ambiguous[:8]:
+            print(f"handoff:    {item.category}\t{item.text}")
+        if len(ambiguous) > 8:
+            print(f"handoff:    另有 {len(ambiguous) - 8} 条同类疑似姓名，见 suspects 文件。")
+        pending = [s for s in pending if s.reason != AMBIGUOUS_CONTRACT_PARTY]
+        if not pending:
+            return
     print("handoff:    只把下面几条补进 entities.json，然后重跑同一条命令。不要打开原文。")
     shown = pending[:8]
     for item in shown:

@@ -228,6 +228,8 @@ _CONTRACT_PARTY_PERSON = re.compile(
     re.MULTILINE,
 )
 CONTRACT_PARTY_LABEL = "contract_party_label"
+AMBIGUOUS_CONTRACT_PARTY = "ambiguous_contract_party"
+CONTRACT_PARTY_REASONS = frozenset({CONTRACT_PARTY_LABEL, AMBIGUOUS_CONTRACT_PARTY})
 _LABELED_LATIN = re.compile(
     r"(?:法定代表人|授权代表|姓名|著作权人|权利人|制片人|导演|编剧)"
     r"\s*[：:]\s*"
@@ -367,6 +369,34 @@ def _person_ok(val: str) -> bool:
     return not val.endswith(("公司", "法院", "银行", "事务所"))
 
 
+def _contract_party_candidates(text: str, skip: set[str]) -> list[Suspect]:
+    matches = []
+    outside_names = []
+    end = 0
+    for m in _CONTRACT_PARTY_PERSON.finditer(text):
+        val = m.group("name")
+        if val in skip or not _person_ok(val) or not _has_surname(val):
+            continue
+        if len(val) == 4 and not val.startswith(_COMPOUND_SURNAMES) and not any(
+            dot in val for dot in "·•"
+        ):
+            continue
+        matches.append(m)
+        outside_names.append(text[end : m.start("name")])
+        end = m.end("name")
+    if not matches:
+        return []
+    outside_names.append(text[end:])
+    unlabeled = "\n".join(outside_names)
+    candidates = []
+    for m in matches:
+        val = m.group("name")
+        # Literal replacement would also rewrite a word like 方可 in contract clauses.
+        reason = AMBIGUOUS_CONTRACT_PARTY if len(val) == 2 and val in unlabeled else CONTRACT_PARTY_LABEL
+        candidates.append(Suspect(val, "person", reason, m.start("name"), m.end("name"), "party"))
+    return candidates
+
+
 def detect_suspects(
     text: str,
     *,
@@ -485,17 +515,7 @@ def detect_suspects(
             )
         )
 
-    for m in _CONTRACT_PARTY_PERSON.finditer(text):
-        val = m.group("name")
-        if val in skip or not _person_ok(val) or not _has_surname(val):
-            continue
-        if len(val) == 4 and not val.startswith(_COMPOUND_SURNAMES) and not any(
-            dot in val for dot in "·•"
-        ):
-            continue
-        candidates.append(
-            Suspect(val, "person", CONTRACT_PARTY_LABEL, m.start("name"), m.end("name"), "party")
-        )
+    candidates.extend(_contract_party_candidates(text, skip))
 
     for m in _LABELED_LATIN.finditer(text):
         val = re.sub(r"\s+", " ", m.group("name").strip())
@@ -604,7 +624,9 @@ def detect_suspects(
     for s in candidates:
         if s.text in seen or s.text in skip:
             continue
-        if s.reason != CONTRACT_PARTY_LABEL and any(s.text != t and s.text in t for t in seen):
+        if s.reason not in CONTRACT_PARTY_REASONS and any(
+            s.text != t and s.text in t for t in seen
+        ):
             continue
         if any(not (s.end <= a or s.start >= b) for a, b in occupied):
             continue
