@@ -10,7 +10,7 @@ import pymupdf as fitz
 from ..entities import apply_mapping_to_text
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
-_CharIndex = tuple[str, list[fitz.Rect], list[int], list[float]]
+_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, int]]]
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -91,11 +91,11 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
 
 
-def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
+def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, "fitz.Rect"]]]]:
     """Per-line non-space characters with their rects, in reading order."""
-    lines: list[list[tuple[str, fitz.Rect]]] = []
+    lines: list[tuple[int, list[tuple[str, fitz.Rect]]]] = []
     raw = page.get_text("rawdict")
-    for block in raw.get("blocks", []):
+    for block_id, block in enumerate(raw.get("blocks", [])):
         for line in block.get("lines", []):
             chars: list[tuple[str, fitz.Rect]] = []
             for span in line.get("spans", []):
@@ -105,7 +105,7 @@ def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
                         continue
                     chars.append((char, fitz.Rect(ch["bbox"])))
             if chars:
-                lines.append(chars)
+                lines.append((block_id, chars))
     return lines
 
 
@@ -119,18 +119,22 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     parts: list[str] = []
     rects: list[fitz.Rect] = []
     rows: list[int] = []
-    lefts: list[float] = []
-    for row, line in enumerate(_line_chars(page)):
-        lefts.append(line[0][1].x0)
+    line_info: list[tuple[float, int]] = []
+    for row, (block_id, line) in enumerate(_line_chars(page)):
+        line_info.append((line[0][1].x0, block_id))
         for char, rect in line:
             parts.append(char)
             rects.append(rect)
             rows.append(row)
-    return "".join(parts), rects, rows, lefts
+    return "".join(parts), rects, rows, line_info
 
 
 def _short_name_is_local(
-    rects: list["fitz.Rect"], rows: list[int], lefts: list[float], start: int, end: int
+    rects: list["fitz.Rect"],
+    rows: list[int],
+    line_info: list[tuple[float, int]],
+    start: int,
+    end: int,
 ) -> bool:
     for i in range(start + 1, end):
         prev, curr = rects[i - 1], rects[i]
@@ -140,11 +144,16 @@ def _short_name_is_local(
                 return False
         else:
             height = max(prev.height, curr.height)
-            indent = abs(curr.x0 - lefts[rows[i - 1]])
+            prev_left, prev_block = line_info[rows[i - 1]]
+            _, curr_block = line_info[rows[i]]
+            indent = abs(curr.x0 - prev_left)
             gap = curr.y0 - prev.y0
             if rows[i] != rows[i - 1] + 1 or not 0 < gap <= 2 * height:
                 return False
-            if indent > width and not (
+            if indent <= width:
+                if prev_block != curr_block:
+                    return False
+            elif not (
                 indent <= 2 * width and gap <= 1.5 * height and curr.x0 <= prev.x0
             ):
                 return False
@@ -162,7 +171,7 @@ def _wrapped_rects(
     Returns ``[(rect, carries_replacement_text), ...]`` so the caller paints the
     alias once, on the first line of the wrapped run.
     """
-    text, rects, rows, lefts = index
+    text, rects, rows, line_info = index
     target = "".join(original.split())
     short_name = is_short_cjk_name(target)
     if len(target) < 4 and not short_name:
@@ -171,7 +180,7 @@ def _wrapped_rects(
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
-        if not short_name or _short_name_is_local(rects, rows, lefts, start, start + len(target)):
+        if not short_name or _short_name_is_local(rects, rows, line_info, start, start + len(target)):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
                 for n, row in enumerate(unique_rows):

@@ -99,6 +99,22 @@ def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, cap
     assert "于当天到场" in text
 
 
+def test_pdf_short_names_do_not_join_aligned_text_blocks(short_names_pdf, tmp_path):
+    _, entities = short_names_pdf
+    src = tmp_path / "aligned.pdf"
+    out = tmp_path / "aligned.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "附录李", fontname="china-s")
+        page.insert_text((24, 64), "明细另附", fontname="china-s")
+        assert len(page.get_text("blocks")) == 2
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 0
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        assert doc[0].get_text() == "附录李\n明细另附\n"
+
+
 def _suspect(text: str, category: str = "organization") -> Suspect:
     return Suspect(text=text, category=category, reason="org_suffix", start=0, end=len(text))
 
