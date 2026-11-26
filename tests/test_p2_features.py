@@ -131,6 +131,33 @@ def test_docx_image_pii_listed(tmp_path: Path):
     assert any("IMAGE-PII word/media/image1.png" in w for w in res.warnings), res.warnings
 
 
+def test_redact_fails_for_docx_image_pii(docx_with_image_pii, capsys):
+    src = docx_with_image_pii
+    out = src.with_name("with_img.ai.docx")
+
+    rc = main(["redact", str(src), "--mode", "ai", "-o", str(out)])
+    stdout = capsys.readouterr().out
+
+    assert rc == 2, stdout
+    assert "status:      FAIL" in stdout
+    assert "handoff:    status=FAIL 不得交付" in stdout
+    assert any(line.startswith("handoff:") and "word/media/image1.png" in line for line in stdout.splitlines())
+
+
+def test_verify_strict_fails_for_docx_image_pii(docx_with_image_pii, capsys):
+    src = docx_with_image_pii
+    out = src.with_name("with_img.ai.docx")
+    main(["redact", str(src), "--mode", "ai", "-o", str(out)])
+    capsys.readouterr()
+
+    rc = main(["verify", str(out), "--mode", "ai", "--strict"])
+    stdout = capsys.readouterr().out
+
+    assert rc == 2, stdout
+    assert "status: FAIL" in stdout
+    assert "word/media/image1.png" in stdout
+
+
 def test_docx_image_off(tmp_path: Path):
     src = tmp_path / "d2.docx"
     _docx_with_image(src, _phone_png())
