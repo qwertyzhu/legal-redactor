@@ -383,6 +383,21 @@ def test_credential_bearing_url_with_escaped_path_does_not_crash(tmp_path: Path)
     assert "/a%2Fb/doc" in rels
 
 
+def test_percent_encoded_query_name_token_scrubbed(tmp_path: Path):
+    encoded_token_url = "https://example-fictional.test/a%2Fb/doc?%74oken=tok999999&keep=x%2Fy"
+    src_docx = _make_docx_with_hidden_pii(
+        tmp_path / "enctok.docx", title="", subject="", keywords="", http_target=encoded_token_url
+    )
+    out_docx = tmp_path / "enctok.out.docx"
+    res = redact_file(src_docx, mode="production", output_path=out_docx)
+    assert res.residual.ok, res.residual.hits
+    with zipfile.ZipFile(out_docx) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert "tok999999" not in rels
+    assert "/a%2Fb/doc" in rels
+    assert "keep=x%2Fy" in rels
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

@@ -1959,6 +1959,14 @@ async function redactDocx(arrayBuffer, options) {
             const base = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
             const query = qIdx >= 0
               ? '?' + beforeHash.slice(qIdx + 1).split('&').map(item => {
+                  try {
+                    const decodedItem = decodeURIComponent(item);
+                    if (decodedItem !== item) {
+                      const probe = '?' + decodedItem;
+                      const cleanedProbe = scrubStructuralPii(applyPlanToText(probe, plan));
+                      if (cleanedProbe !== probe) return cleanedProbe.slice(1);
+                    }
+                  } catch (_) {}
                   const eq = item.indexOf('=');
                   return eq >= 0
                     ? item.slice(0, eq + 1) + scrubPart(item.slice(eq + 1), false)

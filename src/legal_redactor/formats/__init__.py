@@ -85,6 +85,15 @@ def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None
     if q_sep:
         new_query_items = []
         for item in query.split("&"):
+            decoded_item = unquote(item)
+            if decoded_item != item:
+                probe = f"?{decoded_item}"
+                scrubbed_probe = scrub_structural_text(
+                    apply_mapping_to_text(probe, pairs), categories=URL_SECRET_CATEGORIES
+                )
+                if scrubbed_probe != probe:
+                    new_query_items.append(scrubbed_probe[1:])
+                    continue
             if "=" in item:
                 k, v = item.split("=", 1)
                 new_query_items.append(f"{k}={_scrub_encoded_part(v, pairs)}")
