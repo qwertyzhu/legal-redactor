@@ -26,10 +26,11 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, ocr_engine
+from .formats import pdf_io
 from .image_scan import seal_detection_available
 from .ledger_store import load_ledger, restore_text
 from .ner import ner_status
-from .pipeline import _parse_category_list, redact_file
+from .pipeline import PDFTextLayerError, _parse_category_list, redact_file
 from .profiles_loader import list_profiles, load_profile
 
 
@@ -297,30 +298,25 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             is_docx = suffix == ".docx"
             page_count = 0
             has_text_layer = True
+            mixed_scan_pages: list[int] = []
             preview = ""
 
             try:
                 if is_pdf:
                     import pymupdf as fitz
-                    from .ocr_engine import pdf_has_text_layer
 
                     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                         tmp.write(content)
                         tmp_path = Path(tmp.name)
                     try:
-                        doc = fitz.open(str(tmp_path))
-                        page_count = len(doc)
-                        has_text_layer = pdf_has_text_layer(tmp_path, min_chars=1)
-                        # Extract first 500 chars preview
-                        parts: list[str] = []
-                        for page in doc:
-                            t = page.get_text("text").strip()
-                            if t:
-                                parts.append(t)
-                            if sum(len(p) for p in parts) >= 400:
-                                break
-                        preview = "\n".join(parts)[:400]
-                        doc.close()
+                        with fitz.open(str(tmp_path)) as doc:
+                            page_count = len(doc)
+                        text, scan_pages = pdf_io.extract_text_with_scan_pages(tmp_path)
+                        has_text = bool(text.strip())
+                        has_text_layer = has_text and not scan_pages
+                        if has_text:
+                            mixed_scan_pages = scan_pages
+                        preview = text.strip()[:400]
                     finally:
                         try:
                             tmp_path.unlink()
@@ -358,6 +354,7 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 "is_docx": is_docx,
                 "page_count": page_count,
                 "has_text_layer": has_text_layer,
+                "mixed_scan_pages": mixed_scan_pages,
                 "preview": preview,
             })
             return
@@ -551,6 +548,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                     "download_audit_url": f"/api/download/{task_id}/audit",
                     "download_ledger_url": f"/api/download/{task_id}/ledger",
                 })
+            except PDFTextLayerError as exc:
+                shutil.rmtree(task_dir, ignore_errors=True)
+                self._send_json({"ok": False, "error": str(exc)}, status=400)
             except Exception as exc:
                 self._send_json({"ok": False, "error": f"脱敏处理失败: {exc}"}, status=500)
             return
@@ -1204,6 +1204,13 @@ footer {
         </div>
       </div>
 
+      <div id="mixedScanAlert" class="alert alert-warning hidden">
+        <div>
+          <strong>检测到该 PDF 混有无文字层的扫描页：</strong><span id="mixedScanPages"></span><br>
+          不能直接脱敏这份 PDF。请先用 <code>legal-redactor ocr</code> 提取文本，再脱敏 <code>ocr.normalized.md</code>。
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="form-group">
           <label>脱敏目标与等级 (Mode / Profile)</label>
@@ -1542,6 +1549,7 @@ async function handleFileSelect(file) {
 
   document.getElementById('fileInfoBar').classList.remove('hidden');
   document.getElementById('fileDropzone').classList.add('hidden');
+  document.getElementById('mixedScanAlert').classList.add('hidden');
   document.getElementById('fileStartBtn').disabled = true;
   document.getElementById('fileStartBtn').innerHTML = '<span class="spinner"></span> 正在预检文档...';
 
@@ -1552,6 +1560,15 @@ async function handleFileSelect(file) {
     const res = await fetch('/api/inspect', { method: 'POST', body: formData });
     const data = await res.json();
     if (data.ok) {
+      if (data.is_pdf && data.mixed_scan_pages?.length) {
+        document.getElementById('fileTextLayerBadge').classList.add('hidden');
+        document.getElementById('fileScanBadge').classList.add('hidden');
+        document.getElementById('scannedAlert').classList.add('hidden');
+        document.getElementById('mixedScanPages').textContent = `第 ${data.mixed_scan_pages.join('、')} 页`;
+        document.getElementById('mixedScanAlert').classList.remove('hidden');
+        document.getElementById('fileStartBtn').textContent = '扫描页需先 OCR';
+        return;
+      }
       if (data.is_pdf) {
         if (data.has_text_layer) {
           document.getElementById('fileTextLayerBadge').classList.remove('hidden');
@@ -1585,6 +1602,7 @@ function resetFile() {
   document.getElementById('fileInfoBar').classList.add('hidden');
   document.getElementById('fileDropzone').classList.remove('hidden');
   document.getElementById('scannedAlert').classList.add('hidden');
+  document.getElementById('mixedScanAlert').classList.add('hidden');
   document.getElementById('fileResultPanel').classList.add('hidden');
   document.getElementById('fileStartBtn').disabled = true;
   document.getElementById('fileStartBtn').innerHTML = '<span>立即开始脱敏处理</span>';

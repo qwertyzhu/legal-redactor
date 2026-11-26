@@ -98,6 +98,10 @@ REVISION_MODES = ("accept", "reject", "keep-and-redact")
 OCR_IMAGE_MODES = ("auto", "on", "off")
 
 
+class PDFTextLayerError(ValueError):
+    """A PDF cannot be redacted through the vector-text pipeline."""
+
+
 def _extract(path: Path, *, revisions: str = "accept") -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
@@ -319,7 +323,7 @@ def redact_file(
         source_text, scan_pages = pdf_io.extract_text_with_scan_pages(input_path)
         if scan_pages or not source_text.strip():
             notice = _scan_page_notice(scan_pages) if scan_pages else "这份 PDF 没有文字层。"
-            raise ValueError(
+            raise PDFTextLayerError(
                 f"{notice}给模型先跑 ocr，再对 ocr.normalized.md 做 redact；"
                 "不要把原 PDF 交给模型。redact-scan 只涂结构性号码，姓名和公章仍在图上。"
             )
