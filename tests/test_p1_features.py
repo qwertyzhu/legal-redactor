@@ -187,6 +187,27 @@ def test_restore_pdf_keeps_repeated_letters_in_tight_email(tmp_path: Path):
     assert sorted(pdf_io.extract_text(restored).split()) == ["Adjacent", email]
 
 
+def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((72, 72), "邮箱：[邮箱]", fontsize=9, fontname="china-s")
+        placeholder, = page.search_for("[邮箱]")
+        page.insert_text((placeholder.x1 + 2, 72), "Adjacent", fontsize=9)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        assert f"邮箱：{email}" in doc[0].get_text(sort=True)
+
+
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
     monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-pass")

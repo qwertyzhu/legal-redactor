@@ -238,8 +238,20 @@ def _restoration_obstacles(page: fitz.Page) -> list[fitz.Rect]:
     return occupied
 
 
+def _horizontal_text_spans(page: fitz.Page) -> list[tuple[fitz.Rect, float]]:
+    flags = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+    return [
+        (fitz.Rect(span["bbox"]), span["origin"][1])
+        for block in page.get_text("dict", flags=flags)["blocks"]
+        for line in block.get("lines", ())
+        if line["dir"] == (1, 0)
+        for span in line["spans"]
+    ]
+
+
 def _insert_fitted_text(
     page: fitz.Page, rect: fitz.Rect, text: str, occupied: list[fitz.Rect],
+    baseline: float | None,
 ) -> None:
     fontname = _redaction_fontname(text)
     font = fitz.Font(fontname)
@@ -256,12 +268,15 @@ def _insert_fitted_text(
     fitted_width = min(width, right - rect.x0)
     scale_x = fitted_width / width
     min_scale_x = 0.6
-    if scale_x < min_scale_x:
+    shrinks_fontsize = scale_x < min_scale_x
+    if shrinks_fontsize:
         fontsize *= scale_x / min_scale_x
         scale_x = min_scale_x
-    y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2
+    y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2 + font.ascender * fontsize
+    if shrinks_fontsize and len(lines) == 1 and baseline is not None:
+        y = baseline
     for line in lines:
-        point = fitz.Point(rect.x0, y + font.ascender * fontsize)
+        point = fitz.Point(rect.x0, y)
         page.insert_text(point, line, fontname=fontname, fontsize=fontsize, morph=(point, fitz.Matrix(scale_x, 1)))
         y += line_height * fontsize
     occupied.append(fitz.Rect(rect.x0, rect.y0, rect.x0 + fitted_width, rect.y1))
@@ -323,11 +338,16 @@ def redact_pdf(
                         fontname=_redaction_fontname(replacement),
                     )
             if claimed_rects:
+                spans = _horizontal_text_spans(page) if fitted_text else []
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
             if fitted_text:
                 occupied = claimed_rects + _restoration_obstacles(page)
                 for rect, text in fitted_text:
-                    _insert_fitted_text(page, rect, text, occupied)
+                    _, baseline = max(
+                        (((rect & span_rect).get_area(), y) for span_rect, y in spans if rect.intersects(span_rect)),
+                        default=(0, None),
+                    )
+                    _insert_fitted_text(page, rect, text, occupied, baseline)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
