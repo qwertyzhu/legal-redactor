@@ -1666,10 +1666,14 @@ function buildRedactionPlan(text, options) {
     if (mode === 'publish') {
       const addressRegex = /(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地|住|现住|户籍地|经常居住地)[：:\s]*([一-鿿0-9A-Za-z（）()·\- ]{6,80}?[号室层幢栋弄巷街路道村组区县市省镇乡][一-鿿0-9A-Za-z（）()·\- ]{0,30})/g;
       const addressBeforeClause = /[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))/;
-      for (const [, match] of text.matchAll(addressRegex)) {
+      while ((m = addressRegex.exec(text)) !== null) {
+        const match = m[1];
         let address = match.trim();
         const boundary = address.match(addressBeforeClause);
-        if (boundary) address = address.slice(0, boundary.index + boundary[0].length);
+        if (boundary) {
+          address = address.slice(0, boundary.index + boundary[0].length);
+          addressRegex.lastIndex += address.length - match.trimStart().length;
+        }
         if (address.length < 6 || (address.includes('法院') && address.length < 12)) continue;
         addHit(address, publishAddressAlias(address), 'address', 'party');
       }

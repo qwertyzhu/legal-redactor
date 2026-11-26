@@ -601,11 +601,16 @@ def detect_suspects(
             )
         )
 
-    for m in _ADDRESS.finditer(text):
-        val = m.group(1).strip().rstrip("，,。；;、")
+    address_pos = 0
+    while m := _ADDRESS.search(text, address_pos):
+        captured = m.group(1)
+        start = m.end(1) - len(captured.lstrip())
+        val = captured.strip()
+        address_pos = m.end()
         boundary = _ADDRESS_BEFORE_CLAUSE.search(val)
         if boundary:
             val = val[:boundary.end()]
+            address_pos = start + boundary.end()
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases
@@ -616,8 +621,8 @@ def detect_suspects(
                 text=val,
                 category="address",
                 reason="address_label",
-                start=m.start(1),
-                end=m.start(1) + len(val),
+                start=start,
+                end=start + len(val),
                 role_hint="party",
             )
         )

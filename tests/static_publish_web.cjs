@@ -53,6 +53,11 @@ test('publish redacts both addresses when one is a prefix of the other', () => {
   assert.equal(redact(text, { mode: 'publish' }), '住北京市海淀区为约定送达地址。另住北京市海淀区。');
 });
 
+test('publish finds an address after an unseparated clause', () => {
+  const text = '住北京市海淀区测试路8号为送达地址住苏州市测试路5号';
+  assert.equal(redact(text, { mode: 'publish' }), '住北京市海淀区为送达地址住苏州市');
+});
+
 test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
   const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
   assert.equal(redact(text, { mode: 'production' }), text);
