@@ -25,8 +25,12 @@ W = "{%s}" % W_NS
 
 # Package parts that may carry visible body text
 _TEXT_PART_RE = re.compile(
-    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
+    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
+_CHART_VALUE_TAGS = {
+    "{http://schemas.openxmlformats.org/drawingml/2006/chart}v",
+    "{http://purl.oclc.org/ooxml/drawingml/chart}v",
+}
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 
 
@@ -253,7 +257,7 @@ _REVISION_SPLIT_WARN: list[str] = []
 
 
 def _process_xml_bytes(
-    data: bytes, mapping: list[tuple[str, str]] | None, revisions: str = "accept"
+    name: str, data: bytes, mapping: list[tuple[str, str]] | None, revisions: str = "accept"
 ) -> tuple[bytes, str]:
     root = etree.fromstring(data)
     _flatten_revisions(root, revisions)
@@ -261,16 +265,20 @@ def _process_xml_bytes(
         _scrub_authors_and_rsids(root)
 
     texts: list[str] = []
-    for p in root.iter():
-        if _local(p.tag) != "p":
-            continue
-        original = _paragraph_text(p)
-        if not original:
-            continue
-        if mapping is None:
-            texts.append(original)
-            continue
-        texts.append(_redact_paragraph(p, mapping))
+    chart = name.startswith("word/charts/")
+    for node in root.iter():
+        if _local(node.tag) == "p":
+            text = _paragraph_text(node) if mapping is None else _redact_paragraph(node, mapping)
+            if text:
+                texts.append(text)
+        elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
+            text = node.text
+            if mapping is not None:
+                updated = apply_mapping_to_text(text, mapping)
+                if updated != text:
+                    node.text = updated
+                text = updated
+            texts.append(text)
 
     out = etree.tostring(
         root,
@@ -287,7 +295,7 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
-            _, text = _process_xml_bytes(zin.read(name), mapping=None, revisions=revisions)
+            _, text = _process_xml_bytes(name, zin.read(name), mapping=None, revisions=revisions)
             if text.strip():
                 chunks.append(text)
     return "\n".join(chunks)
@@ -424,7 +432,7 @@ def redact_docx(
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(data, mapping, revisions)
+                    data, text = _process_xml_bytes(name, data, mapping, revisions)
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":
