@@ -223,7 +223,8 @@ _LABELED_PERSON = re.compile(
 )
 # A bare party label can also introduce a duty (乙方：包工包料).
 _CONTRACT_PARTY_PERSON = re.compile(
-    r"(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*签[字名])?[^\S\n]*[：:][^\S\n]*"
+    r"(?:^|(?<=[；;]))[^\S\n]*[甲乙丙丁]方(?:[^\S\n]*(?P<signature>签[字名]))?"
+    r"[^\S\n]*[：:][^\S\n]*"
     rf"(?P<name>{_PERSON_NAME_PAT}){_LABELED_PERSON_END}",
     re.MULTILINE,
 )
@@ -377,8 +378,11 @@ def _contract_party_candidates(text: str, skip: set[str]) -> list[Suspect]:
         val = m.group("name")
         if val in skip or not _person_ok(val) or not _has_surname(val):
             continue
-        if len(val) == 4 and not val.startswith(_COMPOUND_SURNAMES) and not any(
-            dot in val for dot in "·•"
+        if (
+            not m.group("signature")
+            and len(val) == 4
+            and not val.startswith(_COMPOUND_SURNAMES)
+            and not any(dot in val for dot in "·•")
         ):
             continue
         matches.append(m)

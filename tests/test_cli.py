@@ -244,7 +244,7 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
     assert residual["ok"] is True, residual
 
 
-_NATURAL_PARTIES = ("顾南枝", "沈测禾")
+_NATURAL_PARTIES = ("顾南枝", "沈测青禾")
 _PARTY_CLAUSE = "乙方应当在交付时签收。"
 _PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PARTIES[1]}\n{_PARTY_CLAUSE}"
 
