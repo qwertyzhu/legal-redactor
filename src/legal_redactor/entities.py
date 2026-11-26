@@ -65,7 +65,9 @@ class RedactionPlan:
 
 
 from .suspects import (
+    AMBIGUOUS_CONTRACT_PARTY,
     COMPOUND_SURNAMES as _COMPOUND_SURNAMES,
+    CONTRACT_PARTY_REASONS,
     SURNAMES as _SURNAMES,
     has_surname as _has_surname,
 )
@@ -128,7 +130,13 @@ def _district_address(addr: str) -> str:
     match = re.search(r"^(.{2,20}?(?<!自治)(?:区|县|旗))", head)
     if match:
         return match.group(1)
-    match = re.search(r"^(.{2,12}?(?:市|州|盟))", head)
+    # 州 alone is part of a name (苏州, 郑州); only 自治州 is a prefecture unit.
+    # A county-level city (昆山市) after the prefecture is still 县 level;
+    # 超市/菜市/门市部… are landmarks, not cities.
+    match = re.search(
+        r"^(.{2,12}?(?:市|自治州|盟)(?:[^市县区旗镇乡村街道路号]{2,4}?(?<![超菜夜集早花鱼])市(?!部))?)",
+        head,
+    )
     if match:
         return match.group(1)
     return "某地址"
@@ -407,9 +415,13 @@ def build_plan(
     if auto_confident:
         from .suspects import detect_suspects
 
-        for suspect in detect_suspects(
-            text, known=already | preserve_set, allowlist=allow_set
-        ):
+        suspects = detect_suspects(text, known=already | preserve_set, allowlist=allow_set)
+        party_names = (
+            {s.text for s in suspects if s.reason in CONTRACT_PARTY_REASONS}
+            if mode == "production"
+            else set()
+        )
+        for suspect in suspects:
             if suspect.text in already or suspect.text in preserve_set:
                 continue
             if suspect.role_hint == "court_staff" and not redact_court_staff:
@@ -418,11 +430,14 @@ def build_plan(
             if suspect.reason == "org_suffix_unanchored":
                 # No left boundary found: likely clause text, not a name. Review only.
                 continue
+            if suspect.reason == AMBIGUOUS_CONTRACT_PARTY:
+                continue
             if mode == "production":
                 third = (
                     suspect.category == "person"
                     and suspect.role_hint == "third_party"
                     and redact_third_party
+                    and not any(suspect.text in name for name in party_names)
                 )
                 address = suspect.category == "address" and truncate_addresses
                 if not third and not address:

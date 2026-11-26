@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,7 +19,13 @@ from .ledger_store import (
 from .profiles_loader import Profile, resolve_profile
 from .formats import FIELD_BOUNDARY, docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
-from .suspects import Suspect, detect_suspects
+from .suspects import (
+    AMBIGUOUS_CONTRACT_PARTY,
+    CONTRACT_PARTY_REASONS,
+    EXPLICIT_PERSON_REASONS,
+    Suspect,
+    detect_suspects,
+)
 from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
@@ -123,6 +129,24 @@ def extract_for_verify(path: Path, *, revisions: str = "keep-and-redact") -> str
 
 def _scan_page_notice(pages: list[int]) -> str:
     return f"第 {'、'.join(map(str, pages))} 页没有文字层（扫描图片），未脱敏、无法通过文字校验。"
+
+
+def _add_image_pii(report: ResidualReport, findings: list[str]) -> None:
+    if not findings:
+        return
+    report.hits[:0] = [
+        {"category": "IMAGE-PII", "text": detail, "start": -1, "end": -1}
+        for detail in findings
+    ]
+    detail = f"{len(findings)} embedded image(s) contain OCR-detected PII"
+    report.summary = (
+        f"residual scan FAILED for mode={report.mode}: {detail}"
+        if report.ok else f"{report.summary}; {detail}"
+    )
+    report.ok = False
+    report.status = "FAIL"
+
+
 def _apply(
     path: Path,
     output: Path,
@@ -134,6 +158,7 @@ def _apply(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    image_pii: list[str] | None = None,
     mode: str = "ai",
 ) -> str:
     suffix = path.suffix.lower()
@@ -147,6 +172,7 @@ def _apply(
             revisions=revisions,
             ocr_images=ocr_images,
             image_categories=image_categories,
+            image_pii=image_pii,
             mode=mode,
         )
     if suffix == ".pdf":
@@ -313,6 +339,10 @@ def redact_file(
         raise ValueError(
             f"output suffix {output_path.suffix!r} must match input suffix {input_path.suffix!r}"
         )
+    if output_path.resolve() == input_path.resolve() or (
+        output_path.exists() and output_path.samefile(input_path)
+    ):
+        raise ValueError(f"输出路径不能与输入文件相同：{output_path}；脱敏稿须另存，原件保持不变。")
 
     sidecar_stem = sidecar_stem or output_path.stem
     work_dir = Path(work_dir) if work_dir else output_path.parent
@@ -358,6 +388,7 @@ def redact_file(
     )
     mapping = plan.mapping()
     warnings: list[str] = []
+    image_pii: list[str] = []
     if is_sandwich_pdf:
         warnings.append(
             "PDF 包含整页扫描图层（双层扫描件）：文字层已处理，图像层须人工逐页核查或改用 redact-scan"
@@ -374,6 +405,7 @@ def redact_file(
         image_categories=categories_for_mode(
             mode, keep_categories=keep, extra_categories=extra, only_categories=only
         ),
+        image_pii=image_pii,
         mode=mode,
     )
     hidden_output = _extract_hidden(output_path)
@@ -397,6 +429,7 @@ def redact_file(
             pdf_path=output_path if input_path.suffix.lower() == ".pdf" else None,
         ),
     )
+    _add_image_pii(residual, image_pii)
 
     known = {e.original for e in plan.entities}
     known |= {p.strip() for p in (preserve or []) if p and p.strip()}
@@ -415,18 +448,29 @@ def redact_file(
     # 北京朗岳网络科技有限公司 across a line break keeps coming back as
     # 朗岳网络科技有限公司 and the handoff loop never converges.
     planned = [e.original for e in plan.entities if e.original]
-    if planned:
-        suspects = [
-            s
-            for s in suspects
-            if not (
-                s.text
-                and any(
-                    s.text != original and (s.text in original or original in s.text)
-                    for original in planned
-                )
-            )
-        ]
+    planned_party_names = [e.original for e in plan.entities if e.notes in CONTRACT_PARTY_REASONS]
+    residual_names = {w["text"] for w in residual.warnings if w["category"] == "person"}
+    # PDF replacement can also match text across line breaks.
+    collision_text = "".join(output_text.split()) if input_path.suffix.lower() == ".pdf" else output_text
+    pending = []
+    for s in suspects:
+        if s.reason in CONTRACT_PARTY_REASONS:
+            pending.append(s)
+        elif (
+            (s.reason in EXPLICIT_PERSON_REASONS or s.role_hint == "third_party")
+            and s.text in residual_names
+            and any(s.text != name and s.text in name for name in planned_party_names)
+        ):
+            if collision_text.count(s.text) == 1:
+                pending.append(s)
+            else:
+                pending.append(replace(s, reason=AMBIGUOUS_CONTRACT_PARTY))
+        elif not s.text or not any(
+            s.text != original and (s.text in original or original in s.text)
+            for original in planned
+        ):
+            pending.append(s)
+    suspects = pending
 
     ledger_target = resolve_ledger_path(
         input_path,
@@ -708,6 +752,9 @@ def verify_file(
     *,
     entities_path: Path | None = None,
     alias_style: str = "generic",
+    keep_categories: set[str] | None = None,
+    extra_categories: set[str] | None = None,
+    only_categories: set[str] | None = None,
     **scan_options: Any,
 ) -> ResidualReport:
     scan_pages: list[int] = []
@@ -723,7 +770,10 @@ def verify_file(
     if hidden:
         text = f"{text}{FIELD_BOUNDARY}{hidden}" if text else hidden
 
-    report = scan_residual(text, mode=mode, nl=True, **scan_options)
+    report = scan_residual(
+        text, mode=mode, nl=True, keep_categories=keep_categories,
+        extra_categories=extra_categories, only_categories=only_categories, **scan_options,
+    )
     if suffix == ".pdf" and entities_path is not None and not scan_pages:
         plan = build_plan(
             text,
@@ -735,6 +785,15 @@ def verify_file(
         )
         short_names = [(o, r) for o, r in plan.mapping() if pdf_io.is_short_cjk_name(o)]
         add_unreplaced(report, unreplaced_originals(text, short_names, pdf_path=path))
+    elif suffix == ".docx":
+        _, image_pii = docx_io.scan_media(
+            path,
+            categories=categories_for_mode(
+                mode, keep_categories=keep_categories, extra_categories=extra_categories,
+                only_categories=only_categories,
+            ),
+        )
+        _add_image_pii(report, image_pii)
     if scan_pages:
         report.ok = False
         report.status = "FAIL"

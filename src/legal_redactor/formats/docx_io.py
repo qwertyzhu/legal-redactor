@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -17,6 +18,7 @@ from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
+from ..patterns import categories_for_mode
 from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -26,8 +28,17 @@ W = "{%s}" % W_NS
 
 # Package parts that may carry visible body text
 _TEXT_PART_RE = re.compile(
-    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
+    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
+_CHART_NAMESPACES = (
+    "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "http://purl.oclc.org/ooxml/drawingml/chart",
+)
+_CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
+_CHART_NUMERIC_TAGS = tuple(
+    f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
+)
+_CHART_LABEL_TAGS = tuple(f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("cat", "tx"))
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 _HYPERLINK_FIELD_RE = re.compile(r'(?i)(\bHYPERLINK\s+")([^"]+)(")')
 
@@ -271,6 +282,7 @@ _REVISION_SPLIT_WARN: list[str] = []
 
 
 def _process_xml_bytes(
+    name: str,
     data: bytes,
     mapping: list[tuple[str, str]] | None,
     revisions: str = "accept",
@@ -293,16 +305,29 @@ def _process_xml_bytes(
                         )
 
     texts: list[str] = []
-    for p in root.iter():
-        if _local(p.tag) != "p":
-            continue
-        original = _paragraph_text(p)
-        if not original:
-            continue
-        if mapping is None:
-            texts.append(original)
-            continue
-        texts.append(_redact_paragraph(p, mapping))
+    chart_fields: list[str] = []
+    chart = name.startswith("word/charts/")
+    for node in root.iter():
+        if _local(node.tag) == "p":
+            text = _paragraph_text(node) if mapping is None else _redact_paragraph(node, mapping)
+            if text:
+                texts.append(text)
+        elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
+            if (
+                next(node.iterancestors(*_CHART_NUMERIC_TAGS), None) is not None
+                and next(node.iterancestors(*_CHART_LABEL_TAGS), None) is None
+            ):
+                continue
+            text = node.text
+            if mapping is not None:
+                updated = apply_mapping_to_text(text, mapping)
+                if updated != text:
+                    node.text = updated
+                text = updated
+            if texts:
+                chart_fields.append("\n".join(texts))
+                texts.clear()
+            chart_fields.append(text)
 
     out = etree.tostring(
         root,
@@ -310,7 +335,13 @@ def _process_xml_bytes(
         encoding="UTF-8",
         standalone=True,
     )
-    return out, "\n".join(texts)
+    text = "\n".join(texts)
+    if chart:
+        if text.strip():
+            chart_fields.append(text)
+        if chart_fields:
+            text = FIELD_BOUNDARY.join(("", *chart_fields, ""))
+    return out, text
 
 
 def extract_text(path: Path, revisions: str = "accept") -> str:
@@ -319,7 +350,7 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
-            _, text = _process_xml_bytes(zin.read(name), mapping=None, revisions=revisions)
+            _, text = _process_xml_bytes(name, zin.read(name), mapping=None, revisions=revisions)
             if text.strip():
                 chunks.append(text)
     return "\n".join(chunks)
@@ -512,6 +543,7 @@ def redact_docx(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    image_pii: list[str] | None = None,
     mode: str = "ai",
 ) -> str:
     input_path = Path(input_path)
@@ -523,9 +555,15 @@ def redact_docx(
     with zipfile.ZipFile(input_path, "r") as zin:
         names = zin.namelist()
         if any(n.startswith("word/media/") for n in names):
-            warn.extend(
-                _media_warnings(input_path, mapping, ocr_images, image_categories)
+            media_warnings, findings = scan_media(
+                input_path,
+                ocr_images=ocr_images,
+                categories=image_categories if image_categories is not None else categories_for_mode("ai"),
+                extra_terms=[original for original, _ in mapping],
             )
+            warn.extend(media_warnings)
+            if image_pii is not None:
+                image_pii.extend(findings)
         if any(n.startswith("word/embeddings/") for n in names):
             warn.append("docx contains word/embeddings/* (OLE) — review or remove before sharing")
         if _has_sensitive_field(zin, names):
@@ -541,7 +579,7 @@ def redact_docx(
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(data, mapping, revisions, drop_http=drop_http)
+                    data, text = _process_xml_bytes(name, data, mapping, revisions, drop_http=drop_http)
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":
@@ -583,13 +621,14 @@ def _has_sensitive_field(zin: zipfile.ZipFile, names: list[str]) -> bool:
     return False
 
 
-def _media_warnings(
+def scan_media(
     path: Path,
-    mapping: list[tuple[str, str]],
-    ocr_images: str,
-    categories: set[str] | None,
-) -> list[str]:
-    """List word/media images; OCR them when Tesseract is available (auto/on)."""
+    *,
+    categories: set[str],
+    ocr_images: str = "auto",
+    extra_terms: Iterable[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Return embedded-image warnings and the subset reporting detected PII."""
     from ..image_scan import ocr_available, scan_docx_media
 
     if ocr_images == "off" or not ocr_available():
@@ -598,27 +637,29 @@ def _media_warnings(
             raise RuntimeError("--ocr-images on requires Tesseract (chi_sim) — see skills/legal-document-redactor/references/scanned-pdf.md")
         with zipfile.ZipFile(path) as z:
             media = [n for n in z.namelist() if n.startswith("word/media/")]
-        return [
+        warnings = [
             f"docx contains {len(media)} embedded image(s) ({why}) — not OCR-scanned; "
             "review manually: " + ", ".join(media[:10])
-        ]
-    from ..patterns import categories_for_mode
+        ] if media else []
+        return warnings, []
 
-    cats = categories if categories is not None else categories_for_mode("ai")
-    items = scan_docx_media(path, categories=cats, extra_terms=[o for o, _ in mapping])
-    out: list[str] = []
+    items = scan_docx_media(path, categories=categories, extra_terms=extra_terms)
+    warnings: list[str] = []
+    findings: list[str] = []
     for it in items:
         if it["hits"]:
             kinds = sorted({h["category"] for h in it["hits"]})
-            out.append(
-                f"IMAGE-PII {it['name']}: OCR found {len(it['hits'])} hit(s) ({', '.join(kinds)}) — "
+            detail = (
+                f"{it['name']}: OCR found {len(it['hits'])} hit(s) ({', '.join(kinds)}) — "
                 "image NOT modified; replace or crop it before sharing"
             )
+            findings.append(detail)
+            warnings.append(f"IMAGE-PII {detail}")
         elif not it["ocr"]:
-            out.append(f"docx image {it['name']} not OCR-scanned (undecodable/tiny/unsupported); review manually")
-    if not out:
-        out.append(f"docx word/media images OCR-scanned ({len(items)}), no structural PII found — still glance at seals/signatures")
-    return out
+            warnings.append(f"docx image {it['name']} not OCR-scanned (undecodable/tiny/unsupported); review manually")
+    if items and not warnings:
+        warnings.append(f"docx word/media images OCR-scanned ({len(items)}), no structural PII found — still glance at seals/signatures")
+    return warnings, findings
 
 
 def create_sample_docx(path: Path, text: str) -> None:
