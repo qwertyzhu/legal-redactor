@@ -178,13 +178,18 @@ def _insert_fitted_text(
         if other.x1 > rect.x1 and other.y0 < rect.y1 and other.y1 > rect.y0:
             right = min(right, other.x0 - word_gap)
     right = max(rect.x1, right)
-    scale_x = min(1, (right - rect.x0) / width)
+    fitted_width = min(width, right - rect.x0)
+    scale_x = fitted_width / width
+    min_scale_x = 0.6
+    if scale_x < min_scale_x:
+        fontsize *= scale_x / min_scale_x
+        scale_x = min_scale_x
     y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2
     for line in lines:
         point = fitz.Point(rect.x0, y + font.ascender * fontsize)
         page.insert_text(point, line, fontname=fontname, fontsize=fontsize, morph=(point, fitz.Matrix(scale_x, 1)))
         y += line_height * fontsize
-    occupied.append(fitz.Rect(rect.x0, rect.y0, rect.x0 + width * scale_x, rect.y1))
+    occupied.append(fitz.Rect(rect.x0, rect.y0, rect.x0 + fitted_width, rect.y1))
 
 
 def redact_pdf(

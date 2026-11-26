@@ -164,6 +164,29 @@ def test_restore_pdf_keeps_adjacent_numbers_separate(tmp_path: Path):
     assert pdf_io.extract_text(restored).split() == [phone, account]
 
 
+def test_restore_pdf_keeps_repeated_letters_in_tight_email(tmp_path: Path):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    tight = tmp_path / "tight.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    with fitz.open() as doc:
+        page = doc.new_page(width=1600)
+        page.insert_text((72, 72), email, fontsize=11)
+        doc.save(src)
+
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    with fitz.open(redacted) as doc:
+        page = doc[0]
+        placeholder, = page.search_for("[邮箱]")
+        page.insert_text((placeholder.x1 + 2, placeholder.y1 - 2), "Adjacent", fontsize=9)
+        doc.save(tight)
+
+    assert main(["restore", str(tight), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert sorted(pdf_io.extract_text(restored).split()) == ["Adjacent", email]
+
+
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
     monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-pass")
