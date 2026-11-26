@@ -10,6 +10,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import main
@@ -112,6 +113,34 @@ def test_restore_pdf(tmp_path: Path, label: str, original: str, placeholder: str
     restored_text = pdf_io.extract_text(restored)
     assert original in restored_text
     assert placeholder not in restored_text
+    with fitz.open(restored) as doc:
+        restored_rect, = doc[0].search_for(original)
+        assert restored_rect.width == pytest.approx(
+            fitz.get_text_length(original, fontsize=7), rel=0.1
+        )
+
+
+def test_restore_pdf_keeps_adjacent_text(tmp_path: Path):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = "restore.roundtrip@example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((72, 72), "[邮箱]", fontsize=9, fontname="china-s")
+        page.insert_text((145, 72), "Adjacent", fontsize=9)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        page = doc[0]
+        email_rect, = page.search_for(email)
+        adjacent_rect, = page.search_for("Adjacent")
+        assert 60 < email_rect.width < adjacent_rect.x0 - email_rect.x0
 
 
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):

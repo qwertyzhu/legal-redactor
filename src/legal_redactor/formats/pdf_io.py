@@ -152,19 +152,38 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
-def _insert_fitted_text(page: fitz.Page, rect: fitz.Rect, text: str) -> None:
+def _restoration_obstacles(page: fitz.Page) -> list[fitz.Rect]:
+    occupied = [fitz.Rect(word[:4]) for word in page.get_text("words")]
+    occupied.extend(fitz.Rect(image["bbox"]) for image in page.get_image_info())
+    white = (1.0, 1.0, 1.0)
+    for path in page.get_drawings():
+        if any(path.get(key) not in (None, white) for key in ("fill", "color")):
+            pad = (path.get("width") or 0) / 2
+            occupied.append(path["rect"] + (-pad, -pad, pad, pad))
+    return occupied
+
+
+def _insert_fitted_text(
+    page: fitz.Page, rect: fitz.Rect, text: str, occupied: list[fitz.Rect],
+) -> None:
     fontname = _redaction_fontname(text)
     font = fitz.Font(fontname)
     lines = text.splitlines()
     line_height = font.ascender - font.descender
     fontsize = min(9, rect.height / (len(lines) * line_height))
     width = max(fitz.get_text_length(line, fontname, fontsize) for line in lines)
-    scale_x = min(1, rect.width / width)
+    right = min(rect.x0 + width, (page.rect * page.derotation_matrix).x1)
+    for other in occupied:
+        if other.x1 > rect.x1 and other.y0 < rect.y1 and other.y1 > rect.y0:
+            right = min(right, other.x0 - 1)
+    right = max(rect.x1, right)
+    scale_x = min(1, (right - rect.x0) / width)
     y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2
     for line in lines:
         point = fitz.Point(rect.x0, y + font.ascender * fontsize)
         page.insert_text(point, line, fontname=fontname, fontsize=fontsize, morph=(point, fitz.Matrix(scale_x, 1)))
         y += line_height * fontsize
+    occupied.append(fitz.Rect(rect.x0, rect.y0, rect.x0 + width * scale_x, rect.y1))
 
 
 def redact_pdf(
@@ -223,8 +242,10 @@ def redact_pdf(
                     )
             if claimed_rects:
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+            if fitted_text:
+                occupied = claimed_rects + _restoration_obstacles(page)
                 for rect, text in fitted_text:
-                    _insert_fitted_text(page, rect, text)
+                    _insert_fitted_text(page, rect, text, occupied)
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
