@@ -399,3 +399,37 @@ def test_shipped_cli_docx_chart_preserves_numeric_measurements(tmp_path: Path, c
     for docx in (src, out):
         verify = _run_cli("verify", str(docx), "--mode", "ai", "--strict", cwd=tmp_path)
         assert verify.returncode == 0, verify.stderr + verify.stdout
+
+
+@pytest.mark.parametrize("separate_parts", [False, True], ids=["same-chart", "separate-charts"])
+def test_shipped_cli_docx_chart_keeps_labels_separate(tmp_path: Path, separate_parts: bool) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    labels = (("137000",), ("03333",)) if separate_parts else (("137000", "03333"),)
+    charts = {}
+    for index, values in enumerate(labels, 1):
+        points = "".join(f'<c:pt idx="{i}"><c:v>{value}</c:v></c:pt>' for i, value in enumerate(values))
+        charts[f"word/charts/chart{index}.xml"] = (
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            f"<c:strLit>{points}</c:strLit></c:chartSpace>"
+        )
+    with zipfile.ZipFile(src, "a") as archive:
+        for name, xml in charts.items():
+            archive.writestr(name, xml)
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 0, before.stderr + before.stdout
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    assert "replaced:    0" in redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        for name, xml in charts.items():
+            assert etree.tostring(etree.fromstring(archive.read(name))) == xml.encode()
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout

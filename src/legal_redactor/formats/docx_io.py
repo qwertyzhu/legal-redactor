@@ -35,6 +35,8 @@ _CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
 _CHART_NUMERIC_TAGS = tuple(
     f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
 )
+# Invisible, non-whitespace boundary for detectors that match across newlines.
+_CHART_TEXT_SEPARATOR = "\n\u2063\n"
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 
 
@@ -292,6 +294,8 @@ def _process_xml_bytes(
         encoding="UTF-8",
         standalone=True,
     )
+    if chart and any(text.strip() for text in texts):
+        return out, _CHART_TEXT_SEPARATOR.join(("", *texts, ""))
     return out, "\n".join(texts)
 
 
