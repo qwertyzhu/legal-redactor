@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -98,8 +101,15 @@ _PATH_ALLOW_FRAGMENTS = (
 )
 
 
-def _iter_public_text_files():
+def _iter_public_tree_paths():
+    build_dir = ROOT / "build"
     for path in ROOT.rglob("*"):
+        if not path.is_relative_to(build_dir):
+            yield path
+
+
+def _iter_public_text_files():
+    for path in _iter_public_tree_paths():
         if not path.is_file():
             continue
         if any(part in _SKIP_CONTENT_PARTS for part in path.parts):
@@ -119,7 +129,7 @@ def _iter_public_text_files():
 
 def test_no_forbidden_filenames():
     bad = []
-    for path in ROOT.rglob("*"):
+    for path in _iter_public_tree_paths():
         if ".git" in path.parts or "demo-output" in path.parts or "dist" in path.parts:
             continue
         name = path.name.lower()
@@ -279,3 +289,24 @@ def test_public_org_names_are_fictional():
         "public tree contains non-fictional organisation names "
         "(replace with 北测/星测/南例/某某 style):\n" + "\n".join(sorted(set(offenders))[:40])
     )
+
+
+@pytest.mark.parametrize(
+    ("scan", "message"),
+    [
+        (test_no_forbidden_filenames, "forbidden paths:"),
+        (test_public_tree_has_no_live_structural_pii, "src/build/credentials.txt: email"),
+    ],
+)
+def test_public_safety_skips_only_root_build(tmp_path, monkeypatch, scan, message):
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+    artifact = tmp_path / "build" / "lib" / "credentials.txt"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("fixture@example.invalid\n", encoding="utf-8")
+    scan()
+
+    source = tmp_path / "src" / "build" / artifact.name
+    source.parent.mkdir(parents=True)
+    source.write_bytes(artifact.read_bytes())
+    with pytest.raises(AssertionError, match=message):
+        scan()

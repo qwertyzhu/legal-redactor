@@ -8,9 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .formats import docx_io, pdf_io, text_io
-from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_tree
-from .verify import scan_residual
+from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_file, verify_tree
 
 
 def _configure_stdio() -> None:
@@ -395,7 +393,7 @@ def _build_parser() -> argparse.ArgumentParser:
     psd.add_argument("-o", "--output", type=Path, default=None, help="草稿 JSON 路径")
     psd.add_argument("--dpi", type=int, default=150)
 
-    pdoc = sub.add_parser("doctor", help="检查可选组件：Tesseract / OpenCV / NER")
+    pdoc = sub.add_parser("doctor", help="检查可选组件：OCR (RapidOCR / Tesseract) / OpenCV / NER")
     pdoc.add_argument("--json", action="store_true")
 
     pweb = sub.add_parser("web", help="启动本地网页版模式 (Local-First Web UI)")
@@ -404,15 +402,6 @@ def _build_parser() -> argparse.ArgumentParser:
     pweb.add_argument("--no-browser", action="store_true", help="启动时不自动打开浏览器")
 
     return p
-
-
-def _extract_any(path: Path, *, revisions: str = "accept") -> str:
-    suffix = path.suffix.lower()
-    if suffix == ".docx":
-        return docx_io.extract_text(path, revisions=revisions)
-    if suffix == ".pdf":
-        return pdf_io.extract_text(path)
-    return text_io.extract_text(path)
 
 
 def _split_cats(values: list[str]) -> list[str]:
@@ -541,6 +530,9 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             ocr_images=getattr(args, "ocr_images", "auto"),
             redact_court_staff=getattr(args, "redact_court_staff", None),
         )
+        failed = batch.failed
+        residual_failed = bool(failed) and not args.allow_residual
+        exit_code = 2 if residual_failed else 1 if batch.skipped else 0
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -564,9 +556,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
                     indent=2,
                 )
             )
-            if batch.skipped and not batch.results:
-                return 1
-            return 2 if (batch.failed and not args.allow_residual) else 0
+            return exit_code
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
@@ -586,10 +576,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             )
         for path, reason in batch.skipped:
             print(f"  [SKIP] {path.name}: {reason}", file=sys.stderr)
-        if batch.skipped and not batch.results:
-            return 1
+        if batch.skipped and not residual_failed:
+            print("handoff:    部分输入未处理，请查看 [SKIP] 并处理后重跑。")
+            return exit_code
         pending = [s for result in batch.results for s in result.suspects]
-        failed = [r for r in batch.results if not r.ok]
         failed_hits: list[dict] = []
         for result in failed:
             for hit in result.residual.hits:
@@ -604,14 +594,13 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             mode=batch.mode,
             allow_residual=bool(args.allow_residual),
         )
-        if batch.failed and not args.allow_residual:
+        if residual_failed:
             print(
                 "ERROR: one or more files failed residual scan. "
                 "Fix entities or use --allow-residual.",
                 file=sys.stderr,
             )
-            return 2
-        return 0
+        return exit_code
 
     if not src.is_file():
         print(f"ERROR: input not found: {src}", file=sys.stderr)
@@ -725,11 +714,16 @@ def _cmd_seal_draft(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    from .image_scan import ocr_available, seal_detection_available
+    from .image_scan import seal_detection_available
     from .ner import ner_status
+    from .ocr_engine import rapidocr_available, tesseract_available
 
+    rapidocr = rapidocr_available()
+    tesseract = tesseract_available()
     info = {
-        "tesseract": ocr_available(),
+        "ocr": rapidocr or tesseract,
+        "rapidocr": rapidocr,
+        "tesseract": tesseract,
         "opencv": seal_detection_available(),
         "ner": ner_status(),
     }
@@ -877,16 +871,14 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"    - {h['category']}: {h['text']}")
                 status = payload["status"]
             else:
-                from .pipeline import resolve_allowlist
+                from .pipeline import resolve_allowlist, verify_file
 
-                text = _extract_any(src, revisions="keep-and-redact")
-                report = scan_residual(
-                    text,
+                report = verify_file(
+                    src,
                     mode=vmode,
                     keep_categories=keep,
                     extra_categories=extra,
                     only_categories=only,
-                    nl=True,
                     allowlist=resolve_allowlist(src, list(args.allowlist or [])),
                     known={p.strip() for p in (args.preserve or []) if p.strip()},
                     redact_court_staff=staff,

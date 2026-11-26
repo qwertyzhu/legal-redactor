@@ -245,6 +245,7 @@ Details: [skills/legal-document-redactor/references/methodology.md](skills/legal
 - DOCX: entities split across runs are replaced in place, keeping every other run's formatting; only an entity crossing a tab/line break/tracked-change boundary collapses the paragraph
 - Natural-language names are rule-based (role words, relation words, company suffixes); unanchored names and app/product names can still slip through. In `ai` mode, `verify` lists name/org/address candidates left in the output as WARN — use `--strict` before delivery
 - Batch redact is flat output names (recursive mode disambiguates colliding basenames)
+- If batch `redact` skips an input because it could not process it, `--json` reports `ok: false` and the command exits with code 1 (code 2 takes precedence for a residual scan failure unless overridden). `--allow-residual` does not override skipped inputs.
 - Directory `verify` will scan all supported suffixes present (including `.json` sidecars if mixed in)
 - Not legal advice; not a substitute for firm confidentiality procedure
 

@@ -384,6 +384,10 @@ header {
   background: var(--border);
 }
 
+@media (max-width: 380px) {
+  #btnDownloadAudit { padding-inline: 12px; }
+}
+
 .btn-block {
   width: 100%;
   margin-top: 24px;
@@ -686,14 +690,15 @@ footer {
           <strong id="fileName">文档.pdf</strong>
           <span id="fileSize" style="color:var(--text-muted);">(0 KB)</span>
           <span id="fileTextLayerBadge" class="badge badge-success hidden">✅ 矢量文字层已解析</span>
-          <span id="fileScanBadge" class="badge badge-warning hidden">⚠️ 纯扫描件图片 (无可提取文字层)</span>
+          <span id="fileScanBadge" class="badge badge-warning hidden">⚠️ 含无文字层的扫描页</span>
         </div>
         <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="resetFile()">重新选择</button>
       </div>
 
       <div id="scannedAlert" class="alert alert-warning hidden">
         <div>
-          <strong>⚠️ 纯扫描件提示：</strong>该 PDF 未发现矢量文字层（为纯扫描图片）。纯浏览器环境不支持图片 OCR 识别，建议优先使用带有文字层的电子版 PDF 或 Word 文档。
+          <strong>⚠️ 扫描页未脱敏：</strong><span id="scannedPageNotice"></span>
+          浏览器不支持图片 OCR，未生成脱敏文件。请换用带文字层的原始电子版，或使用本地 OCR 后再脱敏。
         </div>
       </div>
 
@@ -788,10 +793,13 @@ footer {
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a id="btnDownloadFile" class="btn btn-primary" href="#" download>📥 下载脱敏后文档</a>
             <button id="btnDownloadMdText" class="btn btn-secondary hidden" onclick="downloadCurrentRedactedMd()">📝 下载脱敏纯文本 (.md · 推荐喂给 AI)</button>
-            <button id="btnDownloadAudit" class="btn btn-secondary" onclick="downloadCurrentAudit()">📄 下载审计报告 (.md)</button>
+            <button id="btnDownloadAudit" class="btn btn-secondary" aria-describedby="auditDownloadHint" onclick="downloadCurrentAudit()">📄 下载审计（含未脱敏原文）</button>
             <button id="btnDownloadLedger" class="btn btn-secondary" onclick="downloadCurrentLedger()">🔐 导出还原账本 (.json)</button>
           </div>
         </div>
+        <p id="auditDownloadHint" class="alert alert-warning" style="margin-top:0;margin-bottom:14px;">
+          <span>审计报告（.md）含<strong>未脱敏原文</strong>，请勿随脱敏文档一同外发。</span>
+        </p>
         <div id="pdfRasterNotice" class="alert alert-success hidden" style="margin-top:0;margin-bottom:14px;">
           <div>🔒 <strong>PDF 物理级栅格脱敏已完成：</strong>导出的 PDF 已通过 Canvas 像素重绘重建，原文件底层文字流、隐藏图层与元数据已 100% 物理清除（不可复制原字）。若需发给在线大模型分析，建议同时点击上方「下载脱敏纯文本 (.md)」，省 Token 且识别更准。</div>
         </div>
@@ -1362,6 +1370,12 @@ dropzone.addEventListener('drop', (e) => {
 async function handleFileSelect(file) {
   if (!file) return;
   currentFile = file;
+  currentArrayBuffer = null;
+  document.getElementById('fileResultPanel').classList.add('hidden');
+  document.getElementById('btnDownloadFile').removeAttribute('href');
+  document.getElementById('fileTextLayerBadge').classList.add('hidden');
+  document.getElementById('fileScanBadge').classList.add('hidden');
+  document.getElementById('scannedAlert').classList.add('hidden');
 
   document.getElementById('fileName').textContent = file.name;
   document.getElementById('fileSize').textContent = `(${formatSize(file.size)})`;
@@ -1379,44 +1393,39 @@ async function handleFileSelect(file) {
 
   document.getElementById('fileInfoBar').classList.remove('hidden');
   document.getElementById('fileDropzone').classList.add('hidden');
-  document.getElementById('fileStartBtn').disabled = true;
-  document.getElementById('fileStartBtn').innerHTML = '<span class="spinner"></span> 正在解析文件...';
+  const startBtn = document.getElementById('fileStartBtn');
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<span class="spinner"></span> 正在解析文件...';
 
-  currentArrayBuffer = await file.arrayBuffer();
-
-  // 如果是 PDF，检查文字层
-  if (ext === 'pdf') {
-    try {
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(currentArrayBuffer.slice(0)) }).promise;
-      let hasText = false;
-      for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        if (textContent.items.length > 0 && textContent.items.some(item => item.str.trim().length > 0)) {
-          hasText = true;
-          break;
-        }
-      }
-      if (hasText) {
-        document.getElementById('fileTextLayerBadge').classList.remove('hidden');
-        document.getElementById('fileScanBadge').classList.add('hidden');
-        document.getElementById('scannedAlert').classList.add('hidden');
-      } else {
-        document.getElementById('fileTextLayerBadge').classList.add('hidden');
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    if (currentFile !== file) return;
+    if (ext === 'pdf') {
+      const task = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+      const { pageEntries, scanPages } = await task.promise.then(readPdfPages)
+        .finally(() => task.destroy());
+      if (currentFile !== file) return;
+      if (scanPages.length) {
+        document.getElementById('scannedPageNotice').textContent = scanPageNotice(scanPages);
         document.getElementById('fileScanBadge').classList.remove('hidden');
         document.getElementById('scannedAlert').classList.remove('hidden');
+        startBtn.textContent = '扫描页未脱敏';
+        return;
       }
-    } catch(err) {
-      console.warn("PDF parse note:", err);
+      if (pageEntries.some(({ text }) => text.trim())) {
+        document.getElementById('fileTextLayerBadge').classList.remove('hidden');
+      }
     }
-  } else {
-    document.getElementById('fileTextLayerBadge').classList.add('hidden');
-    document.getElementById('fileScanBadge').classList.add('hidden');
-    document.getElementById('scannedAlert').classList.add('hidden');
+    currentArrayBuffer = arrayBuffer;
+  } catch (err) {
+    if (currentFile !== file) return;
+    startBtn.textContent = '文件读取失败';
+    alert('无法读取文件: ' + err.message);
+    return;
   }
 
-  document.getElementById('fileStartBtn').disabled = false;
-  document.getElementById('fileStartBtn').innerHTML = '<span>立即开始脱敏处理</span>';
+  startBtn.disabled = false;
+  startBtn.innerHTML = '<span>立即开始脱敏处理</span>';
 
   appendChatBubble('assistant', `📄 已接收文档：<strong>${escapeHtml(file.name)}</strong> (${formatSize(file.size)})。你可以直接在下方提出任何个性化要求，或者直接点击「开始脱敏」。`);
 }
@@ -1655,6 +1664,7 @@ function applyPlanToText(text, plan) {
 // 开始脱敏主入口
 async function startFileRedact() {
   if (!currentFile || !currentArrayBuffer) return;
+  const file = currentFile;
   const startBtn = document.getElementById('fileStartBtn');
   startBtn.disabled = true;
   startBtn.innerHTML = '<span class="spinner"></span> 正在本地脱敏处理中...';
@@ -1682,29 +1692,31 @@ async function startFileRedact() {
     let resultBlob = null;
     let outFileName = '';
     let plan = [];
-    currentRedactedMdText = '';
+    let redactedText = '';
 
     if (ext === 'docx') {
       const res = await redactDocx(currentArrayBuffer, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
       resultBlob = res.blob;
       plan = res.plan;
-      currentRedactedMdText = res.redactedText || '';
-      outFileName = currentFile.name.replace(/\.docx$/i, `.redacted-${mode}.docx`);
+      redactedText = res.redactedText || '';
+      outFileName = file.name.replace(/\.docx$/i, `.redacted-${mode}.docx`);
     } else if (ext === 'pdf') {
       const res = await redactPdf(currentArrayBuffer, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
       resultBlob = res.blob;
       plan = res.plan;
-      currentRedactedMdText = res.redactedText || '';
-      outFileName = currentFile.name.replace(/\.pdf$/i, `.redacted-${mode}.pdf`);
+      redactedText = res.redactedText || '';
+      outFileName = file.name.replace(/\.pdf$/i, `.redacted-${mode}.pdf`);
     } else {
       const text = new TextDecoder('utf-8').decode(currentArrayBuffer);
       plan = buildRedactionPlan(text, { mode, autoConfident, keepUscc, redactStaff, customEntities, allowlist });
       const outText = applyPlanToText(text, plan);
-      currentRedactedMdText = outText;
+      redactedText = outText;
       resultBlob = new Blob([outText], { type: 'text/plain;charset=utf-8' });
       outFileName = currentFile.name.replace(/\.(txt|md)$/i, `.redacted-${mode}.$1`);
     }
 
+    if (currentFile !== file) return;
+    currentRedactedMdText = redactedText;
     currentPlan = plan;
     currentLedgerJson = { mode, timestamp: new Date().toISOString(), entities: plan };
     currentAuditMd = generateAuditMarkdown(currentFile.name, outFileName, mode, plan);
@@ -1731,6 +1743,7 @@ async function startFileRedact() {
     startBtn.disabled = false;
     startBtn.innerHTML = '<span>重新脱敏</span>';
   } catch (err) {
+    if (currentFile !== file) return;
     startBtn.disabled = false;
     startBtn.innerHTML = '<span>立即开始脱敏处理</span>';
     alert('脱敏处理异常: ' + err.message);
@@ -1839,7 +1852,18 @@ function collectParagraphSegments(pEl) {
   return groups;
 }
 
-// DOCX 纯浏览器 DOM 级原位脱敏（支持跨 run 拼接、清理修订及元数据）
+function scrubStructuralPii(text) {
+  if (!text) return text;
+  return text
+    .replace(/(?<=:\/\/)([^/\s:@]{1,64}:[^/\s@]{4,64})@/g, '[参数]@')
+    .replace(/([?&](?:access_token|refresh_token|id_token|token|password|passwd|pwd|secret|session|sid|api_key|apikey|key|auth|cookie)=)([^&#\s<>"'\]）)，。；、]{4,})/gi, '$1[参数]')
+    .replace(/(?<!\d)[1-9]\d{5}[\s-]?(?:19|20)\d{2}[\s-]?(?:0[1-9]|1[0-2])[\s-]?(?:0[1-9]|[12]\d|3[01])[\s-]?\d{3}[\s-]?[\dXx](?!\d)/g, '[身份证号]')
+    .replace(/(?<!\d)1[3-9](?:[\s\u3000-]{0,2}\d){9}(?!\d)/g, '[手机号]')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[邮箱]')
+    .replace(/(?<!\d)(?:0\d{2,3}(?:[\s\u3000-]*\d){7,8}|[48]00(?:[\s\u3000-]*\d){7})(?!\d)/g, '[电话]');
+}
+
+// DOCX 纯浏览器 DOM 级原位脱敏（支持跨 run 拼接、清理修订、元数据及外链）
 async function redactDocx(arrayBuffer, options) {
   const zip = await JSZip.loadAsync(arrayBuffer);
   const parser = new DOMParser();
@@ -1877,21 +1901,107 @@ async function redactDocx(arrayBuffer, options) {
     zip.file(part.name, serializer.serializeToString(part.xmlDoc));
   }
 
+  const clearCoreTags = new Set(['title', 'subject', 'description', 'keywords', 'category', 'contentStatus']);
+  const skipCoreTags = new Set(['created', 'modified', 'lastPrinted', 'revision']);
   if (zip.file('docProps/core.xml')) {
     const coreDoc = parser.parseFromString(await zip.file('docProps/core.xml').async('string'), 'application/xml');
     for (const el of Array.from(coreDoc.getElementsByTagName('*'))) {
       const tag = localTagName(el);
       if (tag === 'creator' || tag === 'lastModifiedBy') el.textContent = '作者';
-      else if (el.textContent && el.children.length === 0) el.textContent = applyPlanToText(el.textContent, plan);
+      else if (clearCoreTags.has(tag)) el.textContent = '';
+      else if (!skipCoreTags.has(tag) && el.textContent && el.children.length === 0) {
+        el.textContent = scrubStructuralPii(applyPlanToText(el.textContent, plan));
+      }
     }
     zip.file('docProps/core.xml', serializer.serializeToString(coreDoc));
   }
   if (zip.file('docProps/app.xml')) {
     const appDoc = parser.parseFromString(await zip.file('docProps/app.xml').async('string'), 'application/xml');
     for (const el of Array.from(appDoc.getElementsByTagName('*'))) {
-      if (['Company', 'Manager', 'HyperlinkBase'].includes(localTagName(el))) el.textContent = '';
+      if (['Company', 'Manager', 'CompanyDoc', 'HyperlinkBase'].includes(localTagName(el))) el.textContent = '';
     }
     zip.file('docProps/app.xml', serializer.serializeToString(appDoc));
+  }
+  if (zip.file('docProps/custom.xml')) {
+    const customDoc = parser.parseFromString(await zip.file('docProps/custom.xml').async('string'), 'application/xml');
+    const root = customDoc.documentElement;
+    if (root) {
+      while (root.firstChild) root.removeChild(root.firstChild);
+    }
+    zip.file('docProps/custom.xml', serializer.serializeToString(customDoc));
+  }
+  const dropHttp = (options.mode || 'ai') !== 'production';
+  const relsNames = Object.keys(zip.files).filter(f => /^word\/_rels\/.*\.rels$/.test(f));
+  for (const relName of relsNames) {
+    const relDoc = parser.parseFromString(await zip.file(relName).async('string'), 'application/xml');
+    let relChanged = false;
+    for (const el of Array.from(relDoc.getElementsByTagName('*'))) {
+      if (localTagName(el) !== 'Relationship') continue;
+      const target = el.getAttribute('Target') || '';
+      if (/^(?:mailto|tel):/i.test(target)) {
+        el.setAttribute('Target', '#');
+        relChanged = true;
+      } else if (el.getAttribute('TargetMode') === 'External') {
+        if (dropHttp) {
+          el.setAttribute('Target', '#');
+          relChanged = true;
+        } else if (target) {
+          let scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
+          if (scrubbed.includes('%')) {
+            const secretKeyRe = /^(?:access_token|refresh_token|id_token|token|password|passwd|pwd|secret|session|sid|api_key|apikey|key|auth|cookie)$/i;
+            const scrubPart = (part, escapeSlash, escapeQuery) => {
+              try {
+                const decoded = decodeURIComponent(part);
+                if (decoded === part) return part;
+                let cleaned = scrubStructuralPii(applyPlanToText(decoded, plan));
+                if (cleaned === decoded) return part;
+                if (escapeSlash) cleaned = cleaned.replace(/\//g, '%2F');
+                if (escapeQuery) cleaned = cleaned.replace(/&/g, '%26').replace(/#/g, '%23');
+                return cleaned;
+              } catch (_) {
+                return part;
+              }
+            };
+            const hashIdx = scrubbed.indexOf('#');
+            const beforeHash = hashIdx >= 0 ? scrubbed.slice(0, hashIdx) : scrubbed;
+            const frag = hashIdx >= 0 ? '#' + scrubPart(scrubbed.slice(hashIdx + 1), false, false) : '';
+            const qIdx = beforeHash.indexOf('?');
+            const base = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
+            const query = qIdx >= 0
+              ? '?' + beforeHash.slice(qIdx + 1).split('&').map(item => {
+                  const eq = item.indexOf('=');
+                  if (eq >= 0) {
+                    const k = item.slice(0, eq);
+                    const v = item.slice(eq + 1);
+                    let dk = k;
+                    let dv = v;
+                    try { dk = decodeURIComponent(k); } catch (_) {}
+                    try { dv = decodeURIComponent(v); } catch (_) {}
+                    if (secretKeyRe.test(dk) && dv.length >= 4) {
+                      return dk + '=[参数]';
+                    }
+                    return scrubPart(k, false, true) + '=' + scrubPart(v, false, true);
+                  }
+                  return scrubPart(item, false, true);
+                }).join('&')
+              : '';
+            const schemeIdx = base.indexOf('://');
+            const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : 0;
+            const rebuiltBase = pathStart >= 0
+              ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true, false)).join('/')
+              : base;
+            scrubbed = rebuiltBase + query + frag;
+          }
+          if (scrubbed !== target) {
+            el.setAttribute('Target', scrubbed);
+            relChanged = true;
+          }
+        }
+      }
+    }
+    if (relChanged) {
+      zip.file(relName, serializer.serializeToString(relDoc));
+    }
   }
 
   const blob = await zip.generateAsync({
@@ -1909,21 +2019,40 @@ function dataUrlToUint8Array(dataUrl) {
   return bytes;
 }
 
-// PDF 纯浏览器物理级脱敏：Canvas 2x 栅格化涂抹重打包（彻底销毁原底层文字流与隐藏元数据）
-async function redactPdf(arrayBuffer, options) {
-  const pdfJsDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
-  const pageEntries = [];
-  const pageTexts = [];
+function scanPageNotice(pages) {
+  return `第 ${pages.join('、')} 页没有文字层（扫描图片），未脱敏。`;
+}
 
-  for (let i = 1; i <= pdfJsDoc.numPages; i++) {
-    const page = await pdfJsDoc.getPage(i);
+async function readPdfPages(pdf) {
+  const ops = pdfjsLib.OPS;
+  const imageOps = new Set([
+    ops.paintImageXObject, ops.paintImageXObjectRepeat,
+    ops.paintInlineImageXObject, ops.paintInlineImageXObjectGroup,
+    ops.paintImageMaskXObject, ops.paintImageMaskXObjectGroup, ops.paintImageMaskXObjectRepeat,
+  ]);
+  const pageEntries = [];
+  const scanPages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const items = textContent.items || [];
-    pageEntries.push({ page, items });
-    pageTexts.push(items.map(it => it.str || '').join(''));
+    const text = items.map(it => it.str || '').join('');
+    pageEntries.push({ page, items, text });
+    if (!text.trim()) {
+      const { fnArray } = await page.getOperatorList();
+      if (fnArray.some(op => imageOps.has(op))) scanPages.push(i);
+    }
   }
+  return { pageEntries, scanPages };
+}
 
-  const fullText = pageTexts.join('\n');
+// PDF 纯浏览器物理级脱敏：Canvas 2x 栅格化涂抹重打包（彻底销毁原底层文字流与隐藏元数据）
+async function redactPdf(arrayBuffer, options) {
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+  const { pageEntries, scanPages } = await readPdfPages(pdf);
+  if (scanPages.length) throw new Error(scanPageNotice(scanPages));
+
+  const fullText = pageEntries.map(({ text }) => text).join('\n');
   const plan = buildRedactionPlan(fullText, options);
   const redactedText = applyPlanToText(fullText, plan);
 
