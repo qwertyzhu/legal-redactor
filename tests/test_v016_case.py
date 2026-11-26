@@ -3,6 +3,9 @@
 import json
 from pathlib import Path
 
+import pymupdf
+from docx import Document
+
 from legal_redactor.cli import main
 from legal_redactor.pipeline import find_case_entities, iter_batch_inputs, redact_tree
 
@@ -45,6 +48,38 @@ def test_batch_skips_entities_and_keeps_ledgers_private(tmp_path: Path):
     assert not list(out.glob("*.ledger.json"))
     assert list((src / ".redactor").glob("*.ledger.json"))
     assert not (out / "entities.json").exists()
+
+
+def test_batch_same_stem_keeps_each_documents_ledger_and_audit(tmp_path: Path):
+    src = tmp_path / "case"
+    src.mkdir()
+    docx = Document()
+    docx.add_paragraph("Synthetic DOCX contract")
+    docx.save(src / "contract.docx")
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((72, 72), "Synthetic PDF contract")
+        pdf.save(src / "contract.pdf")
+    (src / "contract.txt").write_text("Synthetic TXT contract", encoding="utf-8")
+
+    batch = redact_tree(src, mode="production", output_dir=tmp_path / "out")
+
+    assert batch.ok and not batch.skipped
+    assert {r.output_path.name for r in batch.results} == {
+        "contract.redacted-production.docx",
+        "contract.redacted-production.pdf",
+        "contract.redacted-production.txt",
+    }
+    private = src / ".redactor"
+    for suffix in ("ledger.json", "audit.json", "audit.md"):
+        assert len(list(private.glob(f"*.{suffix}"))) == 3, suffix
+    for result in batch.results:
+        for path in (result.ledger_path, result.audit_json_path):
+            assert path is not None and path.parent == private
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            assert payload["input_path"] == str(result.input_path)
+            assert payload["output_path"] == str(result.output_path)
+        assert result.audit_md_path is not None
+        assert f"`{result.input_path}`" in result.audit_md_path.read_text(encoding="utf-8")
 
 
 def test_cli_directory_does_not_merge_unrelated_files(tmp_path: Path, monkeypatch):
