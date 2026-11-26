@@ -51,7 +51,11 @@ def scrub_structural_text(
 
 
 def _scrub_encoded_part(
-    part: str, mapping: list[tuple[str, str]], *, escape_slash: bool = False
+    part: str,
+    mapping: list[tuple[str, str]],
+    *,
+    escape_slash: bool = False,
+    escape_query: bool = False,
 ) -> str:
     decoded = unquote(part)
     if decoded == part:
@@ -61,7 +65,15 @@ def _scrub_encoded_part(
     )
     if scrubbed == decoded:
         return part
-    return scrubbed.replace("/", "%2F") if escape_slash else scrubbed
+    if escape_slash:
+        scrubbed = scrubbed.replace("/", "%2F")
+    if escape_query:
+        scrubbed = scrubbed.replace("&", "%26").replace("#", "%23")
+    return scrubbed
+
+
+def _is_url_secret_param(name: str) -> bool:
+    return any(h.category == "url_secret" for h in detect_structural(f"?{name}=XXXX"))
 
 
 def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None) -> str:
@@ -85,20 +97,17 @@ def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None
     if q_sep:
         new_query_items = []
         for item in query.split("&"):
-            decoded_item = unquote(item)
-            if decoded_item != item:
-                probe = f"?{decoded_item}"
-                scrubbed_probe = scrub_structural_text(
-                    apply_mapping_to_text(probe, pairs), categories=URL_SECRET_CATEGORIES
-                )
-                if scrubbed_probe != probe:
-                    new_query_items.append(scrubbed_probe[1:])
-                    continue
             if "=" in item:
                 k, v = item.split("=", 1)
-                new_query_items.append(f"{k}={_scrub_encoded_part(v, pairs)}")
+                dk = unquote(k)
+                if _is_url_secret_param(dk) and len(unquote(v)) >= 4:
+                    new_query_items.append(f"{dk}={structural_placeholder('url_secret', item, 0)}")
+                else:
+                    new_k = _scrub_encoded_part(k, pairs, escape_query=True)
+                    new_v = _scrub_encoded_part(v, pairs, escape_query=True)
+                    new_query_items.append(f"{new_k}={new_v}")
             else:
-                new_query_items.append(_scrub_encoded_part(item, pairs))
+                new_query_items.append(_scrub_encoded_part(item, pairs, escape_query=True))
         new_query = "?" + "&".join(new_query_items)
     else:
         new_query = ""

@@ -1941,42 +1941,47 @@ async function redactDocx(arrayBuffer, options) {
         } else if (target) {
           let scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
           if (scrubbed.includes('%')) {
-            const scrubPart = (part, escapeSlash) => {
+            const secretKeyRe = /^(?:access_token|refresh_token|id_token|token|password|passwd|pwd|secret|session|sid|api_key|apikey|key|auth|cookie)$/i;
+            const scrubPart = (part, escapeSlash, escapeQuery) => {
               try {
                 const decoded = decodeURIComponent(part);
                 if (decoded === part) return part;
-                const cleaned = scrubStructuralPii(applyPlanToText(decoded, plan));
+                let cleaned = scrubStructuralPii(applyPlanToText(decoded, plan));
                 if (cleaned === decoded) return part;
-                return escapeSlash ? cleaned.replace(/\//g, '%2F') : cleaned;
+                if (escapeSlash) cleaned = cleaned.replace(/\//g, '%2F');
+                if (escapeQuery) cleaned = cleaned.replace(/&/g, '%26').replace(/#/g, '%23');
+                return cleaned;
               } catch (_) {
                 return part;
               }
             };
             const hashIdx = scrubbed.indexOf('#');
             const beforeHash = hashIdx >= 0 ? scrubbed.slice(0, hashIdx) : scrubbed;
-            const frag = hashIdx >= 0 ? '#' + scrubPart(scrubbed.slice(hashIdx + 1), false) : '';
+            const frag = hashIdx >= 0 ? '#' + scrubPart(scrubbed.slice(hashIdx + 1), false, false) : '';
             const qIdx = beforeHash.indexOf('?');
             const base = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
             const query = qIdx >= 0
               ? '?' + beforeHash.slice(qIdx + 1).split('&').map(item => {
-                  try {
-                    const decodedItem = decodeURIComponent(item);
-                    if (decodedItem !== item) {
-                      const probe = '?' + decodedItem;
-                      const cleanedProbe = scrubStructuralPii(applyPlanToText(probe, plan));
-                      if (cleanedProbe !== probe) return cleanedProbe.slice(1);
-                    }
-                  } catch (_) {}
                   const eq = item.indexOf('=');
-                  return eq >= 0
-                    ? item.slice(0, eq + 1) + scrubPart(item.slice(eq + 1), false)
-                    : scrubPart(item, false);
+                  if (eq >= 0) {
+                    const k = item.slice(0, eq);
+                    const v = item.slice(eq + 1);
+                    let dk = k;
+                    let dv = v;
+                    try { dk = decodeURIComponent(k); } catch (_) {}
+                    try { dv = decodeURIComponent(v); } catch (_) {}
+                    if (secretKeyRe.test(dk) && dv.length >= 4) {
+                      return dk + '=[参数]';
+                    }
+                    return scrubPart(k, false, true) + '=' + scrubPart(v, false, true);
+                  }
+                  return scrubPart(item, false, true);
                 }).join('&')
               : '';
             const schemeIdx = base.indexOf('://');
             const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : 0;
             const rebuiltBase = pathStart >= 0
-              ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true)).join('/')
+              ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true, false)).join('/')
               : base;
             scrubbed = rebuiltBase + query + frag;
           }

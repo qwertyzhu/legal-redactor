@@ -384,7 +384,10 @@ def test_credential_bearing_url_with_escaped_path_does_not_crash(tmp_path: Path)
 
 
 def test_percent_encoded_query_name_token_scrubbed(tmp_path: Path):
-    encoded_token_url = "https://example-fictional.test/a%2Fb/doc?%74oken=tok999999&keep=x%2Fy"
+    encoded_token_url = (
+        "https://example-fictional.test/a%2Fb/doc"
+        "?%70assword=sec%23rest&note=136%200000%204444%23tail&keep=x%2Fy"
+    )
     src_docx = _make_docx_with_hidden_pii(
         tmp_path / "enctok.docx", title="", subject="", keywords="", http_target=encoded_token_url
     )
@@ -393,9 +396,10 @@ def test_percent_encoded_query_name_token_scrubbed(tmp_path: Path):
     assert res.residual.ok, res.residual.hits
     with zipfile.ZipFile(out_docx) as z:
         rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
-    assert "tok999999" not in rels
+    assert "sec" not in rels and "rest" not in rels
+    assert "136%200000%204444" not in rels and "136 0000 4444" not in rels
+    assert "%23tail&amp;keep=x%2Fy" in rels
     assert "/a%2Fb/doc" in rels
-    assert "keep=x%2Fy" in rels
 
 
 def test_relative_link_first_segment_encoded_phone_scrubbed(tmp_path: Path):
