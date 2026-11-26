@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,7 +19,13 @@ from .ledger_store import (
 from .profiles_loader import Profile, resolve_profile
 from .formats import docx_io, pdf_io, text_io
 from .patterns import categories_for_mode
-from .suspects import CONTRACT_PARTY_REASONS, EXPLICIT_PERSON_REASONS, Suspect, detect_suspects
+from .suspects import (
+    AMBIGUOUS_CONTRACT_PARTY,
+    CONTRACT_PARTY_REASONS,
+    EXPLICIT_PERSON_REASONS,
+    Suspect,
+    detect_suspects,
+)
 from .verify import ResidualReport, add_unreplaced, scan_residual, unreplaced_originals
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".csv", ".json"}
@@ -395,24 +401,22 @@ def redact_file(
     planned = [e.original for e in plan.entities if e.original]
     planned_party_names = [e.original for e in plan.entities if e.notes in CONTRACT_PARTY_REASONS]
     residual_names = {w["text"] for w in residual.warnings if w["category"] == "person"}
-    if planned:
-        suspects = [
-            s
-            for s in suspects
-            if not (
-                s.reason not in CONTRACT_PARTY_REASONS
-                and s.text
-                and not (
-                    (s.reason in EXPLICIT_PERSON_REASONS or s.role_hint == "third_party")
-                    and s.text in residual_names
-                    and any(s.text in name for name in planned_party_names)
-                )
-                and any(
-                    s.text != original and (s.text in original or original in s.text)
-                    for original in planned
-                )
-            )
-        ]
+    pending = []
+    for s in suspects:
+        if s.reason in CONTRACT_PARTY_REASONS:
+            pending.append(s)
+        elif (
+            (s.reason in EXPLICIT_PERSON_REASONS or s.role_hint == "third_party")
+            and s.text in residual_names
+            and any(s.text != name and s.text in name for name in planned_party_names)
+        ):
+            pending.append(replace(s, reason=AMBIGUOUS_CONTRACT_PARTY))
+        elif not s.text or not any(
+            s.text != original and (s.text in original or original in s.text)
+            for original in planned
+        ):
+            pending.append(s)
+    suspects = pending
 
     ledger_target = resolve_ledger_path(
         input_path,

@@ -479,7 +479,7 @@ def _print_handoff(
         return
     ambiguous = [s for s in pending if s.reason == AMBIGUOUS_CONTRACT_PARTY]
     if ambiguous:
-        print("handoff:    以下二字姓名也出现在合同方字段之外，须人工核对，不要直接补入 entities.json。")
+        print("handoff:    以下疑似姓名与合同方姓名或正文用语重合，须人工核对，不要直接补入 entities.json。")
         for item in ambiguous[:8]:
             print(f"handoff:    {item.category}\t{item.text}")
         if len(ambiguous) > 8:
