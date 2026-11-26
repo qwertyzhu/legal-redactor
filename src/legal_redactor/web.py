@@ -1016,6 +1016,13 @@ header {
   background: var(--border);
 }
 
+@media (max-width: 380px) {
+  #btnDownloadAudit {
+    padding-inline: 8px;
+    font-size: 14px;
+  }
+}
+
 .btn-success {
   background: var(--success);
   color: #fff;
@@ -1249,17 +1256,20 @@ footer {
 
       <!-- RESULTS PANEL -->
       <div id="fileResultPanel" class="hidden" style="margin-top:24px;border-top:1px solid var(--border);padding-top:20px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <span id="resultStatusBadge" class="badge badge-success">PASS</span>
             <strong id="resultSummaryText" style="font-size:16px;">脱敏完成</strong>
           </div>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a id="btnDownloadFile" class="btn btn-primary" href="#" download>📥 下载脱敏后文档</a>
-            <a id="btnDownloadAudit" class="btn btn-secondary" href="#" download>📄 下载审计报告 (.md)</a>
+            <a id="btnDownloadAudit" class="btn btn-secondary" href="#" aria-describedby="auditDownloadHint" download>📄 下载审计（含未脱敏原文）</a>
             <a id="btnDownloadLedger" class="btn btn-secondary" href="#" download>🔐 导出还原账本 (.json)</a>
           </div>
         </div>
+        <p id="auditDownloadHint" class="alert alert-warning hidden" style="margin-top:0;margin-bottom:14px;">
+          <span>审计报告（.md）含<strong>未脱敏原文</strong>，请勿随脱敏文档一同外发。</span>
+        </p>
 
         <div id="fileResultAlerts"></div>
 
@@ -1648,12 +1658,12 @@ function renderFileResult(data) {
   btnFile.download = data.out_filename;
 
   const btnAudit = document.getElementById('btnDownloadAudit');
+  const auditHint = document.getElementById('auditDownloadHint');
   if (data.download_audit_url) {
     btnAudit.href = data.download_audit_url;
-    btnAudit.classList.remove('hidden');
-  } else {
-    btnAudit.classList.add('hidden');
   }
+  btnAudit.classList.toggle('hidden', !data.download_audit_url);
+  auditHint.classList.toggle('hidden', !data.download_audit_url);
 
   const btnLedger = document.getElementById('btnDownloadLedger');
   if (data.download_ledger_url) {

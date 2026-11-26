@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import socket
 import tempfile
 import threading
@@ -80,6 +81,14 @@ def test_get_root(web_server):
         html = resp.read().decode("utf-8")
         assert "中国法律文书" in html
         assert "文档脱敏" in html
+        assert re.search(
+            r'<a\b[^>]*\bid="btnDownloadAudit"[^>]*\baria-describedby="auditDownloadHint"[^>]*>'
+            r'[^<]*下载审计（含未脱敏原文）</a>',
+            html,
+        )
+        hint = re.search(r'<p\b[^>]*\bid="auditDownloadHint"[^>]*>(.*?)</p>', html, re.DOTALL)
+        assert hint is not None
+        assert "未脱敏原文" in hint[1]
 
 
 def test_get_doctor(web_server):
