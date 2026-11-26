@@ -76,6 +76,29 @@ def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf,
     assert "unreplaced_entity: 郝测一" in printed
 
 
+@pytest.mark.parametrize("positioned", [False, True])
+def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, capsys, positioned):
+    _, entities = short_names_pdf
+    src = tmp_path / "indented.pdf"
+    out = tmp_path / "indented.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        if positioned:
+            page.insert_text((24, 40), "记录中提及郝测", fontname="china-s")
+            page.insert_text((46, 55), "一于当天到场", fontname="china-s")
+        else:
+            page.insert_text((24, 40), "记录中提及郝测\n　　一于当天到场", fontname="china-s")
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 2
+    assert "unreplaced_entity: 郝测一" in capsys.readouterr().out
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "郝测" not in text
+    assert "一于当天到场" not in text
+    assert "于当天到场" in text
+
+
 def _suspect(text: str, category: str = "organization") -> Suspect:
     return Suspect(text=text, category=category, reason="org_suffix", start=0, end=len(text))
 

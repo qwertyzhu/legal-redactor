@@ -138,12 +138,16 @@ def _short_name_is_local(
         if rows[i] == rows[i - 1]:
             if not 0 <= curr.x0 - prev.x0 <= prev.width + width:
                 return False
-        elif not (
-            rows[i] == rows[i - 1] + 1
-            and 0 < curr.y0 - prev.y0 <= 2 * max(prev.height, curr.height)
-            and abs(curr.x0 - lefts[rows[i - 1]]) <= width
-        ):
-            return False
+        else:
+            height = max(prev.height, curr.height)
+            indent = abs(curr.x0 - lefts[rows[i - 1]])
+            gap = curr.y0 - prev.y0
+            if rows[i] != rows[i - 1] + 1 or not 0 < gap <= 2 * height:
+                return False
+            if indent > width and not (
+                indent <= 2 * width and gap <= 1.5 * height and curr.x0 <= prev.x0
+            ):
+                return False
     return True
 
 
