@@ -74,7 +74,7 @@ def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None
     before_hash, hash_sep, fragment = scrubbed.partition("#")
     base, q_sep, query = before_hash.partition("?")
     scheme_idx = base.find("://")
-    path_start = base.find("/", scheme_idx + 3) if scheme_idx >= 0 else base.find("/")
+    path_start = base.find("/", scheme_idx + 3) if scheme_idx >= 0 else 0
     if path_start >= 0:
         prefix, path = base[:path_start], base[path_start:]
         new_base = prefix + "/".join(

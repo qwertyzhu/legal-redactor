@@ -398,6 +398,20 @@ def test_percent_encoded_query_name_token_scrubbed(tmp_path: Path):
     assert "keep=x%2Fy" in rels
 
 
+def test_relative_link_first_segment_encoded_phone_scrubbed(tmp_path: Path):
+    rel_url = "136%200000%204444/exhibit.pdf"
+    src_docx = _make_docx_with_hidden_pii(
+        tmp_path / "rel.docx", title="", subject="", keywords="", http_target=rel_url
+    )
+    out_docx = tmp_path / "rel.out.docx"
+    res = redact_file(src_docx, mode="production", output_path=out_docx)
+    assert res.residual.ok, res.residual.hits
+    with zipfile.ZipFile(out_docx) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert "136%200000%204444" not in rels and "136 0000 4444" not in rels
+    assert "/exhibit.pdf" in rels
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

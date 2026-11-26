@@ -1974,7 +1974,7 @@ async function redactDocx(arrayBuffer, options) {
                 }).join('&')
               : '';
             const schemeIdx = base.indexOf('://');
-            const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : base.indexOf('/');
+            const pathStart = schemeIdx >= 0 ? base.indexOf('/', schemeIdx + 3) : 0;
             const rebuiltBase = pathStart >= 0
               ? base.slice(0, pathStart) + base.slice(pathStart).split('/').map(s => scrubPart(s, true)).join('/')
               : base;
