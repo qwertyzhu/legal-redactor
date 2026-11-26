@@ -28,6 +28,7 @@ test('publish falls back to the city instead of retaining a named development', 
     ['苏州市星河园区8号楼', '苏州市'],
     ['苏州市云桥社区6号', '苏州市'],
     ['上海市浦东新区晨光小区3栋', '上海市浦东新区'],
+    ['山东省东营市东营区测试路8号', '山东省东营市东营区'],
   ]) {
     assert.equal(redact(`住${address}`, { mode: 'publish' }), `住${expected}`);
   }

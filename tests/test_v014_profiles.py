@@ -146,6 +146,7 @@ def test_publish_never_keeps_a_full_compound_surname_name(tmp_path: Path, name: 
         ("苏州市星河园区8号楼", "苏州市"),
         ("苏州市云桥社区6号", "苏州市"),
         ("上海市浦东新区晨光小区3栋", "上海市浦东新区"),
+        ("山东省东营市东营区测试路8号", "山东省东营市东营区"),
     ],
 )
 def test_publish_uses_city_when_there_is_no_district(tmp_path: Path, address: str, expected: str):

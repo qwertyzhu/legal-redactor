@@ -1482,7 +1482,7 @@ function hasValidSurname(name) {
 
 function publishAddressAlias(address) {
   const head = address.slice(0, 24);
-  const district = head.match(/^.{2,20}?(?<!自治)(?:(?<![小园社校景厂院营])区|[县旗])/);
+  const district = head.match(/^.{2,20}?(?<!自治)(?:(?<![小园社校景厂院])区|[县旗])/);
   const city = head.match(/^.{2,12}?(?:市|自治州|盟)(?:[^市县区旗镇乡村街道路号]{2,4}?(?<![超菜夜集早花鱼])市(?!部))?/);
   return district?.[0] || city?.[0] || '某地址';
 }
