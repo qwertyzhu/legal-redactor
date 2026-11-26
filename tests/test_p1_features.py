@@ -143,6 +143,27 @@ def test_restore_pdf_keeps_adjacent_text(tmp_path: Path):
         assert 60 < email_rect.width < adjacent_rect.x0 - email_rect.x0
 
 
+def test_restore_pdf_keeps_adjacent_numbers_separate(tmp_path: Path):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    phone, account = "010-12345678", "622202123456789012"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        start = fitz.Point(72, 72)
+        page.insert_text(start, phone, fontsize=11, morph=(start, fitz.Matrix(0.55, 1)))
+        phone_width = 0.55 * fitz.get_text_length(phone, fontsize=11)
+        page.insert_text((start.x + phone_width + 3, start.y), account, fontsize=11)
+        doc.save(src)
+
+    assert pdf_io.extract_text(src).split() == [phone, account]
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    assert sorted(pdf_io.extract_text(redacted).split()) == ["[电话]", "[账号]"]
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert pdf_io.extract_text(restored).split() == [phone, account]
+
+
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
     monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-pass")

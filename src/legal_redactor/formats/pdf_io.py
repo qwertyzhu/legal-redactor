@@ -172,10 +172,11 @@ def _insert_fitted_text(
     line_height = font.ascender - font.descender
     fontsize = min(9, rect.height / (len(lines) * line_height))
     width = max(fitz.get_text_length(line, fontname, fontsize) for line in lines)
+    word_gap = max(1, fitz.get_text_length(" ", fontname, fontsize))
     right = min(rect.x0 + width, (page.rect * page.derotation_matrix).x1)
     for other in occupied:
         if other.x1 > rect.x1 and other.y0 < rect.y1 and other.y1 > rect.y0:
-            right = min(right, other.x0 - 1)
+            right = min(right, other.x0 - word_gap)
     right = max(rect.x1, right)
     scale_x = min(1, (right - rect.x0) / width)
     y = rect.y0 + (rect.height - len(lines) * line_height * fontsize) / 2
