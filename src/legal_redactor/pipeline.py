@@ -394,6 +394,7 @@ def redact_file(
     # 朗岳网络科技有限公司 and the handoff loop never converges.
     planned = [e.original for e in plan.entities if e.original]
     planned_party_names = [e.original for e in plan.entities if e.notes in CONTRACT_PARTY_REASONS]
+    residual_names = {w["text"] for w in residual.warnings if w["category"] == "person"}
     if planned:
         suspects = [
             s
@@ -402,7 +403,8 @@ def redact_file(
                 s.reason not in CONTRACT_PARTY_REASONS
                 and s.text
                 and not (
-                    s.reason in EXPLICIT_PERSON_REASONS
+                    (s.reason in EXPLICIT_PERSON_REASONS or s.role_hint == "third_party")
+                    and s.text in residual_names
                     and any(s.text in name for name in planned_party_names)
                 )
                 and any(

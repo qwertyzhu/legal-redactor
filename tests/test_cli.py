@@ -386,3 +386,17 @@ def test_cli_defers_party_name_that_also_appears_in_a_clause(tmp_path: Path) -> 
     assert "须人工核对，不要直接补入 entities.json" in result.stdout
     verified = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
     assert verified.returncode == 1, verified.stdout + verified.stderr
+
+
+def test_cli_reports_unredacted_witness_within_planned_party_name(tmp_path: Path) -> None:
+    src = tmp_path / "party-contract.txt"
+    out = tmp_path / "redacted.txt"
+    src.write_text("甲方签字：沈测青禾\n证人沈测青出庭作证。", encoding="utf-8")
+    result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out.read_text(encoding="utf-8") == "甲方签字：某甲\n证人沈测青出庭作证。"
+    assert "pending=1" in result.stdout
+    assert "handoff:    person\t沈测青" in result.stdout
+    verified = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert verified.returncode == 1, verified.stdout + verified.stderr
+    assert "person: 沈测青" in verified.stdout
