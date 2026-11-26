@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import re
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from docx import Document
 from lxml import etree
 
 from ..entities import apply_mapping_to_text, find_mapping_spans
-from ..patterns import detect_structural, structural_placeholder
+from ..patterns import categories_for_mode, detect_structural, structural_placeholder
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
@@ -399,6 +400,7 @@ def redact_docx(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    image_pii: list[str] | None = None,
     mode: str = "ai",
 ) -> str:
     input_path = Path(input_path)
@@ -410,9 +412,15 @@ def redact_docx(
     with zipfile.ZipFile(input_path, "r") as zin:
         names = zin.namelist()
         if any(n.startswith("word/media/") for n in names):
-            warn.extend(
-                _media_warnings(input_path, mapping, ocr_images, image_categories)
+            media_warnings, findings = scan_media(
+                input_path,
+                ocr_images=ocr_images,
+                categories=image_categories if image_categories is not None else categories_for_mode("ai"),
+                extra_terms=[original for original, _ in mapping],
             )
+            warn.extend(media_warnings)
+            if image_pii is not None:
+                image_pii.extend(findings)
         if any(n.startswith("word/embeddings/") for n in names):
             warn.append("docx contains word/embeddings/* (OLE) — review or remove before sharing")
         if _has_sensitive_field(zin, names):
@@ -468,13 +476,14 @@ def _has_sensitive_field(zin: zipfile.ZipFile, names: list[str]) -> bool:
     return False
 
 
-def _media_warnings(
+def scan_media(
     path: Path,
-    mapping: list[tuple[str, str]],
-    ocr_images: str,
-    categories: set[str] | None,
-) -> list[str]:
-    """List word/media images; OCR them when Tesseract is available (auto/on)."""
+    *,
+    categories: set[str],
+    ocr_images: str = "auto",
+    extra_terms: Iterable[str] = (),
+) -> tuple[list[str], list[str]]:
+    """Return embedded-image warnings and the subset reporting detected PII."""
     from ..image_scan import ocr_available, scan_docx_media
 
     if ocr_images == "off" or not ocr_available():
@@ -483,27 +492,29 @@ def _media_warnings(
             raise RuntimeError("--ocr-images on requires Tesseract (chi_sim) — see skills/legal-document-redactor/references/scanned-pdf.md")
         with zipfile.ZipFile(path) as z:
             media = [n for n in z.namelist() if n.startswith("word/media/")]
-        return [
+        warnings = [
             f"docx contains {len(media)} embedded image(s) ({why}) — not OCR-scanned; "
             "review manually: " + ", ".join(media[:10])
-        ]
-    from ..patterns import categories_for_mode
+        ] if media else []
+        return warnings, []
 
-    cats = categories if categories is not None else categories_for_mode("ai")
-    items = scan_docx_media(path, categories=cats, extra_terms=[o for o, _ in mapping])
-    out: list[str] = []
+    items = scan_docx_media(path, categories=categories, extra_terms=extra_terms)
+    warnings: list[str] = []
+    findings: list[str] = []
     for it in items:
         if it["hits"]:
             kinds = sorted({h["category"] for h in it["hits"]})
-            out.append(
-                f"IMAGE-PII {it['name']}: OCR found {len(it['hits'])} hit(s) ({', '.join(kinds)}) — "
+            detail = (
+                f"{it['name']}: OCR found {len(it['hits'])} hit(s) ({', '.join(kinds)}) — "
                 "image NOT modified; replace or crop it before sharing"
             )
+            findings.append(detail)
+            warnings.append(f"IMAGE-PII {detail}")
         elif not it["ocr"]:
-            out.append(f"docx image {it['name']} not OCR-scanned (undecodable/tiny/unsupported); review manually")
-    if not out:
-        out.append(f"docx word/media images OCR-scanned ({len(items)}), no structural PII found — still glance at seals/signatures")
-    return out
+            warnings.append(f"docx image {it['name']} not OCR-scanned (undecodable/tiny/unsupported); review manually")
+    if items and not warnings:
+        warnings.append(f"docx word/media images OCR-scanned ({len(items)}), no structural PII found — still glance at seals/signatures")
+    return warnings, findings
 
 
 def create_sample_docx(path: Path, text: str) -> None:

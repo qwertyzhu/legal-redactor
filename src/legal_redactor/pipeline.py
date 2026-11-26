@@ -107,6 +107,22 @@ def _scan_page_notice(pages: list[int]) -> str:
     return f"第 {'、'.join(map(str, pages))} 页没有文字层（扫描图片），未脱敏、无法通过文字校验。"
 
 
+def _add_image_pii(report: ResidualReport, findings: list[str]) -> None:
+    if not findings:
+        return
+    report.hits[:0] = [
+        {"category": "IMAGE-PII", "text": detail, "start": -1, "end": -1}
+        for detail in findings
+    ]
+    detail = f"{len(findings)} embedded image(s) contain OCR-detected PII"
+    report.summary = (
+        f"residual scan FAILED for mode={report.mode}: {detail}"
+        if report.ok else f"{report.summary}; {detail}"
+    )
+    report.ok = False
+    report.status = "FAIL"
+
+
 def _apply(
     path: Path,
     output: Path,
@@ -118,6 +134,7 @@ def _apply(
     revisions: str = "accept",
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    image_pii: list[str] | None = None,
     mode: str = "ai",
 ) -> str:
     suffix = path.suffix.lower()
@@ -131,6 +148,7 @@ def _apply(
             revisions=revisions,
             ocr_images=ocr_images,
             image_categories=image_categories,
+            image_pii=image_pii,
             mode=mode,
         )
     if suffix == ".pdf":
@@ -340,6 +358,7 @@ def redact_file(
     )
     mapping = plan.mapping()
     warnings: list[str] = []
+    image_pii: list[str] = []
     if is_sandwich_pdf:
         warnings.append(
             "PDF 包含整页扫描图层（双层扫描件）：文字层已处理，图像层须人工逐页核查或改用 redact-scan"
@@ -356,6 +375,7 @@ def redact_file(
         image_categories=categories_for_mode(
             mode, keep_categories=keep, extra_categories=extra, only_categories=only
         ),
+        image_pii=image_pii,
         mode=mode,
     )
     residual = scan_residual(
@@ -375,6 +395,7 @@ def redact_file(
             output_text, mapping, join_lines=input_path.suffix.lower() == ".pdf"
         ),
     )
+    _add_image_pii(residual, image_pii)
 
     known = {e.original for e in plan.entities}
     known |= {p.strip() for p in (preserve or []) if p and p.strip()}
@@ -680,7 +701,15 @@ def redact_tree(
     )
 
 
-def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
+def verify_file(
+    path: Path,
+    mode: str,
+    *,
+    keep_categories: set[str] | None = None,
+    extra_categories: set[str] | None = None,
+    only_categories: set[str] | None = None,
+    **scan_options: Any,
+) -> ResidualReport:
     scan_pages: list[int] = []
     suffix = path.suffix.lower()
     if suffix == ".pdf":
@@ -691,7 +720,19 @@ def verify_file(path: Path, mode: str, **scan_options: Any) -> ResidualReport:
     else:
         text = text_io.extract_text(path)
 
-    report = scan_residual(text, mode=mode, nl=True, **scan_options)
+    report = scan_residual(
+        text, mode=mode, nl=True, keep_categories=keep_categories,
+        extra_categories=extra_categories, only_categories=only_categories, **scan_options,
+    )
+    if suffix == ".docx":
+        _, image_pii = docx_io.scan_media(
+            path,
+            categories=categories_for_mode(
+                mode, keep_categories=keep_categories, extra_categories=extra_categories,
+                only_categories=only_categories,
+            ),
+        )
+        _add_image_pii(report, image_pii)
     if scan_pages:
         report.ok = False
         report.status = "FAIL"
