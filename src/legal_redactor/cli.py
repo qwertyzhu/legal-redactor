@@ -395,7 +395,7 @@ def _build_parser() -> argparse.ArgumentParser:
     psd.add_argument("-o", "--output", type=Path, default=None, help="草稿 JSON 路径")
     psd.add_argument("--dpi", type=int, default=150)
 
-    pdoc = sub.add_parser("doctor", help="检查可选组件：Tesseract / OpenCV / NER")
+    pdoc = sub.add_parser("doctor", help="检查可选组件：OCR (RapidOCR / Tesseract) / OpenCV / NER")
     pdoc.add_argument("--json", action="store_true")
 
     pweb = sub.add_parser("web", help="启动本地网页版模式 (Local-First Web UI)")
@@ -725,11 +725,16 @@ def _cmd_seal_draft(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    from .image_scan import ocr_available, seal_detection_available
+    from .image_scan import seal_detection_available
     from .ner import ner_status
+    from .ocr_engine import rapidocr_available, tesseract_available
 
+    rapidocr = rapidocr_available()
+    tesseract = tesseract_available()
     info = {
-        "tesseract": ocr_available(),
+        "ocr": rapidocr or tesseract,
+        "rapidocr": rapidocr,
+        "tesseract": tesseract,
         "opencv": seal_detection_available(),
         "ner": ner_status(),
     }

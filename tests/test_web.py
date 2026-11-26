@@ -88,8 +88,29 @@ def test_get_doctor(web_server):
         assert resp.status == 200
         data = json.loads(resp.read().decode("utf-8"))
         assert "version" in data
+        assert "ocr" in data
+        assert "rapidocr" in data
         assert "tesseract" in data
         assert "opencv" in data
+
+
+def test_get_doctor_reports_actual_ocr_engines(web_server, monkeypatch):
+    from legal_redactor import ocr_engine
+
+    monkeypatch.setattr(ocr_engine, "rapidocr_available", lambda: True)
+
+    def _missing(explicit=None):
+        raise FileNotFoundError("tesseract not found")
+
+    monkeypatch.setattr(ocr_engine, "find_tesseract", _missing)
+
+    req = Request(f"{web_server}/api/doctor")
+    with urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["rapidocr"] is True
+        assert data["tesseract"] is False
+        assert data["ocr"] is True
 
 
 def test_redact_text_and_restore(web_server):
