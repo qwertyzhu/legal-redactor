@@ -8,9 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .formats import docx_io, pdf_io, text_io
-from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_tree
-from .verify import scan_residual
+from .pipeline import detect_only, redact_file, redact_tree, scan_tree, verify_file, verify_tree
 
 
 def _configure_stdio() -> None:
@@ -404,15 +402,6 @@ def _build_parser() -> argparse.ArgumentParser:
     pweb.add_argument("--no-browser", action="store_true", help="启动时不自动打开浏览器")
 
     return p
-
-
-def _extract_any(path: Path, *, revisions: str = "accept") -> str:
-    suffix = path.suffix.lower()
-    if suffix == ".docx":
-        return docx_io.extract_text(path, revisions=revisions)
-    if suffix == ".pdf":
-        return pdf_io.extract_text(path)
-    return text_io.extract_text(path)
 
 
 def _split_cats(values: list[str]) -> list[str]:
@@ -879,14 +868,12 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 from .pipeline import resolve_allowlist
 
-                text = _extract_any(src, revisions="keep-and-redact")
-                report = scan_residual(
-                    text,
+                report = verify_file(
+                    src,
                     mode=vmode,
                     keep_categories=keep,
                     extra_categories=extra,
                     only_categories=only,
-                    nl=True,
                     allowlist=resolve_allowlist(src, list(args.allowlist or [])),
                     known={p.strip() for p in (args.preserve or []) if p.strip()},
                     redact_court_staff=staff,
