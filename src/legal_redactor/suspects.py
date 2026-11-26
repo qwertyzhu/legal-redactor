@@ -644,6 +644,7 @@ def detect_suspects(
         is_party_field = s.reason in CONTRACT_PARTY_REASONS
         if (
             not is_party_field
+            and s.category != "address"
             and any(s.text in t for t in seen)
             and not (
                 s.reason in EXPLICIT_PERSON_REASONS

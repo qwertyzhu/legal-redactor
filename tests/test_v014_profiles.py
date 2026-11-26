@@ -153,3 +153,10 @@ def test_publish_uses_city_when_there_is_no_district(tmp_path: Path, address: st
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == f"住{expected}"
+
+
+def test_publish_redacts_both_addresses_when_one_has_a_shorter_prefix(tmp_path: Path):
+    src = _src(tmp_path, "住北京市海淀区测试路8号为约定送达地址。另住北京市海淀区测试路8号院3号楼。")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "住北京市海淀区为约定送达地址。另住北京市海淀区。"
