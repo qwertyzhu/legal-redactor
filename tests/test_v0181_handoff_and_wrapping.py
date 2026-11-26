@@ -76,18 +76,18 @@ def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf,
     assert "unreplaced_entity: 郝测一" in printed
 
 
-@pytest.mark.parametrize("positioned", [False, True])
-def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, capsys, positioned):
+@pytest.mark.parametrize("indent", [2, None, 3], ids=["two-spaces", "positioned", "three-spaces"])
+def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, capsys, indent):
     _, entities = short_names_pdf
     src = tmp_path / "indented.pdf"
     out = tmp_path / "indented.ai.pdf"
     with fitz.open() as doc:
         page = doc.new_page()
-        if positioned:
+        if indent is None:
             page.insert_text((24, 40), "记录中提及郝测", fontname="china-s")
             page.insert_text((46, 55), "一于当天到场", fontname="china-s")
         else:
-            page.insert_text((24, 40), "记录中提及郝测\n　　一于当天到场", fontname="china-s")
+            page.insert_text((24, 40), f"记录中提及郝测\n{'　' * indent}一于当天到场", fontname="china-s")
         doc.save(src)
     assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 2
     assert "unreplaced_entity: 郝测一" in capsys.readouterr().out
@@ -99,20 +99,25 @@ def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, cap
     assert "于当天到场" in text
 
 
-def test_pdf_short_names_do_not_join_aligned_text_blocks(short_names_pdf, tmp_path):
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [((24, 40, "附录李"), (24, 64, "明细另附")), ((42, 40, "李"), (24, 57, "明"))],
+    ids=["aligned", "offset-columns"],
+)
+def test_pdf_short_names_do_not_join_aligned_text_blocks(short_names_pdf, tmp_path, first, second):
     _, entities = short_names_pdf
     src = tmp_path / "aligned.pdf"
     out = tmp_path / "aligned.ai.pdf"
     with fitz.open() as doc:
         page = doc.new_page()
-        page.insert_text((24, 40), "附录李", fontname="china-s")
-        page.insert_text((24, 64), "明细另附", fontname="china-s")
+        for x, y, line in (first, second):
+            page.insert_text((x, y), line, fontname="china-s")
         assert len(page.get_text("blocks")) == 2
         doc.save(src)
     assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 0
     assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
     with fitz.open(out) as doc:
-        assert doc[0].get_text() == "附录李\n明细另附\n"
+        assert doc[0].get_text() == f"{first[2]}\n{second[2]}\n"
 
 
 @pytest.mark.parametrize(

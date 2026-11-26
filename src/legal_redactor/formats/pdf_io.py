@@ -15,7 +15,7 @@ _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "sub
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
-_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, int]]]
+_CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]]]
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -172,7 +172,7 @@ def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, "fitz.Rect
 
 
 def _page_char_index(page: "fitz.Page") -> _CharIndex:
-    """Whitespace-free page text, character rects and row numbers, and row starts.
+    """Whitespace-free page text, character rects and row numbers, and row bounds.
 
     Court PDFs wrap a long party name across a line break, and `Page.search_for`
     only matches inside one line, so that occurrence survives the replacement.
@@ -181,9 +181,9 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     parts: list[str] = []
     rects: list[fitz.Rect] = []
     rows: list[int] = []
-    line_info: list[tuple[float, int]] = []
+    line_info: list[tuple[float, float, int]] = []
     for row, (block_id, line) in enumerate(_line_chars(page)):
-        line_info.append((line[0][1].x0, block_id))
+        line_info.append((line[0][1].x0, line[-1][1].x1, block_id))
         for char, rect in line:
             parts.append(char)
             rects.append(rect)
@@ -194,7 +194,7 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
 def _short_name_is_local(
     rects: list["fitz.Rect"],
     rows: list[int],
-    line_info: list[tuple[float, int]],
+    line_info: list[tuple[float, float, int]],
     start: int,
     end: int,
 ) -> bool:
@@ -206,17 +206,16 @@ def _short_name_is_local(
                 return False
         else:
             height = max(prev.height, curr.height)
-            prev_left, prev_block = line_info[rows[i - 1]]
-            _, curr_block = line_info[rows[i]]
-            indent = abs(curr.x0 - prev_left)
+            prev_left, prev_right, prev_block = line_info[rows[i - 1]]
+            curr_left, curr_right, curr_block = line_info[rows[i]]
             gap = curr.y0 - prev.y0
             if rows[i] != rows[i - 1] + 1 or not 0 < gap <= 2 * height:
                 return False
-            if indent <= width:
-                if prev_block != curr_block:
-                    return False
-            elif not (
-                indent <= 2 * width and gap <= 1.5 * height and curr.x0 <= prev.x0
+            if max(prev_left, curr_left) >= min(prev_right, curr_right):
+                return False
+            indent = abs(curr_left - prev_left)
+            if prev_block != curr_block and not (
+                width < indent <= 2 * width and gap <= 1.5 * height and curr_left <= prev.x0
             ):
                 return False
     return True
