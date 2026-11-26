@@ -1933,7 +1933,14 @@ async function redactDocx(arrayBuffer, options) {
           el.setAttribute('Target', '#');
           relChanged = true;
         } else if (target) {
-          const scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
+          let scrubbed = scrubStructuralPii(applyPlanToText(target, plan));
+          try {
+            const decoded = decodeURIComponent(scrubbed);
+            if (decoded !== scrubbed) {
+              const decodedScrubbed = scrubStructuralPii(applyPlanToText(decoded, plan));
+              if (decodedScrubbed !== decoded) scrubbed = decodedScrubbed;
+            }
+          } catch (_) {}
           if (scrubbed !== target) {
             el.setAttribute('Target', scrubbed);
             relChanged = true;

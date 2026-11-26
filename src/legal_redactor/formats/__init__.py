@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from ..entities import apply_mapping_to_text
 from ..patterns import detect_structural, structural_placeholder
 
@@ -47,4 +49,12 @@ def scrub_structural_text(
 def scrub_external_url(target: str, mapping: list[tuple[str, str]] | None = None) -> str:
     """Apply planned mapping and strip structural PII/tokens inside a preserved URL."""
     redacted = apply_mapping_to_text(target, mapping or [])
-    return scrub_structural_text(redacted, categories=URL_SECRET_CATEGORIES)
+    scrubbed = scrub_structural_text(redacted, categories=URL_SECRET_CATEGORIES)
+    decoded = unquote(scrubbed)
+    if decoded != scrubbed:
+        decoded_scrubbed = scrub_structural_text(
+            apply_mapping_to_text(decoded, mapping or []), categories=URL_SECRET_CATEGORIES
+        )
+        if decoded_scrubbed != decoded:
+            return decoded_scrubbed
+    return scrubbed

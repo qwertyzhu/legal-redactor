@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import zipfile
 from pathlib import Path
+from urllib.parse import unquote
 
 from docx import Document
 from lxml import etree
@@ -345,6 +346,9 @@ def extract_metadata_and_links(path: Path) -> str:
                         ("mailto:", "tel:", "http://", "https://")
                     ):
                         chunks.append(target)
+                        decoded = unquote(target)
+                        if decoded != target:
+                            chunks.append(decoded)
             except etree.XMLSyntaxError:
                 pass
     return "\n".join(chunks)

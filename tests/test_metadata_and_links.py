@@ -214,6 +214,31 @@ def test_verify_catches_pdf_metadata_and_link_pii(tmp_path: Path):
     assert tree_report["failed"] == 2
 
 
+def test_percent_encoded_phone_in_preserved_links_scrubbed_and_verified(tmp_path: Path):
+    encoded_url = "https://example-fictional.test/doc?phone=136%200000%204444"
+    src_docx = _make_docx_with_hidden_pii(tmp_path / "enc.docx", title="", subject="", keywords="", http_target=encoded_url, mailto_target="https://example-fictional.test/ok")
+    src_pdf = _make_pdf_with_hidden_pii(tmp_path / "enc.pdf", title="", subject="", keywords="", http_uri=encoded_url, mailto_uri="https://example-fictional.test/ok")
+
+    assert main(["verify", str(src_docx), "--mode", "production", "--strict"]) == 2
+    assert main(["verify", str(src_pdf), "--mode", "production", "--strict"]) == 2
+
+    out_docx = tmp_path / "enc.out.docx"
+    out_pdf = tmp_path / "enc.out.pdf"
+    assert redact_file(src_docx, mode="production", output_path=out_docx).residual.ok
+    assert redact_file(src_pdf, mode="production", output_path=out_pdf).residual.ok
+
+    with zipfile.ZipFile(out_docx) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert "136%200000%204444" not in rels and "136 0000 4444" not in rels
+
+    doc = fitz.open(str(out_pdf))
+    try:
+        uris = "\n".join(lk.get("uri", "") for p in doc for lk in p.get_links() if lk.get("uri"))
+    finally:
+        doc.close()
+    assert "136%200000%204444" not in uris and "136 0000 4444" not in uris
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")

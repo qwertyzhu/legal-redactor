@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote
 
 import pymupdf as fitz
 
@@ -39,6 +40,9 @@ def extract_metadata_and_links(path: Path) -> str:
                 uri = (link.get("uri") or "").strip()
                 if uri:
                     parts.append(uri)
+                    decoded = unquote(uri)
+                    if decoded != uri:
+                        parts.append(decoded)
                 file_target = (link.get("file") or "").strip()
                 if file_target:
                     parts.append(file_target)
