@@ -238,6 +238,7 @@ python3 skills/legal-document-redactor/scripts/self_test.py
 - 多文件上 AI：优先 `redact DIR --unify`，保证跨文件替身一致
 - DOCX：实体被 Word 拆成多个 run 时也逐 run 原位替换，其余文字保留各自格式；实体跨制表符/换行/修订边界时才折叠段落
 - 批量输出为扁平文件名（递归时自动消歧）
+- 批量 `redact` 中，有输入因处理失败而跳过时，`--json` 报告 `ok: false`，命令退出码为 1（未放行的残留扫描失败优先返回 2）；`--allow-residual` 不放行跳过的文件
 - 目录 `verify` 会跳过 ledger / audit 等旁路文件；退出码 0=PASS、2=FAIL，WARN 默认 0、`--strict` 时 1（交付前用 `--strict`）
 - 不是法律意见，不能替代律所保密流程
 

@@ -458,7 +458,7 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                     self._send_json({
                         "ok": True,
                         "task_id": task_id,
-                        "status": "PASS",
+                        "status": "WARN",
                         "is_scan": True,
                         "hits_count": len(scan_res.hits),
                         "out_filename": out_name,
@@ -1649,8 +1649,9 @@ function renderFileResult(data) {
     statusBadge.textContent = 'FAIL 存在风险';
   }
 
-  document.getElementById('resultSummaryText').textContent = 
-    `已成功脱敏生成: ${data.out_filename}`;
+  document.getElementById('resultSummaryText').textContent = data.is_scan
+    ? `已生成扫描件涂黑稿（须人工逐页复核）: ${data.out_filename}`
+    : `已成功脱敏生成: ${data.out_filename}`;
 
   // Download buttons
   const btnFile = document.getElementById('btnDownloadFile');
