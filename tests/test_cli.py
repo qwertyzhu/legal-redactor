@@ -431,9 +431,15 @@ def test_cli_defers_witness_name_that_is_also_clause_wording(tmp_path: Path) -> 
 def test_cli_defers_witness_name_that_is_also_wrapped_pdf_wording(tmp_path: Path) -> None:
     src = tmp_path / "party-contract.pdf"
     out = tmp_path / "redacted.pdf"
-    pdf_io.create_sample_pdf(src, "甲方签字：慕容花开·阿青\n证人慕容花开，出庭作证。\n片名为慕容\n花开。")
+    text = "甲方签字：慕容花开·阿青\n证人慕容花开，出庭作证。\n片名为慕容\n花开。"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), text, fontsize=12, fontname="china-s")
+        doc.save(src)
     result = _run_cli("redact", str(src), "--mode", "ai", "-o", str(out), cwd=tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
+    redacted_text = pdf_io.extract_text(out)
+    assert "证人慕容花开，出庭作证。" in redacted_text
+    assert "片名为慕容\n花开。" in redacted_text
     assert "handoff:    person\t慕容花开" in result.stdout
     assert "须人工核对，不要直接补入 entities.json" in result.stdout
     assert "只把下面几条补进" not in result.stdout
