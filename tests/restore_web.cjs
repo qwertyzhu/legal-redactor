@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../docs/index.html'), 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-test('static restore leaves ambiguous mobile placeholders and restores unique values', () => {
+function loadRedactor() {
   const fields = new Map();
   const document = {
     getElementById(id) {
@@ -30,7 +30,11 @@ test('static restore leaves ambiguous mobile placeholders and restores unique va
   };
   const context = vm.createContext({ document, window: { addEventListener() {} } });
   vm.runInContext(script, context);
+  return { context, document };
+}
 
+test('static restore leaves ambiguous mobile placeholders and restores unique values', () => {
+  const { context, document } = loadRedactor();
   document.getElementById('textSourceInput').value =
     '原告手机为 13900001111，被告手机为 13800002222。邮箱 test@example.com。';
   document.getElementById('textModeSelect').value = 'ai';
@@ -56,4 +60,16 @@ test('static restore leaves ambiguous mobile placeholders and restores unique va
   context.startRestore();
   assert.equal(output.value, '原告手机为 13900001111，备用联系也是 13900001111。');
   assert.equal(warnings.classList.contains('hidden'), true);
+});
+
+test('static restore accepts numeric values from a custom ledger', () => {
+  const { context, document } = loadRedactor();
+  document.getElementById('restoreLedgerInput').value = JSON.stringify({ entities: [
+    { original: 20240001, replacement: 12345 },
+    { original: '20240001', replacement: '12345' },
+  ] });
+  document.getElementById('restoreSourceInput').value = '编号 12345。';
+  context.startRestore();
+  assert.equal(document.getElementById('restoreOutput').value, '编号 20240001。');
+  assert.equal(document.getElementById('restoreWarnings').classList.contains('hidden'), true);
 });

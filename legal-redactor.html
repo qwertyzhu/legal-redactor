@@ -2300,7 +2300,9 @@ function startRestore() {
   }
 
   const originalsByToken = new Map();
-  for (const { original, replacement } of ledger.entities || []) {
+  for (const row of ledger.entities || []) {
+    const original = String(row.original || '');
+    const replacement = String(row.replacement || '');
     if (!original || !replacement || original === replacement) continue;
     if (!originalsByToken.has(replacement)) originalsByToken.set(replacement, new Set());
     originalsByToken.get(replacement).add(original);
