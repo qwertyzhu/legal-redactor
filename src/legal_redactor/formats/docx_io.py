@@ -303,6 +303,7 @@ def _process_xml_bytes(
                         )
 
     texts: list[str] = []
+    chart_fields: list[str] = []
     chart = name.startswith("word/charts/")
     for node in root.iter():
         if _local(node.tag) == "p":
@@ -321,7 +322,10 @@ def _process_xml_bytes(
                 if updated != text:
                     node.text = updated
                 text = updated
-            texts.append(text)
+            if texts:
+                chart_fields.append("\n".join(texts))
+                texts.clear()
+            chart_fields.append(text)
 
     out = etree.tostring(
         root,
@@ -329,9 +333,13 @@ def _process_xml_bytes(
         encoding="UTF-8",
         standalone=True,
     )
-    if chart and any(text.strip() for text in texts):
-        return out, FIELD_BOUNDARY.join(("", *texts, ""))
-    return out, "\n".join(texts)
+    text = "\n".join(texts)
+    if chart:
+        if text.strip():
+            chart_fields.append(text)
+        if chart_fields:
+            text = FIELD_BOUNDARY.join(("", *chart_fields, ""))
+    return out, text
 
 
 def extract_text(path: Path, revisions: str = "accept") -> str:

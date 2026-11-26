@@ -327,6 +327,17 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
             "[手机号]",
         ),
         (
+            "word/charts/chart3.xml",
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            "<c:chart><c:title><c:tx><c:rich><a:bodyPr/>"
+            "<a:p><a:r><a:t>QQ号：</a:t></a:r></a:p>"
+            "<a:p><a:r><a:t>246801357</a:t></a:r></a:p>"
+            "</c:rich></c:tx></c:title></c:chart></c:chartSpace>",
+            "246801357",
+            "[社交账号]",
+        ),
+        (
             "word/diagrams/data1.xml",
             '<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" '
             'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
@@ -336,7 +347,7 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
             "[身份证号]",
         ),
     ],
-    ids=["chart-cache", "chart-rich-text", "smartart-split-runs"],
+    ids=["chart-cache", "chart-rich-text", "chart-multiline-title", "smartart-split-runs"],
 )
 def test_shipped_cli_docx_charts_and_smartart(
     tmp_path: Path, part: str, xml: str, secret: str, placeholder: str
