@@ -272,6 +272,34 @@ def test_docx_hyperlink_field_instr_verified_and_scrubbed(tmp_path: Path):
     assert "https://example-fictional.test/f" in doc_xml
 
 
+def test_restore_file_preserves_pdf_and_docx_hyperlinks(tmp_path: Path):
+    from legal_redactor.ledger_store import restore_file
+
+    clean_url = "https://example-fictional.test/evidence/1"
+    src_pdf = tmp_path / "src.pdf"
+    _make_pdf_with_hidden_pii(src_pdf, http_uri=clean_url)
+    red_pdf = tmp_path / "red.pdf"
+    res_pdf = redact_file(src_pdf, mode="production", output_path=red_pdf)
+    restored_pdf = tmp_path / "restored.pdf"
+    restore_file(red_pdf, res_pdf.ledger_path, restored_pdf)
+    doc = fitz.open(restored_pdf)
+    try:
+        uris = [lnk.get("uri") or "" for page in doc for lnk in page.get_links()]
+    finally:
+        doc.close()
+    assert any(clean_url in u for u in uris)
+
+    src_docx = tmp_path / "src.docx"
+    _make_docx_with_hidden_pii(src_docx, http_target=clean_url)
+    red_docx = tmp_path / "red.docx"
+    res_docx = redact_file(src_docx, mode="production", output_path=red_docx)
+    restored_docx = tmp_path / "restored.docx"
+    restore_file(red_docx, res_docx.ledger_path, restored_docx)
+    with zipfile.ZipFile(restored_docx) as z:
+        rels = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    assert clean_url in rels
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")
