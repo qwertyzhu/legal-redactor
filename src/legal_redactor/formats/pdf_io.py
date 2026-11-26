@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import unquote
 
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
+from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
+
+_CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
+_SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 
 
 def extract_text(path: Path) -> str:
@@ -16,6 +21,32 @@ def extract_text(path: Path) -> str:
         for page in doc:
             parts.append(page.get_text("text"))
         return "\n".join(parts)
+    finally:
+        doc.close()
+
+
+def extract_metadata_and_links(path: Path) -> str:
+    """Extract PDF metadata values and external link targets for residual verification."""
+    doc = fitz.open(str(path))
+    try:
+        parts: list[str] = []
+        for key, val in (doc.metadata or {}).items():
+            if key in _SKIP_PDF_META_KEYS:
+                continue
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+        for page in doc:
+            for link in page.get_links() or []:
+                uri = (link.get("uri") or "").strip()
+                if uri:
+                    parts.append(uri)
+                    decoded = unquote(uri)
+                    if decoded != uri:
+                        parts.append(decoded)
+                file_target = (link.get("file") or "").strip()
+                if file_target:
+                    parts.append(file_target)
+        return FIELD_BOUNDARY.join(parts)
     finally:
         doc.close()
 
@@ -31,8 +62,6 @@ def extract_text_with_scan_pages(path: Path) -> tuple[str, list[int]]:
             if not text.strip() and page.get_image_info():
                 scan_pages.append(page.number + 1)
     return "\n".join(parts), scan_pages
-
-
 def _has_text_layer(doc: fitz.Document) -> bool:
     for page in doc:
         if page.get_text("text").strip():
@@ -81,6 +110,39 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         doc.embfile_del(name)
     if names:
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
+
+
+def _scrub_pdf_links(
+    doc: "fitz.Document",
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None,
+    *,
+    drop_http: bool = True,
+) -> None:
+    """Remove or sanitize external PDF hyperlink targets (page.get_links())."""
+    warn = warnings if warnings is not None else []
+    removed = scrubbed = 0
+    for page in doc:
+        for link in list(page.get_links() or []):
+            uri = link.get("uri") or ""
+            file_target = link.get("file") or ""
+            if uri:
+                if drop_http or uri.lower().startswith(("mailto:", "tel:")):
+                    page.delete_link(link)
+                    removed += 1
+                else:
+                    redacted = scrub_external_url(uri, mapping)
+                    if redacted != uri:
+                        link["uri"] = redacted
+                        page.update_link(link)
+                        scrubbed += 1
+            elif file_target:
+                page.delete_link(link)
+                removed += 1
+    if removed:
+        warn.append(f"pdf: {removed} external link(s) removed")
+    if scrubbed:
+        warn.append(f"pdf: {scrubbed} external link target(s) scrubbed")
 
 
 def _line_chars(page: "fitz.Page") -> list[list[tuple[str, "fitz.Rect"]]]:
@@ -171,10 +233,11 @@ def redact_pdf(
     mapping: list[tuple[str, str]],
     warnings: list[str] | None = None,
     *,
-    preserve_hyperlinks: bool = False,  # unused for pdf text-layer path
+    preserve_hyperlinks: bool = False,
     preserve_bookmarks: bool = False,
     ocr_images: str = "auto",
     image_categories: set[str] | None = None,
+    mode: str = "ai",
 ) -> str:
     warn = warnings if warnings is not None else []
     ordered_mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
@@ -231,19 +294,25 @@ def redact_pdf(
 
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
-        meta = doc.metadata or {}
+        meta = dict(doc.metadata or {})
         for key in list(meta.keys()):
+            if key in _CLEAR_PDF_META_KEYS:
+                meta[key] = ""
+                continue
+            if key in _SKIP_PDF_META_KEYS:
+                continue
             val = meta.get(key)
             if isinstance(val, str) and val:
-                meta[key] = apply_mapping_to_text(val, mapping)
-        for key in ("author", "title", "subject", "keywords", "producer", "creator"):
-            if key in meta and isinstance(meta[key], str):
-                meta[key] = apply_mapping_to_text(meta[key], mapping)
-        for key in ("author", "creator", "producer"):
-            if key in meta:
-                meta[key] = ""
+                meta[key] = scrub_structural_text(apply_mapping_to_text(val, mapping))
+        for key in _CLEAR_PDF_META_KEYS:
+            meta[key] = ""
         doc.set_metadata(meta)
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
+        strip_urls = bool(image_categories and "url" in image_categories)
+        drop_http = (not preserve_hyperlinks) and (
+            mode.lower().strip() != "production" or strip_urls
+        )
+        _scrub_pdf_links(doc, mapping, warnings, drop_http=drop_http)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         doc.save(str(output_path), deflate=True, garbage=3)

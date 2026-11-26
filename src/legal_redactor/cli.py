@@ -871,7 +871,7 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"    - {h['category']}: {h['text']}")
                 status = payload["status"]
             else:
-                from .pipeline import resolve_allowlist
+                from .pipeline import resolve_allowlist, verify_file
 
                 report = verify_file(
                     src,
