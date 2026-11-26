@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import subprocess
 import threading
 import zipfile
@@ -58,6 +59,18 @@ def test_standalone_html_files_are_synced_and_rasterize_pdf():
     # DOCX in browser must parse XML DOM across runs rather than naive docXml.split(escapedOrig)
     assert "DOMParser" in docs_html
     assert "docXml.split(escapedOrig)" not in docs_html
+
+
+def test_standalone_audit_download_discloses_unredacted_original_text():
+    html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    button = re.search(r'<button\b[^>]*\bid="btnDownloadAudit"[^>]*>([^<]+)</button>', html)
+    assert button is not None
+    assert "未脱敏原文" in button[1]
+    hint_id = re.search(r'\baria-describedby="([^"]+)"', button[0])
+    assert hint_id is not None
+    hint = re.search(rf'<p\b[^>]*\bid="{re.escape(hint_id[1])}"[^>]*>(.*?)</p>', html, re.DOTALL)
+    assert hint is not None
+    assert "未脱敏原文" in hint[1]
 
 
 # --- P0-2: Batch --unify mode boundaries -----------------------------------

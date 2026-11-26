@@ -384,6 +384,10 @@ header {
   background: var(--border);
 }
 
+@media (max-width: 380px) {
+  #btnDownloadAudit { padding-inline: 12px; }
+}
+
 .btn-block {
   width: 100%;
   margin-top: 24px;
@@ -789,10 +793,13 @@ footer {
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <a id="btnDownloadFile" class="btn btn-primary" href="#" download>📥 下载脱敏后文档</a>
             <button id="btnDownloadMdText" class="btn btn-secondary hidden" onclick="downloadCurrentRedactedMd()">📝 下载脱敏纯文本 (.md · 推荐喂给 AI)</button>
-            <button id="btnDownloadAudit" class="btn btn-secondary" onclick="downloadCurrentAudit()">📄 下载审计报告 (.md)</button>
+            <button id="btnDownloadAudit" class="btn btn-secondary" aria-describedby="auditDownloadHint" onclick="downloadCurrentAudit()">📄 下载审计（含未脱敏原文）</button>
             <button id="btnDownloadLedger" class="btn btn-secondary" onclick="downloadCurrentLedger()">🔐 导出还原账本 (.json)</button>
           </div>
         </div>
+        <p id="auditDownloadHint" class="alert alert-warning" style="margin-top:0;margin-bottom:14px;">
+          <span>审计报告（.md）含<strong>未脱敏原文</strong>，请勿随脱敏文档一同外发。</span>
+        </p>
         <div id="pdfRasterNotice" class="alert alert-success hidden" style="margin-top:0;margin-bottom:14px;">
           <div>🔒 <strong>PDF 物理级栅格脱敏已完成：</strong>导出的 PDF 已通过 Canvas 像素重绘重建，原文件底层文字流、隐藏图层与元数据已 100% 物理清除（不可复制原字）。若需发给在线大模型分析，建议同时点击上方「下载脱敏纯文本 (.md)」，省 Token 且识别更准。</div>
         </div>

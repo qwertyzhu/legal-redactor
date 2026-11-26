@@ -13,10 +13,11 @@ legal-redactor redact INPUT.docx --mode ai -o OUTPUT.docx
 
 `--mode ai` 已经会自动替换带标签的姓名、单位、住址、书名号作品、作品名称、剧名、昵称和抖音号。出证把 `ai` 换成 `production`，当事人、作品和账号会留下。
 
-命令结束只看 `handoff:`。分三种：
+命令结束只看 `handoff:`：
 
 - `handoff: 无待补实体。到此停止` — 可以交付，停止。
 - `handoff: 只把下面几条补进 entities.json` — 只把那几条追加进 `entities.json`，再跑同一条命令。
+- `handoff: 以下疑似姓名与合同方姓名或正文用语重合` — 向用户提示人工区分姓名和条款用语；不要全局替换或交付。
 - `handoff: status=FAIL 不得交付` — 退出码同时是 2。残留在 `handoff:` 或 `residual` 文件里，补表补不掉的说明是规则没接住，不要交出去，也不要当成「没有待补」放行。
 
 不要打开脱敏稿、audit 或 ledger 核对清单。
