@@ -28,8 +28,17 @@ W = "{%s}" % W_NS
 
 # Package parts that may carry visible body text
 _TEXT_PART_RE = re.compile(
-    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$"
+    r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
+_CHART_NAMESPACES = (
+    "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "http://purl.oclc.org/ooxml/drawingml/chart",
+)
+_CHART_VALUE_TAGS = {f"{{{ns}}}v" for ns in _CHART_NAMESPACES}
+_CHART_NUMERIC_TAGS = tuple(
+    f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("numCache", "numLit")
+)
+_CHART_LABEL_TAGS = tuple(f"{{{ns}}}{tag}" for ns in _CHART_NAMESPACES for tag in ("cat", "tx"))
 _RSID_ATTR_RE = re.compile(r"^rsid", re.IGNORECASE)
 _HYPERLINK_FIELD_RE = re.compile(r'(?i)(\bHYPERLINK\s+")([^"]+)(")')
 
@@ -273,6 +282,7 @@ _REVISION_SPLIT_WARN: list[str] = []
 
 
 def _process_xml_bytes(
+    name: str,
     data: bytes,
     mapping: list[tuple[str, str]] | None,
     revisions: str = "accept",
@@ -295,16 +305,29 @@ def _process_xml_bytes(
                         )
 
     texts: list[str] = []
-    for p in root.iter():
-        if _local(p.tag) != "p":
-            continue
-        original = _paragraph_text(p)
-        if not original:
-            continue
-        if mapping is None:
-            texts.append(original)
-            continue
-        texts.append(_redact_paragraph(p, mapping))
+    chart_fields: list[str] = []
+    chart = name.startswith("word/charts/")
+    for node in root.iter():
+        if _local(node.tag) == "p":
+            text = _paragraph_text(node) if mapping is None else _redact_paragraph(node, mapping)
+            if text:
+                texts.append(text)
+        elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
+            if (
+                next(node.iterancestors(*_CHART_NUMERIC_TAGS), None) is not None
+                and next(node.iterancestors(*_CHART_LABEL_TAGS), None) is None
+            ):
+                continue
+            text = node.text
+            if mapping is not None:
+                updated = apply_mapping_to_text(text, mapping)
+                if updated != text:
+                    node.text = updated
+                text = updated
+            if texts:
+                chart_fields.append("\n".join(texts))
+                texts.clear()
+            chart_fields.append(text)
 
     out = etree.tostring(
         root,
@@ -312,7 +335,13 @@ def _process_xml_bytes(
         encoding="UTF-8",
         standalone=True,
     )
-    return out, "\n".join(texts)
+    text = "\n".join(texts)
+    if chart:
+        if text.strip():
+            chart_fields.append(text)
+        if chart_fields:
+            text = FIELD_BOUNDARY.join(("", *chart_fields, ""))
+    return out, text
 
 
 def extract_text(path: Path, revisions: str = "accept") -> str:
@@ -321,7 +350,7 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
-            _, text = _process_xml_bytes(zin.read(name), mapping=None, revisions=revisions)
+            _, text = _process_xml_bytes(name, zin.read(name), mapping=None, revisions=revisions)
             if text.strip():
                 chunks.append(text)
     return "\n".join(chunks)
@@ -550,7 +579,7 @@ def redact_docx(
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(data, mapping, revisions, drop_http=drop_http)
+                    data, text = _process_xml_bytes(name, data, mapping, revisions, drop_http=drop_http)
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":

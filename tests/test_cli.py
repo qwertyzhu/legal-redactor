@@ -13,10 +13,12 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pymupdf as fitz
 import pytest
+from lxml import etree
 
 from legal_redactor import __version__
 from legal_redactor.formats import docx_io, pdf_io
@@ -352,6 +354,179 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
         (tmp_path / "work" / f"{out.stem}.residual.json").read_text(encoding="utf-8")
     )
     assert residual["ok"] is True, residual
+
+
+@pytest.mark.parametrize(
+    "part, xml, secret, placeholder",
+    [
+        (
+            "word/charts/chart1.xml",
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            '<c:strCache><c:pt idx="0"><c:v>13700003333</c:v></c:pt></c:strCache></c:chartSpace>',
+            "13700003333",
+            "[手机号]",
+        ),
+        (
+            "word/charts/chart2.xml",
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            "<c:title><c:tx><c:rich><a:p><a:r><a:t>13700003333</a:t></a:r></a:p>"
+            "</c:rich></c:tx></c:title></c:chartSpace>",
+            "13700003333",
+            "[手机号]",
+        ),
+        (
+            "word/charts/chart3.xml",
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            "<c:chart><c:title><c:tx><c:rich><a:bodyPr/>"
+            "<a:p><a:r><a:t>QQ号：</a:t></a:r></a:p>"
+            "<a:p><a:r><a:t>246801357</a:t></a:r></a:p>"
+            "</c:rich></c:tx></c:title></c:chart></c:chartSpace>",
+            "246801357",
+            "[社交账号]",
+        ),
+        (
+            "word/diagrams/data1.xml",
+            '<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" '
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            "<dgm:ptLst><dgm:pt><dgm:t><a:p><a:r><a:t>1101051990</a:t></a:r>"
+            "<a:r><a:t>0101123X</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst></dgm:dataModel>",
+            "11010519900101123X",
+            "[身份证号]",
+        ),
+    ],
+    ids=["chart-cache", "chart-rich-text", "chart-multiline-title", "smartart-split-runs"],
+)
+def test_shipped_cli_docx_charts_and_smartart(
+    tmp_path: Path, part: str, xml: str, secret: str, placeholder: str
+) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(part, xml)
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 2, before.stderr + before.stdout
+    assert secret in before.stdout
+
+    out = tmp_path / "redacted.docx"
+    work = tmp_path / "work"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(work), cwd=tmp_path
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        text = "".join(etree.fromstring(archive.read(part)).itertext())
+    assert secret not in text
+    assert placeholder in text
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout
+    assert "status: PASS" in after.stdout
+
+    restored = tmp_path / "restored.docx"
+    restore = _run_cli(
+        "restore", str(out), "--ledger", str(work / "redacted.ledger.json"), "-o", str(restored),
+        cwd=tmp_path,
+    )
+    assert restore.returncode == 0, restore.stderr + restore.stdout
+    with zipfile.ZipFile(restored) as archive:
+        assert secret in "".join(etree.fromstring(archive.read(part)).itertext())
+
+
+@pytest.mark.parametrize("container", ["numCache", "numLit"])
+def test_shipped_cli_docx_chart_preserves_numeric_measurements(tmp_path: Path, container: str) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    part = "word/charts/chart1.xml"
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(
+            part,
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            f"<c:{container}><c:pt idx=\"0\"><c:v>13700003333</c:v></c:pt></c:{container}></c:chartSpace>",
+        )
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        assert b"<c:v>13700003333</c:v>" in archive.read(part)
+
+    for docx in (src, out):
+        verify = _run_cli("verify", str(docx), "--mode", "ai", "--strict", cwd=tmp_path)
+        assert verify.returncode == 0, verify.stderr + verify.stdout
+
+
+def test_shipped_cli_docx_chart_redacts_numeric_category_labels(tmp_path: Path) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    part = "word/charts/chart1.xml"
+    ns = {"c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(
+            part,
+            f'<c:chartSpace xmlns:c="{ns["c"]}"><c:chart><c:plotArea><c:barChart><c:ser>'
+            '<c:cat><c:numRef><c:f>Sheet1!$A$2</c:f><c:numCache><c:pt idx="0"><c:v>13700003333</c:v>'
+            '</c:pt></c:numCache></c:numRef></c:cat>'
+            '<c:val><c:numLit><c:pt idx="0"><c:v>13700003333</c:v></c:pt></c:numLit></c:val>'
+            '</c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>',
+        )
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 2, before.stderr + before.stdout
+    assert "mobile: 13700003333" in before.stdout
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        chart = etree.fromstring(archive.read(part))
+    assert chart.findtext(".//c:cat//c:v", namespaces=ns) == "[手机号]"
+    assert chart.findtext(".//c:val//c:v", namespaces=ns) == "13700003333"
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout
+
+
+@pytest.mark.parametrize("separate_parts", [False, True], ids=["same-chart", "separate-charts"])
+def test_shipped_cli_docx_chart_keeps_labels_separate(tmp_path: Path, separate_parts: bool) -> None:
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, "示例文档。")
+    labels = (("137000",), ("03333",)) if separate_parts else (("137000", "03333"),)
+    charts = {}
+    for index, values in enumerate(labels, 1):
+        points = "".join(f'<c:pt idx="{i}"><c:v>{value}</c:v></c:pt>' for i, value in enumerate(values))
+        charts[f"word/charts/chart{index}.xml"] = (
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+            f"<c:strLit>{points}</c:strLit></c:chartSpace>"
+        )
+    with zipfile.ZipFile(src, "a") as archive:
+        for name, xml in charts.items():
+            archive.writestr(name, xml)
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 0, before.stderr + before.stdout
+
+    out = tmp_path / "redacted.docx"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(tmp_path / "work"),
+        cwd=tmp_path,
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    assert "replaced:    0" in redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        for name, xml in charts.items():
+            assert etree.tostring(etree.fromstring(archive.read(name))) == xml.encode()
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout
 
 
 _NATURAL_PARTIES = ("顾南枝", "沈测青禾")
