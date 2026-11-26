@@ -401,6 +401,8 @@ def redact_file(
     planned = [e.original for e in plan.entities if e.original]
     planned_party_names = [e.original for e in plan.entities if e.notes in CONTRACT_PARTY_REASONS]
     residual_names = {w["text"] for w in residual.warnings if w["category"] == "person"}
+    # PDF replacement can also match text across line breaks.
+    collision_text = "".join(output_text.split()) if input_path.suffix.lower() == ".pdf" else output_text
     pending = []
     for s in suspects:
         if s.reason in CONTRACT_PARTY_REASONS:
@@ -410,7 +412,7 @@ def redact_file(
             and s.text in residual_names
             and any(s.text != name and s.text in name for name in planned_party_names)
         ):
-            if output_text.count(s.text) == 1:
+            if collision_text.count(s.text) == 1:
                 pending.append(s)
             else:
                 pending.append(replace(s, reason=AMBIGUOUS_CONTRACT_PARTY))
