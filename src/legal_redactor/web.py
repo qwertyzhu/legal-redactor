@@ -25,8 +25,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import __version__
-from .image_scan import ocr_available, seal_detection_available
+from . import __version__, ocr_engine
+from .image_scan import seal_detection_available
 from .ledger_store import load_ledger, restore_text
 from .ner import ner_status
 from .pipeline import _parse_category_list, redact_file
@@ -212,9 +212,13 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/doctor":
+            rapidocr = ocr_engine.rapidocr_available()
+            tesseract = ocr_engine.tesseract_available()
             info = {
                 "version": __version__,
-                "tesseract": ocr_available(),
+                "ocr": rapidocr or tesseract,
+                "rapidocr": rapidocr,
+                "tesseract": tesseract,
                 "opencv": seal_detection_available(),
                 "ner": ner_status(),
                 "profiles": [load_profile(n).to_dict() for n in list_profiles()],
@@ -1411,9 +1415,14 @@ footer {
               <td>Word (.docx) run 级原位精确替换、修订与批注处理</td>
             </tr>
             <tr>
+              <td><strong>RapidOCR (ONNXRuntime)</strong></td>
+              <td id="docRapidOCR"><span class="spinner"></span></td>
+              <td>纯扫描件 PDF / 内嵌图片敏感文字识别（优先引擎，纯 pip 安装）</td>
+            </tr>
+            <tr>
               <td><strong>Tesseract OCR (chi_sim)</strong></td>
               <td id="docTesseract"><span class="spinner"></span></td>
-              <td>纯扫描件 PDF / 内嵌图片敏感文字识别与视觉涂黑</td>
+              <td>纯扫描件 PDF / 内嵌图片敏感文字识别（回退引擎，需系统安装）</td>
             </tr>
             <tr>
               <td><strong>OpenCV (Vision)</strong></td>
@@ -1834,9 +1843,15 @@ async function fetchDoctorInfo() {
     const res = await fetch('/api/doctor');
     const data = await res.json();
 
+    document.getElementById('docRapidOCR').innerHTML = data.rapidocr
+      ? '<span class="badge badge-success">✅ 已就绪</span>'
+      : '<span class="badge badge-txt">未安装 (可选: pip install .[ocr])</span>';
+
     document.getElementById('docTesseract').innerHTML = data.tesseract 
       ? '<span class="badge badge-success">✅ 已就绪 (chi_sim)</span>' 
-      : '<span class="badge badge-warning">未安装 (扫描件仅能转文本)</span>';
+      : data.rapidocr
+        ? '<span class="badge badge-txt">未安装 (已由 RapidOCR 提供 OCR)</span>'
+        : '<span class="badge badge-warning">未安装 (扫描件仅能转文本)</span>';
 
     document.getElementById('docOpenCV').innerHTML = data.opencv 
       ? '<span class="badge badge-success">✅ 已就绪</span>' 
