@@ -239,6 +239,39 @@ def test_percent_encoded_phone_in_preserved_links_scrubbed_and_verified(tmp_path
     assert "136%200000%204444" not in uris and "136 0000 4444" not in uris
 
 
+def test_docx_hyperlink_field_instr_verified_and_scrubbed(tmp_path: Path):
+    base = tmp_path / "field_base.docx"
+    docx_io.create_sample_docx(base, "干净显示文本")
+    src = tmp_path / "field_link.docx"
+    with zipfile.ZipFile(base) as zin, zipfile.ZipFile(src, "w") as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                field_xml = (
+                    b'<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+                    b'<w:r><w:instrText xml:space="preserve"> HYPERLINK "https://example-fictional.test/f?phone=13900005555" </w:instrText></w:r>'
+                    b'<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+                )
+                data = data.replace(b"</w:p>", field_xml, 1)
+            zout.writestr(item, data)
+
+    assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
+
+    out_ai = tmp_path / "field_ai.docx"
+    assert redact_file(src, mode="ai", output_path=out_ai).residual.ok
+    with zipfile.ZipFile(out_ai) as z:
+        doc_xml = z.read("word/document.xml").decode("utf-8")
+    assert "13900005555" not in doc_xml
+    assert "example-fictional.test" not in doc_xml
+
+    out_prod = tmp_path / "field_prod.docx"
+    assert redact_file(src, mode="production", output_path=out_prod).residual.ok
+    with zipfile.ZipFile(out_prod) as z:
+        doc_xml = z.read("word/document.xml").decode("utf-8")
+    assert "13900005555" not in doc_xml
+    assert "https://example-fictional.test/f" in doc_xml
+
+
 def test_standalone_html_scrubs_docx_rels_and_metadata():
     docs_html = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     root_html = (ROOT / "legal-redactor.html").read_text(encoding="utf-8")
