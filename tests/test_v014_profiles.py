@@ -167,3 +167,18 @@ def test_publish_finds_address_after_unseparated_clause(tmp_path: Path):
     out = tmp_path / "published.md"
     assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
     assert out.read_text(encoding="utf-8") == "住北京市海淀区为送达地址住苏州市"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住某市某区法院宿舍3号楼为约定送达地址", "住某市某区为约定送达地址"),
+        ("住某市某区法院宿舍3号楼", "住某市某区"),
+        ("地址北京市海淀区法院。", "地址北京市海淀区法院。"),
+    ],
+)
+def test_publish_distinguishes_court_housing_from_court_venues(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected

@@ -58,6 +58,16 @@ test('publish finds an address after an unseparated clause', () => {
   assert.equal(redact(text, { mode: 'publish' }), '住北京市海淀区为送达地址住苏州市');
 });
 
+test('publish redacts court housing but retains short court venues', () => {
+  for (const [text, expected] of [
+    ['住某市某区法院宿舍3号楼为约定送达地址', '住某市某区为约定送达地址'],
+    ['住某市某区法院宿舍3号楼', '住某市某区'],
+    ['地址北京市海淀区法院。', '地址北京市海淀区法院。'],
+  ]) {
+    assert.equal(redact(text, { mode: 'publish' }), expected);
+  }
+});
+
 test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
   const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
   assert.equal(redact(text, { mode: 'production' }), text);

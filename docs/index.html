@@ -1674,7 +1674,7 @@ function buildRedactionPlan(text, options) {
           address = address.slice(0, boundary.index + boundary[0].length);
           addressRegex.lastIndex += address.length - match.trimStart().length;
         }
-        if (address.length < 6 || (address.includes('法院') && address.length < 12)) continue;
+        if (address.length < 6 || (address.length < 12 && /法院(?:内|[东西南北]?门(?:口)?|旁|附近|对面)?$/.test(address))) continue;
         addHit(address, publishAddressAlias(address), 'address', 'party');
       }
 

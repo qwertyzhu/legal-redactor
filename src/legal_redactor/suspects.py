@@ -614,7 +614,7 @@ def detect_suspects(
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases
-        if "法院" in val and len(val) < 12:
+        if len(val) < 12 and re.search(r"法院(?:内|[东西南北]?门(?:口)?|旁|附近|对面)?$", val):
             continue
         candidates.append(
             Suspect(
