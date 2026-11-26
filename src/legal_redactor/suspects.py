@@ -634,7 +634,7 @@ def detect_suspects(
         elif rescanned and not _ADDRESS_COMPONENT.search(val):
             address_pos = start
             continue
-        if len(val) < 6 or val in skip:
+        if (len(val) < 6 and not reference) or val in skip:
             continue
         # Skip pure court venue phrases
         if len(val) < 12 and "法院" in val and not _RESIDENCE_COMPONENT.search(val):

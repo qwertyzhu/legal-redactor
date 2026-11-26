@@ -84,6 +84,7 @@ test('publish preserves address references and following prose', () => {
     ['住址同上3号楼502室', '住址某地址'],
     ['地址为上述地址3号楼502室', '地址某地址'],
     ['住址同上3号楼502室经确认无误。', '住址某地址经确认无误。'],
+    ['住址同上8号楼所在街道已确认。', '住址某地址所在街道已确认。'],
   ]) {
     assert.equal(redact(text, { mode: 'publish' }), expected);
   }

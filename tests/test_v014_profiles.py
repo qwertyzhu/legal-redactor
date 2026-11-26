@@ -201,6 +201,7 @@ def test_publish_distinguishes_court_housing_from_court_venues(tmp_path: Path, t
         ("地址为上述地址3号楼502室", "地址某地址"),
         ("住址同上3号楼502室经确认无误。", "住址某地址经确认无误。"),
         ("住址为同上502室。另在1502室开会。", "住址某地址。另在1502室开会。"),
+        ("住址同上8号楼所在街道已确认。", "住址某地址所在街道已确认。"),
     ],
 )
 def test_publish_preserves_address_references_and_following_prose(tmp_path: Path, text: str, expected: str):

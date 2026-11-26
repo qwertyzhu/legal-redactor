@@ -1692,7 +1692,7 @@ function buildRedactionPlan(text, options) {
           addressRegex.lastIndex = start;
           continue;
         }
-        if (address.length < 6 || (address.length < 12 && address.includes('法院') && !residenceComponent.test(address))) continue;
+        if ((address.length < 6 && !reference) || (address.length < 12 && address.includes('法院') && !residenceComponent.test(address))) continue;
         addHit(address, publishAddressAlias(address), 'address', 'party');
       }
 
