@@ -1,0 +1,30 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const html = fs.readFileSync(path.join(__dirname, '../docs/index.html'), 'utf8');
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const redact = vm.runInNewContext(script + '\n(text, options) => applyPlanToText(text, buildRedactionPlan(text, options));', {
+  document: { getElementById: () => ({ addEventListener() {} }) },
+  window: { addEventListener() {} },
+});
+
+test('publish keeps compound surnames and truncates labeled addresses', () => {
+  assert.equal(redact('原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。', { mode: 'publish' }),
+    '原告欧阳某，住北京市海淀区。');
+  assert.equal(redact('被告王明，住所地江苏省苏州市昆山市玉山镇前进路27号。', { mode: 'publish' }),
+    '被告王某，住所地江苏省苏州市昆山市。');
+});
+
+test('publish fuzzes numerical and personal financial-uppercase amounts like the CLI', () => {
+  const text = '工资人民币500,000元（伍拾万元整）。索赔3.5万元（叁万伍仟元整）。';
+  assert.equal(redact(text, { mode: 'publish' }), '工资数十万元（数十万元）。索赔数万元（叁万伍仟元整）。');
+});
+
+test('publish additions do not affect production or disable the automatic-detection opt-out', () => {
+  const text = '原告欧阳明，住北京市海淀区中关村大街27号院3号楼502室。工资人民币500,000元（伍拾万元整）。';
+  assert.equal(redact(text, { mode: 'production' }), text);
+  assert.equal(redact(text, { mode: 'publish', autoConfident: false }), text);
+});

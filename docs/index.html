@@ -1480,6 +1480,42 @@ function hasValidSurname(name) {
   return SURNAME_SET.has(name[0]);
 }
 
+function publishAddressAlias(address) {
+  const head = address.slice(0, 24);
+  const district = head.match(/^.{2,20}?(?<!自治)[区县旗]/);
+  const city = head.match(/^.{2,12}?(?:市|自治州|盟)(?:[^市县区旗镇乡村街道路号]{2,4}?(?<![超菜夜集早花鱼])市(?!部))?/);
+  return district?.[0] || city?.[0] || '某地址';
+}
+
+function financialAmountValue(amount) {
+  const digits = { 零: 0, 壹: 1, 贰: 2, 貳: 2, 叁: 3, 參: 3, 叄: 3, 肆: 4, 伍: 5, 陆: 6, 陸: 6, 柒: 7, 捌: 8, 玖: 9 };
+  const units = { 拾: 10, 佰: 100, 仟: 1000 };
+  let value = 0;
+  let section = 0;
+  let digit = 0;
+  for (const ch of amount) {
+    if (ch in digits) {
+      digit = digits[ch];
+    } else if (ch in units) {
+      section += (digit || 1) * units[ch];
+      digit = 0;
+    } else if (ch === '亿' || ch === '万' || ch === '萬') {
+      value += (section + digit) * (ch === '亿' ? 100_000_000 : 10_000);
+      section = digit = 0;
+    }
+  }
+  return value + section + digit;
+}
+
+function publishAmountAlias(value) {
+  if (value < 10_000) return '不足万元';
+  if (value < 100_000) return '数万元';
+  if (value < 1_000_000) return '数十万元';
+  if (value < 10_000_000) return '百万元级';
+  if (value < 100_000_000) return '千万元级';
+  return '亿元级';
+}
+
 function buildRedactionPlan(text, options) {
   const mode = options.mode || 'ai';
   const autoConfident = options.autoConfident !== false;
@@ -1577,7 +1613,9 @@ function buildRedactionPlan(text, options) {
     while ((m = roleRegex.exec(text)) !== null) {
       const name = m[2];
       if (name && hasValidSurname(name) && !['公司', '有限', '组织', '协会', '政府', '法院', '事务所'].some(w => name.includes(w))) {
-        const repl = mode === 'publish' ? (name[0] + '某') : (ALIASES[aliasIdx % ALIASES.length] || ('某人' + (aliasIdx + 1)));
+        const repl = mode === 'publish'
+          ? (COMPOUND_SURNAMES.find(s => name.startsWith(s)) || name[0]) + '某'
+          : (ALIASES[aliasIdx % ALIASES.length] || ('某人' + (aliasIdx + 1)));
         aliasIdx++;
         addHit(name, repl, 'person', 'party');
       }
@@ -1622,6 +1660,31 @@ function buildRedactionPlan(text, options) {
           }
         }
         idx = text.indexOf(org.original, idx + org.original.length);
+      }
+    }
+
+    if (mode === 'publish') {
+      const addressRegex = /(?:住所地|住址|地址|送达地址|联系地址|经营场所|注册地址|所在地|住|现住|户籍地|经常居住地)[：:\s]*([一-鿿0-9A-Za-z（）()·\- ]{6,80}?[号室层幢栋弄巷街路道村组区县市省镇乡][一-鿿0-9A-Za-z（）()·\- ]{0,30})/g;
+      for (const [, match] of text.matchAll(addressRegex)) {
+        const address = match.trim();
+        if (address.length < 6 || (address.includes('法院') && address.length < 12)) continue;
+        addHit(address, publishAddressAlias(address), 'address', 'party');
+      }
+
+      const amountRegex = /(?<!\d)(?:人民币|RMB|[￥¥])?\s*(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?\s*(?:万元|元)/g;
+      for (const [match] of text.matchAll(amountRegex)) {
+        const amount = match.trim();
+        const value = Number(amount.replace(/[^\d.]/g, '')) * (amount.endsWith('万元') ? 10_000 : 1);
+        addHit(amount, publishAmountAlias(value), 'amount', 'other');
+      }
+
+      const financialAmountRegex = /(?:人民币)?[零壹贰貳叁參叄肆伍陆陸柒捌玖拾佰仟萬万亿元圆角分整]+[元圆]整?/g;
+      for (const match of text.matchAll(financialAmountRegex)) {
+        const amount = match[0];
+        if (!/[壹贰貳叁參叄肆伍陆陸柒捌玖]/.test(amount)) continue;
+        const context = text.slice(Math.max(0, match.index - 16), match.index);
+        if (/(?:赔偿|索赔|标的|诉讼请求|违约金|许可费|稿酬|报酬|损失)/.test(context) || !/(?:月薪|年薪|工资|薪资|存款|余额)/.test(context)) continue;
+        addHit(amount, publishAmountAlias(financialAmountValue(amount)), 'amount', 'other');
       }
     }
   }

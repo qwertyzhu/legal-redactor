@@ -95,11 +95,12 @@ def test_get_root(web_server):
         assert "未脱敏原文" in hint[1]
 
 
-def test_browser_pdf_scan_guard():
+@pytest.mark.parametrize("script_name", ["pdf_scan_web.cjs", "static_publish_web.cjs"])
+def test_browser_javascript(script_name):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js is needed for the browser JavaScript test")
-    script = Path(__file__).with_name("pdf_scan_web.cjs")
+    script = Path(__file__).with_name(script_name)
     proc = subprocess.run([node, "--test", str(script)], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
