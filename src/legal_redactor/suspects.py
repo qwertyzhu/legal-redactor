@@ -630,12 +630,11 @@ def detect_suspects(
             address_pos = start + (detail.end() if detail else reference.end())
             if not detail:
                 continue
-            val = detail.group().lstrip()
-            start = address_pos - len(val)
+            val = val[:detail.end()]
         elif rescanned and not _ADDRESS_COMPONENT.search(val):
             address_pos = start
             continue
-        if (len(val) < 6 and not reference) or val in skip:
+        if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases
         if len(val) < 12 and "法院" in val and not _RESIDENCE_COMPONENT.search(val):

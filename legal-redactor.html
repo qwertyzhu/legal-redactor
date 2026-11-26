@@ -1687,12 +1687,12 @@ function buildRedactionPlan(text, options) {
           const detail = address.slice(reference[0].length).match(addressReferenceDetail);
           addressRegex.lastIndex = start + reference[0].length + (detail ? detail[0].length : 0);
           if (!detail) continue;
-          address = detail[0].trimStart();
+          address = address.slice(0, reference[0].length + detail[0].length);
         } else if (rescanned && !addressComponent.test(address)) {
           addressRegex.lastIndex = start;
           continue;
         }
-        if ((address.length < 6 && !reference) || (address.length < 12 && address.includes('法院') && !residenceComponent.test(address))) continue;
+        if (address.length < 6 || (address.length < 12 && address.includes('法院') && !residenceComponent.test(address))) continue;
         addHit(address, publishAddressAlias(address), 'address', 'party');
       }
 
