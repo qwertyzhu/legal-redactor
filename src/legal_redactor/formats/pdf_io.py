@@ -259,7 +259,10 @@ def _placeholder_baseline(
 ) -> float | None:
     target = re.compile(re.escape("".join(placeholder.split())), re.IGNORECASE)
     for line in lines:
-        chars = [(char, y) for char, bbox, y in line if rect.intersects(bbox)]
+        chars = [
+            (char, y) for char, bbox, y in line
+            if rect.contains((bbox.tl + bbox.br) / 2)
+        ]
         match = target.search("".join(char for char, _ in chars))
         if match is not None and chars:
             return chars[match.start()][1]

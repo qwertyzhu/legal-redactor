@@ -220,6 +220,33 @@ def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path, second_
         assert baselines[email] == pytest.approx(baselines["邮箱："])
 
 
+def test_restore_pdf_keeps_identical_placeholders_on_separate_rows(tmp_path: Path):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        rows = [(72, "上栏："), (80, "下栏：")]
+        for y, label in rows:
+            page.insert_text((72, y), f"{label}[邮箱]", fontsize=9, fontname="china-s")
+        first, second = page.search_for("[邮箱]")
+        assert first.intersects(second)
+        for y, _ in rows:
+            page.insert_text((first.x1 + 2, y), "Note", fontsize=9)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        email_rows = [line.strip() for line in doc[0].get_text(sort=True).splitlines() if email in line]
+        assert [line[:3] for line in email_rows] == ["上栏：", "下栏："]
+        assert all(line.count(email) == 1 for line in email_rows)
+
+
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
     monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-pass")
