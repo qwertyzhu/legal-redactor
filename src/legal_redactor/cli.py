@@ -530,6 +530,9 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             ocr_images=getattr(args, "ocr_images", "auto"),
             redact_court_staff=getattr(args, "redact_court_staff", None),
         )
+        failed = batch.failed
+        residual_failed = bool(failed) and not args.allow_residual
+        exit_code = 2 if residual_failed else 1 if batch.skipped else 0
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -553,9 +556,7 @@ def _cmd_redact(args: argparse.Namespace) -> int:
                     indent=2,
                 )
             )
-            if batch.skipped and not batch.results:
-                return 1
-            return 2 if (batch.failed and not args.allow_residual) else 0
+            return exit_code
         print(f"mode:     {batch.mode}")
         print(f"files:    {len(batch.results)}")
         print(f"skipped:  {len(batch.skipped)}")
@@ -575,10 +576,10 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             )
         for path, reason in batch.skipped:
             print(f"  [SKIP] {path.name}: {reason}", file=sys.stderr)
-        if batch.skipped and not batch.results:
-            return 1
+        if batch.skipped and not residual_failed:
+            print("handoff:    部分输入未处理，请查看 [SKIP] 并处理后重跑。")
+            return exit_code
         pending = [s for result in batch.results for s in result.suspects]
-        failed = [r for r in batch.results if not r.ok]
         failed_hits: list[dict] = []
         for result in failed:
             for hit in result.residual.hits:
@@ -593,14 +594,13 @@ def _cmd_redact(args: argparse.Namespace) -> int:
             mode=batch.mode,
             allow_residual=bool(args.allow_residual),
         )
-        if batch.failed and not args.allow_residual:
+        if residual_failed:
             print(
                 "ERROR: one or more files failed residual scan. "
                 "Fix entities or use --allow-residual.",
                 file=sys.stderr,
             )
-            return 2
-        return 0
+        return exit_code
 
     if not src.is_file():
         print(f"ERROR: input not found: {src}", file=sys.stderr)
