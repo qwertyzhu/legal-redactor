@@ -1668,7 +1668,7 @@ function buildRedactionPlan(text, options) {
       const addressBeforeClause = /[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))/;
       const addressReference = /^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))/;
       const addressComponent = /[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)|[0-9零〇一二两三四五六七八九十百千] *(?:号|室|层|幢|栋|弄|巷|单元)|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))/;
-      const residenceComponent = /宿舍|小区|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])/;
+      const residenceComponent = /宿舍|小区$|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])/;
       let scannedUntil = 0;
       while ((m = addressRegex.exec(text)) !== null) {
         const match = m[1];

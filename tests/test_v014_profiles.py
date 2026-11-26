@@ -180,6 +180,7 @@ def test_publish_finds_address_after_unseparated_clause(tmp_path: Path):
         ("地址北京市海淀区法院。", "地址北京市海淀区法院。"),
         ("地址：上海市浦东新区法院正门。", "地址：上海市浦东新区法院正门。"),
         ("地址：上海市浦东新区法院外。", "地址：上海市浦东新区法院外。"),
+        ("地址：某市法院阳光小区旁。", "地址：某市法院阳光小区旁。"),
     ],
 )
 def test_publish_distinguishes_court_housing_from_court_venues(tmp_path: Path, text: str, expected: str):

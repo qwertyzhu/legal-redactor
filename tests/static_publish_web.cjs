@@ -68,6 +68,7 @@ test('publish redacts court housing but retains short court venues', () => {
     ['地址北京市海淀区法院。', '地址北京市海淀区法院。'],
     ['地址：上海市浦东新区法院正门。', '地址：上海市浦东新区法院正门。'],
     ['地址：上海市浦东新区法院外。', '地址：上海市浦东新区法院外。'],
+    ['地址：某市法院阳光小区旁。', '地址：某市法院阳光小区旁。'],
   ]) {
     assert.equal(redact(text, { mode: 'publish' }), expected);
   }
