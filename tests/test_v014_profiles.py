@@ -117,8 +117,6 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
             page.insert_text((24, 40), "原告：张明华。", fontname="china-s")
             page.insert_text((24, 85), "证人：张明。", fontname="china-s")
             doc.save(src)
-        verify = ["--profile", "judgment-online", "--entities", str(entities), "--strict"]
-        assert main(["verify", str(src), *verify]) == 2
     elif suffix == "docx":
         doc = Document()
         p = doc.add_paragraph("原告：张明")
@@ -128,6 +126,8 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
     else:
         _src(tmp_path, "原告：张明华。\n证人：张明。\n", src.name)
 
+    verify = ["--profile", "judgment-online", "--entities", str(entities), "--strict"]
+    assert main(["verify", str(src), *verify]) == 2
     out = tmp_path / f"redacted.{suffix}"
     code = main(["redact", str(src), "--profile", "judgment-online", "-o", str(out)])
     if suffix == "pdf":
@@ -136,7 +136,6 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
         assert "原告：张明华。" in text
         assert "张某" in text
         assert text.count("张明") == 1
-        assert main(["verify", str(out), *verify]) == 0
     elif suffix == "docx":
         p = Document(out).paragraphs[0]
         assert p.text == "原告：张明华。证人：张某。"
@@ -144,6 +143,7 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
     else:
         assert out.read_text(encoding="utf-8") == "原告：张明华。\n证人：张某。\n"
     assert code == 0
+    assert main(["verify", str(out), *verify]) == 0
 
 
 @pytest.mark.parametrize("suffix_pos", [(200, 135), (24, 58)], ids=["distant", "aligned"])
@@ -297,6 +297,37 @@ def test_judgment_online_pdf_redacts_a_witness_name_containing_a_shorter_kept_na
     assert "原告：张明。" in text
     assert "张某" in text and "张明华" not in text
     assert main(["verify", str(out), *flags, "--strict"]) == 0
+
+
+def test_judgment_online_strict_verify_checks_explicit_entities(tmp_path: Path, capsys):
+    witness = "顾仿乙"
+    party = "顾仿甲"
+    district = "北京市海淀区"
+    src = _src(
+        tmp_path, f"原告：{party}，证人：{witness}。\n住所地：{district}测试路27号院3号楼502室。\n",
+    )
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([
+            {"original": witness, "category": "person", "role": "article8"},
+            {"original": party, "category": "person", "role": "party"},
+            {"original": district, "category": "address"},
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    options = ["--profile", "judgment-online", "--entities", str(entities)]
+
+    for verify_input in (src, tmp_path):
+        assert main(["verify", str(verify_input), *options, "--strict"]) == 2
+        printed = capsys.readouterr().out
+        assert f"unreplaced_entity: {witness}" in printed
+        assert f"unreplaced_entity: {party}" not in printed
+        assert f"unreplaced_entity: {district}" not in printed
+
+    out = tmp_path / "redacted.md"
+    assert main(["redact", str(src), *options, "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"原告：{party}，证人：顾某。\n住所地：{district}。\n"
+    assert main(["verify", str(out), *options, "--strict"]) == 0
 
 
 def test_publish_still_renames_everyone(tmp_path: Path):
