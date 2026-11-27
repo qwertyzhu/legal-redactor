@@ -330,8 +330,9 @@ def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAlia
         return original
 
     for obs in bucket.values():
-        if obs.abbr_of:
-            original, full = identity(obs.original), identity(obs.abbr_of)
+        target = bucket.get(obs.abbr_of) if obs.abbr_of else None
+        if obs.category == "person" and target is not None and target.category == "person":
+            original, full = identity(obs.original), identity(target.original)
             if original != full:
                 links[original] = full
 

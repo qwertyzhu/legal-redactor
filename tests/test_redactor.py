@@ -674,6 +674,33 @@ def test_unify_allows_linked_person_names_to_share_alias(tmp_path: Path):
     assert report["ok"] and report["conflicts"] == []
 
 
+def test_unify_company_abbreviation_does_not_hide_person_alias_collision(tmp_path: Path):
+    from legal_redactor.cli import main
+
+    ledgers = tmp_path / "ledgers"
+    ledgers.mkdir()
+    person = {"original": "星澜", "category": "person", "replacement": "某甲"}
+    company = dict(person, original="星澜影业有限公司", category="organization")
+    shorthand = dict(company, original="星澜", notes="以下简称:星澜影业有限公司")
+    (ledgers / "a.ledger.json").write_text(
+        json.dumps({"entities": [person]}), encoding="utf-8"
+    )
+    (ledgers / "b.ledger.json").write_text(
+        json.dumps({"entities": [company, shorthand]}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    assert main(["unify", str(ledgers), "--from-ledgers", "-o", str(out)]) == 2
+    report = json.loads((out / "consistency.report.json").read_text(encoding="utf-8"))
+    assert not report["ok"]
+    assert report["conflicts"] == [
+        {
+            "replacement": "某甲",
+            "originals": ["星澜", "星澜影业有限公司"],
+            "files": ["a.ledger.json", "b.ledger.json"],
+        },
+    ]
+
+
 def test_verify_and_scan_tree(tmp_path: Path):
     from legal_redactor.pipeline import redact_tree, scan_tree, verify_tree
 
