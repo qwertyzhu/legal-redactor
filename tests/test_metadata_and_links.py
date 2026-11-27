@@ -9,7 +9,8 @@ import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import main
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
+from legal_redactor.ledger_store import write_ledger_payload
 from legal_redactor.pipeline import redact_file, verify_tree
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +100,9 @@ def _make_pdf_with_hidden_pii(
     return path
 
 
-def _make_tagged_pdf(path: Path, *, body: str, alt: str, actual_text: str) -> Path:
+def _make_tagged_pdf(
+    path: Path, *, body: str, alt: str, actual_text: str, subject: str = "",
+) -> Path:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((72, 72), body, fontsize=11)
@@ -117,6 +120,8 @@ def _make_tagged_pdf(path: Path, *, body: str, alt: str, actual_text: str) -> Pa
     )
     doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
     doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<< /Marked true >>")
+    if subject:
+        doc.set_metadata({"subject": subject})
     doc.save(str(path))
     doc.close()
     return path
@@ -511,6 +516,49 @@ def test_restore_file_restores_pdf_structure_tree_text(tmp_path: Path):
     restored = tmp_path / "restored.pdf"
     restore_file(red, res.ledger_path, restored)
     assert alt in _structure_strings(restored)
+
+
+def test_pdf_round_trip_restores_distinct_hidden_phones(tmp_path: Path):
+    body, alt, actual, subject = (
+        "Contact phone 13900001111", "Caller 13800002222",
+        "Caller 13700003333", "Subject phone 13600004444",
+    )
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body=body, alt=alt, actual_text=actual, subject=subject,
+    )
+    redacted, restored, ledger = (tmp_path / name for name in ("redacted.pdf", "restored.pdf", "ledger.json"))
+    assert main(["redact", str(src), "--mode", "ai", "-o", str(redacted), "--ledger", str(ledger)]) == 0
+    assert main(["verify", str(redacted), "--mode", "ai", "--strict"]) == 0
+    with fitz.open(redacted) as doc:
+        assert "[手机号]" in doc[0].get_text()
+        assert doc.metadata["subject"] == ""
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        assert body.split()[-1] in doc[0].get_text()
+        assert {key: value for _, key, value in pdf_io._struct_text_fields(doc)} == {
+            "Alt": alt, "T": alt, "ActualText": actual, "E": actual,
+        }
+        assert doc.metadata["subject"] == subject
+
+    redacted.write_bytes(redacted.read_bytes() + b"\n")
+    mismatch = tmp_path / "mismatch.pdf"
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(mismatch)]) == 1
+    assert not mismatch.exists()
+
+
+def test_pdf_restore_rejects_legacy_ambiguous_hidden_phone(tmp_path: Path, capsys):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="Caller 13800002222", actual_text="Transfer receipt",
+    )
+    redacted, restored, ledger = (tmp_path / name for name in ("redacted.pdf", "restored.pdf", "ledger.json"))
+    pdf_io.redact_pdf(src, redacted, [("13900001111", "[手机号]")], image_categories={"mobile"})
+    write_ledger_payload(ledger, {"entities": [
+        {"original": "13900001111", "replacement": "[手机号]", "category": "mobile"},
+    ]})
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 1
+    assert "账本缺少 PDF 结构树电话号码的对应记录" in capsys.readouterr().err
+    assert not restored.exists()
 
 
 def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):

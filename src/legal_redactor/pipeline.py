@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -12,6 +12,7 @@ from .allowlist import load_allowlist
 from .audit import AuditReport, build_audit_report
 from .entities import RedactionPlan, build_plan, load_entities_file
 from .ledger_store import (
+    pdf_digest,
     resolve_ledger_path,
     write_ledger_payload,
     write_ledger_pointer,
@@ -164,6 +165,7 @@ def _apply(
     image_categories: set[str] | None = None,
     image_pii: list[str] | None = None,
     mode: str = "ai",
+    pdf_hidden_phones: pdf_io.PDFHiddenPhones | None = None,
 ) -> str:
     suffix = path.suffix.lower()
     if suffix == ".docx":
@@ -190,6 +192,7 @@ def _apply(
             ocr_images=ocr_images,
             image_categories=image_categories,
             mode=mode,
+            capture_hidden_phones=pdf_hidden_phones,
         )
     if suffix in TEXT_SUFFIXES or suffix == "":
         if output.suffix == "":
@@ -391,6 +394,7 @@ def redact_file(
         redact_third_party=prof.redact_third_party if prof else True,
     )
     mapping = plan.mapping()
+    pdf_hidden_phones = pdf_io.PDFHiddenPhones() if input_path.suffix.lower() == ".pdf" else None
     warnings: list[str] = []
     image_pii: list[str] = []
     if is_sandwich_pdf:
@@ -411,6 +415,7 @@ def redact_file(
         ),
         image_pii=image_pii,
         mode=mode,
+        pdf_hidden_phones=pdf_hidden_phones,
     )
     hidden_output = _extract_hidden(output_path)
     verify_text = f"{output_text}{FIELD_BOUNDARY}{hidden_output}" if hidden_output else output_text
@@ -489,6 +494,11 @@ def redact_file(
     ledger_payload["input_path"] = str(input_path)
     ledger_payload["output_path"] = str(output_path)
     ledger_payload["profile"] = prof.name if prof else None
+    if pdf_hidden_phones is not None:
+        hidden_phones = asdict(pdf_hidden_phones)
+        if pdf_hidden_phones.structure or pdf_hidden_phones.metadata:
+            hidden_phones["sha256"] = pdf_digest(output_path)
+        ledger_payload["pdf_hidden_phones"] = hidden_phones
     ledger_path = write_ledger_payload(ledger_target, ledger_payload, encrypt=ledger_encrypt)
     if not ledger_beside_output:
         write_ledger_pointer(work_dir, sidecar_stem, ledger_path)

@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
 
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
+from ..patterns import DEFAULT_PLACEHOLDERS, detect_structural
 from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 _STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
+_PHONE_CATEGORIES = frozenset({"mobile", "landline"})
+_HIDDEN_PHONE_TOKEN = re.compile(r"\[PDF(?:手机号|电话)[0-9]+\]")
 _INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
@@ -34,6 +37,12 @@ class _NameRect:
     baseline: float
     font_size: float
     direction: tuple[float, float]
+
+
+@dataclass
+class PDFHiddenPhones:
+    structure: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -170,16 +179,60 @@ def _scrub_struct_text(
     mapping: list[tuple[str, str]],
     warnings: list[str] | None,
     categories: set[str] | None,
+    *,
+    capture_hidden_phones: PDFHiddenPhones | None,
+    restore_hidden_phones: PDFHiddenPhones | None,
+    restoring: bool,
 ) -> None:
     """Apply `mapping` to tagged-PDF structure text (/Alt, /ActualText, /E, /T).
 
     Structural PII of the active `categories` is replaced too; restore passes none.
     """
+    fields = _struct_text_fields(doc)
+    if restoring and restore_hidden_phones is None and any(
+        _HIDDEN_PHONE_TOKEN.search(value)
+        or any(DEFAULT_PLACEHOLDERS[category] in value for category in _PHONE_CATEGORIES)
+        for _, _, value in fields
+    ):
+        raise ValueError("账本缺少 PDF 结构树电话号码的对应记录，请使用正确账本或从原始 PDF 重新脱敏")
+    struct_mapping = mapping
+    if restore_hidden_phones is not None:
+        struct_mapping = [*restore_hidden_phones.structure.items(), *mapping]
+    mapped_fields = [
+        (xref, key, value, apply_mapping_to_text(value, struct_mapping))
+        for xref, key, value in fields
+    ]
+    hidden_phone_categories = (categories or set()) & _PHONE_CATEGORIES
+    captured: dict[str, str] = {}
+    token_index = 0
+    fallback = (categories or set())
+    if capture_hidden_phones is not None:
+        fallback = fallback - _PHONE_CATEGORIES
+    taken = {
+        token
+        for _, _, original, mapped in mapped_fields
+        for text in (original, mapped)
+        for token in _HIDDEN_PHONE_TOKEN.findall(text)
+    } if capture_hidden_phones is not None and hidden_phone_categories else set()
     scrubbed = 0
-    for xref, key, value in _struct_text_fields(doc):
-        redacted = apply_mapping_to_text(value, mapping)
-        if categories:
-            redacted = scrub_structural_text(redacted, categories=categories)
+    for xref, key, value, redacted in mapped_fields:
+        if capture_hidden_phones is not None and hidden_phone_categories:
+            phones: list[tuple[str, str]] = []
+            for hit in detect_structural(redacted):
+                if hit.category not in hidden_phone_categories or not hit.auto_replace:
+                    continue
+                if hit.text not in captured:
+                    while True:
+                        token_index += 1
+                        token = f"[PDF{DEFAULT_PLACEHOLDERS[hit.category][1:-1]}{token_index}]"
+                        if token not in taken:
+                            break
+                    captured[hit.text] = token
+                    capture_hidden_phones.structure[token] = hit.text
+                phones.append((hit.text, captured[hit.text]))
+            redacted = apply_mapping_to_text(redacted, phones)
+        if fallback:
+            redacted = scrub_structural_text(redacted, categories=fallback)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1
@@ -479,6 +532,9 @@ def redact_pdf(
     image_categories: set[str] | None = None,
     mode: str = "ai",
     fit_replacements: bool = False,
+    capture_hidden_phones: PDFHiddenPhones | None = None,
+    restore_hidden_phones: PDFHiddenPhones | None = None,
+    restoring: bool = False,
 ) -> str:
     warn = warnings if warnings is not None else []
     ordered_mapping = sorted((pair for pair in mapping if pair[0]), key=lambda p: len(p[0]), reverse=True)
@@ -552,8 +608,14 @@ def redact_pdf(
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
         meta = dict(doc.metadata or {})
+        hidden_phone_categories = (image_categories or set()) & _PHONE_CATEGORIES
         for key in list(meta.keys()):
             if key in _CLEAR_PDF_META_KEYS:
+                if capture_hidden_phones is not None and hidden_phone_categories and any(
+                    hit.category in hidden_phone_categories and hit.auto_replace
+                    for hit in detect_structural(meta[key] or "")
+                ):
+                    capture_hidden_phones.metadata[key] = meta[key]
                 meta[key] = ""
                 continue
             if key in _SKIP_PDF_META_KEYS:
@@ -563,8 +625,15 @@ def redact_pdf(
                 meta[key] = scrub_structural_text(apply_mapping_to_text(val, mapping))
         for key in _CLEAR_PDF_META_KEYS:
             meta[key] = ""
+        if restore_hidden_phones is not None:
+            meta.update(restore_hidden_phones.metadata)
         doc.set_metadata(meta)
-        _scrub_struct_text(doc, mapping, warnings, image_categories)
+        _scrub_struct_text(
+            doc, mapping, warnings, image_categories,
+            capture_hidden_phones=capture_hidden_phones,
+            restore_hidden_phones=restore_hidden_phones,
+            restoring=restoring,
+        )
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
