@@ -2,17 +2,211 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import _print_handoff, main
+from legal_redactor.formats.pdf_io import redact_pdf
+from legal_redactor.ledger_store import restore_file, restore_text
 from legal_redactor.patterns import detect_structural
 from legal_redactor.suspects import Suspect, detect_suspects
 
 ORG = "北京星澜影业有限公司"
 WRAPPED_ORG = "西安云海数字娱乐发行股份有限公司"
 PERSON = "王建国"
+
+
+@pytest.fixture
+def short_names_pdf(tmp_path):
+    src = tmp_path / "wrap_clean.pdf"
+    entities = tmp_path / "ent3.json"
+    entities.write_text(
+        json.dumps({"entities": [
+            {"original": "郝测一", "category": "person"},
+            {"original": "李明", "category": "person"},
+        ]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=400)
+        page.insert_text((24, 40), "被告郝测\n一于2024年签署", fontname="china-s")
+        page.insert_text((24, 85), "签字确认：郝 测 一", fontname="china-s")
+        page.insert_text((24, 115), "另一签字：李 明", fontname="china-s")
+        page.insert_text((24, 145), "到会人员：李明", fontname="china-s")
+        page.insert_text((24, 185), "审查依据所列李", fontname="china-s")
+        page.insert_text((24, 245), "明细另附", fontname="china-s")
+        page.insert_text((24, 300), "卷内目录附录李", fontname="china-s")
+        page.insert_text((110, 315), "明细另附", fontname="china-s")
+        page.insert_text((180, 300), "明细另附", fontname="china-s")
+        page.insert_text((24, 360), "经办人李\n明在场", fontname="china-s")
+        doc.save(src)
+    return src, entities
+
+
+def test_pdf_wrapped_and_spaced_short_names_are_redacted(short_names_pdf, tmp_path, capsys):
+    src, entities = short_names_pdf
+    out = tmp_path / "wrap_clean.ai.pdf"
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "郝 测 一" not in text
+    assert "李 明" not in text
+    assert "李明" not in text
+    assert "一于2024年签署" not in text
+    assert "明在场" not in text
+    assert "在场" in text
+    assert "于2024年签署" in text
+    assert "卷内目录附录李" in text
+    assert text.count("明细另附") == 3
+    assert main(["verify", str(out), "--mode", "ai", "--strict", "--entities", str(entities)]) == 0
+    assert "status: PASS" in capsys.readouterr().out
+
+
+def test_pdf_split_name_aliases_use_original_position_and_size(short_names_pdf, tmp_path):
+    src, entities = short_names_pdf
+    out = tmp_path / "positioned.ai.pdf"
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        aliases = [
+            (*char["origin"], span["size"])
+            for block in doc[0].get_text("rawdict")["blocks"]
+            for line in block["lines"]
+            for span in line["spans"]
+            for char in span["chars"]
+            if char["c"] == "某" and char["origin"][1] < 130
+        ]
+    assert sorted(aliases, key=lambda item: item[1]) == [
+        pytest.approx((46, 40, 11)),
+        pytest.approx((79, 85, 11)),
+        pytest.approx((79, 115, 11)),
+    ]
+
+
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_pdf_rotated_split_name_alias_stays_inside_redaction(short_names_pdf, tmp_path, rotation):
+    _, entities = short_names_pdf
+    src = tmp_path / "rotated.pdf"
+    out = tmp_path / "rotated.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        page.insert_text((100, 140), "上下李 明前后", fontname="china-s", rotate=rotation)
+        bounds = page.search_for("李 明")[0]
+        direction = page.get_text("dict")["blocks"][0]["lines"][0]["dir"]
+        doc.save(src)
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        lines = [line for block in doc[0].get_text("dict")["blocks"] for line in block["lines"]]
+        alias, = [
+            (fitz.Rect(span["bbox"]), line["dir"])
+            for line in lines for span in line["spans"] if span["text"] == "某乙"
+        ]
+        assert alias[0] in bounds
+        assert alias[1] == direction
+        text = doc[0].get_text()
+        assert "上下" in text and "前后" in text
+        assert "李" not in text and "明" not in text
+
+
+@pytest.mark.parametrize("alias", ["Alias number seventeen", "很长的替身 测试代号"])
+def test_pdf_rotated_split_name_keeps_exact_alias_for_restore(tmp_path, alias):
+    src = tmp_path / "rotated.pdf"
+    out = tmp_path / "rotated.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        page.insert_text((100, 140), "上下李 明前后", fontname="china-s", rotate=270)
+        doc.save(src)
+    text = redact_pdf(src, out, [("李明", alias)])
+    assert alias in text.splitlines()
+    ledger = {"entities": [{"original": "李明", "replacement": alias}]}
+    restored, _ = restore_text(text, ledger)
+    assert alias not in restored
+    assert "李明" in restored
+    ledger_file = tmp_path / "ledger.json"
+    ledger_file.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
+    restored_pdf, _ = restore_file(out, ledger_file, tmp_path / "restored.pdf")
+    assert alias not in restored_pdf
+    assert all(text in restored_pdf for text in ("上下", "李明", "前后"))
+
+
+@pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])
+def test_pdf_verify_fails_for_wrapped_and_spaced_short_entities(short_names_pdf, tmp_path, capsys, line):
+    _, entities = short_names_pdf
+    src = tmp_path / "residual.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), line, fontname="china-s")
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 2
+    printed = capsys.readouterr().out
+    assert "unreplaced_entity: 郝测一" in printed
+
+
+@pytest.mark.parametrize("indent", [2, None, 3], ids=["two-spaces", "positioned", "three-spaces"])
+def test_pdf_short_name_wraps_onto_hanging_indent(short_names_pdf, tmp_path, capsys, indent):
+    _, entities = short_names_pdf
+    src = tmp_path / "indented.pdf"
+    out = tmp_path / "indented.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        if indent is None:
+            page.insert_text((24, 40), "记录中提及郝测", fontname="china-s")
+            page.insert_text((46, 55), "一于当天到场", fontname="china-s")
+        else:
+            page.insert_text((24, 40), f"记录中提及郝测\n{'　' * indent}一于当天到场", fontname="china-s")
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 2
+    assert "unreplaced_entity: 郝测一" in capsys.readouterr().out
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "郝测" not in text
+    assert "一于当天到场" not in text
+    assert "于当天到场" in text
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [((24, 40, "附录李"), (24, 64, "明细另附")), ((42, 40, "李"), (24, 57, "明"))],
+    ids=["aligned", "offset-columns"],
+)
+def test_pdf_short_names_do_not_join_aligned_text_blocks(short_names_pdf, tmp_path, first, second):
+    _, entities = short_names_pdf
+    src = tmp_path / "aligned.pdf"
+    out = tmp_path / "aligned.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        for x, y, line in (first, second):
+            page.insert_text((x, y), line, fontname="china-s")
+        assert len(page.get_text("blocks")) == 2
+        doc.save(src)
+    assert main(["verify", str(src), "--mode", "ai", "--strict", "--entities", str(entities)]) == 0
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        assert doc[0].get_text() == f"{first[2]}\n{second[2]}\n"
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "alias"),
+    [("郝", "测一", "某甲"), ("李", "明", "某乙")],
+)
+def test_pdf_alias_survives_small_wrapped_name_rect(short_names_pdf, tmp_path, first, second, alias):
+    _, entities = short_names_pdf
+    src = tmp_path / "small.pdf"
+    out = tmp_path / "small.ai.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), f"记录中提及{first}\n{second}于当天到场", fontsize=7, fontname="china-s")
+        doc.save(src)
+    assert main(["redact", str(src), "--mode", "ai", "--entities", str(entities), "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert text.count(alias) == 1
+    assert first not in text
+    assert second not in text
+    assert "于当天到场" in text
 
 
 def _suspect(text: str, category: str = "organization") -> Suspect:

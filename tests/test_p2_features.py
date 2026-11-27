@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pymupdf as fitz
 import pytest
@@ -247,6 +249,81 @@ def test_revisions_extract_views(tmp_path: Path):
     assert "13912345678" in docx_io.extract_text(src, revisions="reject")
     both = docx_io.extract_text(src, revisions="keep-and-redact")
     assert "13912345678" in both and "13800138000" in both
+
+
+@pytest.mark.parametrize(
+    "mode,expected",
+    [
+        ("accept", "before inserted moved-in also-inserted between after"),
+        ("reject", "before between deleted moved-out also-deleted after"),
+    ],
+)
+def test_flatten_nested_revisions_preserves_run_order(mode, expected):
+    body = (
+        f'<w:p xmlns:w="{W}">'
+        "<w:r><w:t>before </w:t></w:r>"
+        "<w:ins><w:r><w:t>inserted </w:t></w:r>"
+        "<w:moveTo><w:r><w:t>moved-in </w:t></w:r></w:moveTo></w:ins>"
+        "<w:ins><w:r><w:t>also-inserted </w:t></w:r></w:ins>"
+        "<w:r><w:t>between </w:t></w:r>"
+        "<w:del><w:r><w:delText>deleted </w:delText></w:r>"
+        "<w:moveFrom><w:r><w:delText>moved-out </w:delText></w:r></w:moveFrom></w:del>"
+        "<w:del><w:r><w:delText>also-deleted </w:delText></w:r></w:del>"
+        "<w:r><w:t>after</w:t></w:r>"
+        "</w:p>"
+    )
+    xml, text, _ = docx_io._process_xml_bytes("word/document.xml", body.encode(), None, mode)
+    assert text == expected
+    assert all(tag not in xml for tag in (b"<w:ins", b"<w:del", b"<w:move"))
+
+
+def test_docx_revision_warning_isolated_between_redactions(tmp_path: Path, monkeypatch):
+    revision_src = tmp_path / "revision.docx"
+    revision_out = tmp_path / "revision.redacted.docx"
+    _revision_docx(revision_src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([{"original": "13912345678\n13800138000", "replacement": "[masked]"}]),
+        encoding="utf-8",
+    )
+    plain_src = tmp_path / "plain.docx"
+    docx_io.create_sample_docx(plain_src, "联系电话 13700001111")
+
+    revision_written = Event()
+    resume_revision = Event()
+    writestr = zipfile.ZipFile.writestr
+
+    def pause_after_revision_xml(archive, zinfo_or_arcname, *args, **kwargs):
+        writestr(archive, zinfo_or_arcname, *args, **kwargs)
+        part = getattr(zinfo_or_arcname, "filename", zinfo_or_arcname)
+        if archive.filename == str(revision_out) and part == "word/document.xml":
+            # The split was detected, but the redaction hasn't reported its warnings yet.
+            revision_written.set()
+            assert resume_revision.wait(timeout=10)
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", pause_after_revision_xml)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        revision_job = executor.submit(
+            redact_file,
+            revision_src,
+            mode="ai",
+            output_path=revision_out,
+            entities_path=entities,
+            revisions="keep-and-redact",
+        )
+        try:
+            assert revision_written.wait(timeout=10)
+            plain_result = redact_file(plain_src, mode="ai", output_path=tmp_path / "plain.redacted.docx")
+        finally:
+            resume_revision.set()
+        revision_result = revision_job.result(timeout=10)
+
+    split_warning = (
+        "keep-and-redact: entity spans a tracked-change boundary in "
+        "1 paragraph(s); not collapsed — check residual report"
+    )
+    assert (revision_result.warnings, plain_result.warnings) == ([split_warning], [])
+    assert "13700001111" not in docx_io.extract_text(plain_result.output_path)
 
 
 def test_doctor_cli(capsys):

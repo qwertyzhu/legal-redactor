@@ -894,6 +894,7 @@ footer {
         <button class="btn btn-primary" onclick="startRestore()">🔄 一键还原真实当事人名称</button>
         <button class="btn btn-secondary" onclick="copyRestoredText()">📋 复制还原文本</button>
       </div>
+      <div id="restoreWarnings" class="alert alert-warning hidden" role="status"></div>
     </div>
   </div>
 
@@ -2384,25 +2385,35 @@ function startRestore() {
     return;
   }
 
-  let out = text;
-  const entities = ledger.entities || [];
-  const valid = entities.filter(e => e.replacement && e.original && e.replacement !== e.original);
-  valid.sort((a, b) => b.replacement.length - a.replacement.length);
-
-  // 哨兵两阶段替换，防止链式覆盖
-  const sentinels = [];
-  valid.forEach((e, idx) => {
-    if (out.includes(e.replacement)) {
-      const tok = `⟦S${idx}⟧`;
-      out = out.split(e.replacement).join(tok);
-      sentinels.push([tok, e.original]);
-    }
-  });
-  for (const [tok, orig] of sentinels) {
-    out = out.split(tok).join(orig);
+  const originalsByToken = new Map();
+  for (const row of ledger.entities || []) {
+    const original = String(row.original || '');
+    const replacement = String(row.replacement || '');
+    if (!original || !replacement || original === replacement) continue;
+    if (!originalsByToken.has(replacement)) originalsByToken.set(replacement, new Set());
+    originalsByToken.get(replacement).add(original);
   }
 
-  document.getElementById('restoreOutput').value = out;
+  const reversePlan = Array.from(originalsByToken, ([token, originals]) => ({
+    original: token,
+    replacement: originals.size === 1 ? originals.values().next().value : token,
+  })).sort((a, b) => b.original.length - a.original.length);
+
+  const ambiguous = new Set();
+  let out = '';
+  let last = 0;
+  for (const { start, end, original, replacement } of findMappingSpans(text, reversePlan)) {
+    if (original === replacement) ambiguous.add(original);
+    out += text.slice(last, start) + replacement;
+    last = end;
+  }
+  document.getElementById('restoreOutput').value = out + text.slice(last);
+
+  const warnings = document.getElementById('restoreWarnings');
+  warnings.textContent = ambiguous.size
+    ? `${[...ambiguous].join('、')} 对应多个原文，未还原，请核对账本后手动填写。`
+    : '';
+  warnings.classList.toggle('hidden', ambiguous.size === 0);
 }
 
 function copyRestoredText() {

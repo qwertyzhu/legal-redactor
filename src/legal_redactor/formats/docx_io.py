@@ -70,16 +70,6 @@ def _local(tag: str) -> str:
 REVISION_MODES = ("accept", "reject", "keep-and-redact")
 
 
-def _unwrap(el: etree._Element) -> None:
-    parent = el.getparent()
-    if parent is None:
-        return
-    idx = parent.index(el)
-    for offset, child in enumerate(list(el)):
-        parent.insert(idx + offset, child)
-    parent.remove(el)
-
-
 def _flatten_revisions(root: etree._Element, revisions: str = "accept") -> None:
     """Resolve tracked changes.
 
@@ -104,14 +94,12 @@ def _flatten_revisions(root: etree._Element, revisions: str = "accept") -> None:
                 el.tag = f"{W}t"
             elif _local(el.tag) == "delInstrText":
                 el.tag = f"{W}instrText"
-    changed = True
-    while changed:
-        changed = False
-        for el in list(root.iter()):
-            if _local(el.tag) in keep and el.getparent() is not None:
-                _unwrap(el)
-                changed = True
-                break
+    for el in [node for node in root.iter() if _local(node.tag) in keep]:
+        parent = el.getparent()
+        if parent is not None:
+            for child in list(el):
+                el.addprevious(child)
+            parent.remove(el)
 
 
 def _scrub_authors_and_rsids(root: etree._Element) -> None:
@@ -248,14 +236,14 @@ def _replace_across_runs(nodes: list[etree._Element], mapping: list[tuple[str, s
             _preserve_space(node, new)
 
 
-def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
-    """Apply mapping; edit runs in place so mid-paragraph formatting survives."""
+def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> tuple[str, bool]:
+    """Redact runs in place; return text and whether a revision boundary blocked a replacement."""
     original = _paragraph_text(p)
     if not original:
-        return original
+        return original, False
     updated = apply_mapping_to_text(original, mapping)
     if updated == original:
-        return original
+        return original, False
 
     t_nodes = [n for n in _own_iter(p) if _local(n.tag) in ("t", "delText")]
     has_revision = any(_local(n.tag) in ("ins", "del") for n in _own_iter(p))
@@ -264,21 +252,17 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> str:
             _replace_across_runs(group, mapping)
         after = _paragraph_text(p)
         if after == updated:
-            return updated
+            return updated, False
         if has_revision:
             # Collapsing would destroy tracked-change structure; report the
             # per-run result and let residual verify flag what is left.
-            _REVISION_SPLIT_WARN.append(original[:40])
-            return after
+            return after, True
         # Entity spanned runs (or per-run order differed) — safe collapse.
         _set_paragraph_text(p, updated)
-        return updated
+        return updated, False
 
     _set_paragraph_text(p, updated)
-    return updated
-
-
-_REVISION_SPLIT_WARN: list[str] = []
+    return updated, False
 
 
 def _process_xml_bytes(
@@ -288,7 +272,7 @@ def _process_xml_bytes(
     revisions: str = "accept",
     *,
     drop_http: bool = True,
-) -> tuple[bytes, str]:
+) -> tuple[bytes, str, int]:
     root = etree.fromstring(data)
     _flatten_revisions(root, revisions)
     if mapping is not None:
@@ -306,10 +290,16 @@ def _process_xml_bytes(
 
     texts: list[str] = []
     chart_fields: list[str] = []
+    revision_split_count = 0
     chart = name.startswith("word/charts/")
     for node in root.iter():
         if _local(node.tag) == "p":
-            text = _paragraph_text(node) if mapping is None else _redact_paragraph(node, mapping)
+            if mapping is None:
+                text = _paragraph_text(node)
+            else:
+                text, revision_split = _redact_paragraph(node, mapping)
+                if revision_split:
+                    revision_split_count += 1
             if text:
                 texts.append(text)
         elif chart and node.tag in _CHART_VALUE_TAGS and node.text:
@@ -341,7 +331,7 @@ def _process_xml_bytes(
             chart_fields.append(text)
         if chart_fields:
             text = FIELD_BOUNDARY.join(("", *chart_fields, ""))
-    return out, text
+    return out, text, revision_split_count
 
 
 def extract_text(path: Path, revisions: str = "accept") -> str:
@@ -350,7 +340,7 @@ def extract_text(path: Path, revisions: str = "accept") -> str:
         names = [n for n in zin.namelist() if _TEXT_PART_RE.match(n)]
         names.sort(key=lambda n: (0 if n.endswith("document.xml") else 1, n))
         for name in names:
-            _, text = _process_xml_bytes(name, zin.read(name), mapping=None, revisions=revisions)
+            _, text, _ = _process_xml_bytes(name, zin.read(name), mapping=None, revisions=revisions)
             if text.strip():
                 chunks.append(text)
     return "\n".join(chunks)
@@ -551,6 +541,7 @@ def redact_docx(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     collected: list[str] = []
+    revision_split_count = 0
     warn = warnings if warnings is not None else []
     with zipfile.ZipFile(input_path, "r") as zin:
         names = zin.namelist()
@@ -579,7 +570,10 @@ def redact_docx(
                 data = zin.read(item.filename)
                 name = item.filename
                 if _TEXT_PART_RE.match(name):
-                    data, text = _process_xml_bytes(name, data, mapping, revisions, drop_http=drop_http)
+                    data, text, part_revision_splits = _process_xml_bytes(
+                        name, data, mapping, revisions, drop_http=drop_http
+                    )
+                    revision_split_count += part_revision_splits
                     if text.strip():
                         collected.append(text)
                 elif name == "docProps/core.xml":
@@ -594,12 +588,11 @@ def redact_docx(
                     data = _scrub_misc_part(data)
                 zout.writestr(item, data)
 
-    if _REVISION_SPLIT_WARN:
+    if revision_split_count:
         warn.append(
             "keep-and-redact: entity spans a tracked-change boundary in "
-            f"{len(_REVISION_SPLIT_WARN)} paragraph(s); not collapsed — check residual report"
+            f"{revision_split_count} paragraph(s); not collapsed — check residual report"
         )
-        _REVISION_SPLIT_WARN.clear()
     return "\n".join(collected)
 
 
