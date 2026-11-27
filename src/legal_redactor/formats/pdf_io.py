@@ -13,7 +13,7 @@ import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
 from ..patterns import DEFAULT_PLACEHOLDERS, detect_structural
-from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
+from . import FIELD_BOUNDARY, _replacement_for_hit, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
@@ -233,7 +233,6 @@ def _scrub_struct_text(
     token_counter = count(1)
     taken: set[str] = set()
     if capture_hidden_phones is not None:
-        scrub_categories = scrub_categories - _PHONE_CATEGORIES
         literal_tokens = {
             token for _, _, _, mapped in mapped_fields for token in _HIDDEN_PHONE_TOKEN.findall(mapped)
         }
@@ -244,23 +243,27 @@ def _scrub_struct_text(
                 taken.update(_HIDDEN_PHONE_TOKEN.findall(original))
     scrubbed = 0
     for xref, key, value, redacted in mapped_fields:
-        if scrub_categories:
-            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if capture_hidden_phones is not None and hidden_phone_categories:
             parts: list[str] = []
             last = 0
             for hit in detect_structural(redacted):
-                if hit.category not in hidden_phone_categories or not hit.auto_replace:
+                if hit.category not in scrub_categories or hit.category == "url" or not hit.auto_replace:
                     continue
-                if hit.text not in captured:
-                    token = _next_hidden_phone_token(hit.category, taken, token_counter)
-                    captured[hit.text] = token
-                    capture_hidden_phones.structure[token] = hit.text
-                parts.extend((redacted[last:hit.start], captured[hit.text]))
+                if hit.category in hidden_phone_categories:
+                    if hit.text not in captured:
+                        token = _next_hidden_phone_token(hit.category, taken, token_counter)
+                        captured[hit.text] = token
+                        capture_hidden_phones.structure[token] = hit.text
+                    replacement = captured[hit.text]
+                else:
+                    replacement = _replacement_for_hit(hit.category, hit.text)
+                parts.extend((redacted[last:hit.start], replacement))
                 last = hit.end
             if parts:
                 parts.append(redacted[last:])
                 redacted = "".join(parts)
+        elif scrub_categories:
+            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1

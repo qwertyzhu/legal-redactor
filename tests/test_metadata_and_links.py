@@ -504,6 +504,18 @@ def test_pdf_hidden_landlines_with_shared_prefix_round_trip(tmp_path: Path):
     assert alt in _structure_strings(restored)
 
 
+def test_pdf_hidden_phone_and_wechat_id_with_same_digits(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="微信 13800002222 电话 13800002222", actual_text="Receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "ledger.json").ledger_path
+    assert "微信 [社交账号] 电话 [PDF手机号1]" in _structure_strings(redacted)
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert "微信 [社交账号] 电话 13800002222" in _structure_strings(restored)
+
+
 def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
     src = _make_tagged_pdf(
         tmp_path / "alt_only.pdf",
