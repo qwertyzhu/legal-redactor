@@ -75,6 +75,22 @@ def test_restore_roundtrip_text(tmp_path: Path):
     assert "张测伟" in text and "北京星测科技有限公司" in text and "13912345678" in text
 
 
+def test_restore_txt_does_not_reapply_aliases(tmp_path: Path):
+    original = "原告：顾仿甲\n被告：顾仿乙\n"
+    src = _src(tmp_path, original, name="original.txt")
+    (tmp_path / "entities.json").write_text(json.dumps({"entities": [
+        {"original": "顾仿甲", "replacement": "当事人甲", "category": "person"},
+        {"original": "顾仿乙", "replacement": "顾仿甲", "category": "person"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+    redacted = tmp_path / "redacted.txt"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.txt"
+    assert main(["redact", str(src), "--mode", "ai", "-o", str(redacted), "--ledger", str(ledger)]) == 0
+    assert redacted.read_text(encoding="utf-8") == "原告：当事人甲\n被告：顾仿甲\n"
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert restored.read_text(encoding="utf-8") == original
+
+
 def test_restore_warns_on_ambiguous_tokens():
     ledger = {"entities": [
         {"original": "甲公司全称", "replacement": "某单位A", "category": "organization"},
