@@ -122,9 +122,10 @@ def extract_text_with_scan_pages(path: Path, *, flatten_form: bool = False) -> t
     return "\n".join(parts), scan_pages
 
 
-def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> None:
+def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> dict[int, list[fitz.Rect]]:
+    fields: dict[int, list[fitz.Rect]] = {}
     if not doc.is_form_pdf:
-        return
+        return fields
     flattened = hidden = 0
     for page in doc:
         for widget in list(page.widgets() or []):
@@ -134,12 +135,14 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
                 hidden += 1
             else:
                 flattened += 1
+                fields.setdefault(page.number, []).append(widget.rect)
     doc.bake(annots=False)
     if warnings is not None:
         if flattened:
             warnings.append(f"pdf: {flattened} form field(s) flattened")
         if hidden:
             warnings.append(f"pdf: {hidden} hidden form field(s) removed")
+    return fields
 
 
 def _has_text_layer(doc: fitz.Document) -> bool:
@@ -380,7 +383,7 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
-def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
+def _paint_pdf_replacement(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
     lines = alias.splitlines()
     fontname = _redaction_fontname(alias)
     width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
@@ -512,8 +515,7 @@ def redact_pdf(
     digit_targets = {original for original, _ in ordered_mapping if original.isascii() and original.isdecimal()}
     doc = fitz.open(str(input_path))
     try:
-        if mode.lower().strip() == "production":
-            _flatten_pdf_form(doc, warn)
+        form_fields = _flatten_pdf_form(doc, warn) if mode.lower().strip() == "production" else {}
         if not _has_text_layer(doc):
             raise ValueError(
                 "PDF has no extractable text layer (likely a scan). "
@@ -523,24 +525,37 @@ def redact_pdf(
             )
 
         for page in doc:
+            widget_rects = form_fields.get(page.number, [])
             claimed_rects: list[fitz.Rect] = []
-            split_aliases: list[tuple[list[_NameRect], str]] = []
+            styled_replacements: list[tuple[list[_NameRect], str]] = []
             fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: _CharIndex | None = None
             search_page = page.get_textpage(flags=_PDF_SEARCH_FLAGS) if ordered_mapping else None
             digits = _searchable_digits(search_page) if search_page is not None and digit_targets else None
+            widget_spans = [
+                _NameRect(fitz.Rect(span["bbox"]), span["origin"][1], span["size"], line["dir"])
+                for block in search_page.extractDICT()["blocks"] for line in block.get("lines", ())
+                for span in line["spans"]
+            ] if widget_rects and search_page is not None else []
 
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
                 if _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
+                in_widget = any(field.contains(rect) for field in widget_rects)
                 if fit_replacements and text:
                     fitted_text.append((rect, original, text))
                     text = ""
+                elif in_widget and text:
+                    style = max(widget_spans, key=lambda span: (span.rect & rect).get_area(), default=None)
+                    if style is not None and style.rect.intersects(rect):
+                        slot = _NameRect(rect, style.baseline, style.font_size, style.direction)
+                        styled_replacements.append(([slot], text))
+                        text = ""
                 page.add_redact_annot(
                     rect,
                     text=text,
-                    fill=(1, 1, 1),
+                    fill=False if in_widget else (1, 1, 1),
                     text_color=(0, 0, 0),
                     fontsize=9,
                     fontname=_redaction_fontname(text),
@@ -566,12 +581,12 @@ def redact_pdf(
                         if add_redaction(slot.rect, original, text):
                             applied.append(slot)
                     if paint_after and applied:
-                        split_aliases.append((applied, replacement))
+                        styled_replacements.append((applied, replacement))
             if claimed_rects:
                 lines = _horizontal_text_chars(page) if fitted_text else []
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-                for slots, alias in split_aliases:
-                    _paint_split_alias(page, slots, alias)
+                for slots, alias in styled_replacements:
+                    _paint_pdf_replacement(page, slots, alias)
             if fitted_text:
                 occupied = claimed_rects + _restoration_obstacles(page)
                 for rect, original, text in fitted_text:

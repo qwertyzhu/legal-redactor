@@ -248,6 +248,7 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
     description = "Payment receipt for bank transfer"
     status = "Original verified"
     hidden_value = "Internal form notes"
+    field_fill = (0.75, 0.875, 1)
     with fitz.open() as pdf:
         page = pdf.new_page()
         page.insert_text((36, 50), "Fictional evidence submission form")
@@ -261,6 +262,7 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
             y = 80 + index * 40
             widget.rect = fitz.Rect(36, y, 336, y + 25)
             widget.text_fontsize = 12
+            widget.fill_color = field_fill
             annot = page.add_widget(widget)
             if name == "hidden":
                 annot.set_flags(fitz.PDF_ANNOT_IS_NO_VIEW)
@@ -273,7 +275,11 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
     assert redact.returncode == 0, redact.stderr + redact.stdout
     assert verify.returncode == 0, verify.stderr + verify.stdout
     assert "status: PASS" in verify.stdout
-    with fitz.open(out) as pdf:
+    with fitz.open(src) as source, fitz.open(out) as pdf:
+        original_phone = next(
+            span for block in source[0].get_text("dict")["blocks"] for line in block["lines"]
+            for span in line["spans"] if span["text"] == MOBILE
+        )
         page = pdf[0]
         assert list(page.widgets()) == []
         text = page.get_text()
@@ -283,6 +289,17 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
         assert status in text
         assert hidden_value not in text
         assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
+        placeholder = next(
+            span for block in page.get_text("dict")["blocks"] for line in block["lines"]
+            for span in line["spans"] if "".join(span["text"].split()) == "[手机号]"
+        )
+        assert placeholder["size"] == pytest.approx(original_phone["size"], abs=0.01)
+        assert placeholder["origin"] == pytest.approx(original_phone["origin"], abs=0.01)
+        phone_field = next(widget.rect for widget in source[0].widgets() if widget.field_name == "phone")
+        assert [
+            drawing["fill"] for drawing in page.get_drawings()
+            if drawing.get("fill") and phone_field.intersects(drawing["rect"])
+        ] == [field_fill]
     assert "pdf: 3 form field(s) flattened" in redact.stdout
 
 
