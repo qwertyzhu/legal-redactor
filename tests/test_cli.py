@@ -102,6 +102,22 @@ def test_cli_redacts_encoded_text(tmp_path: Path, encoding: str, note: str) -> N
     assert out.read_bytes().decode("utf-8") == text.replace(MOBILE, "[手机号]")
 
 
+@pytest.mark.parametrize(
+    ("original", "redacted"),
+    [("甲方签字：郝测一", "甲方签字：某甲"), ("作品名称：清月传", "作品名称：某作品")],
+    ids=["signatory", "work-title"],
+)
+def test_cli_redacts_cr_separated_text(tmp_path: Path, original: str, redacted: str) -> None:
+    src = tmp_path / "input.txt"
+    src.write_bytes(f"说明\r{original}\r附注无关\r".encode("utf-8"))
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--profile", "ai", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_bytes().decode("utf-8") == f"说明\r{redacted}\r附注无关\r"
+
+
 @pytest.mark.parametrize("invoice", ["042", "042-"])
 def test_cli_landline_does_not_span_txt_lines(tmp_path: Path, invoice: str) -> None:
     src = tmp_path / "schedule.txt"
@@ -140,7 +156,7 @@ def test_cli_verify_fails_on_unredacted_wrapped_landline(tmp_path: Path, suffix:
     src = tmp_path / f"phone{suffix}"
     number = "010-\n12345678"
     if suffix == ".txt":
-        src.write_text(f"电话：{number}", encoding="utf-8")
+        src.write_bytes("电话：010-\r\n12345678".encode("utf-8"))
     else:
         doc = Document()
         doc.add_paragraph("电话：010-")
