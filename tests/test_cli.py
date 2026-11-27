@@ -117,6 +117,43 @@ def test_cli_landline_does_not_span_txt_lines(tmp_path: Path) -> None:
     assert residual["hits"] == []
 
 
+@pytest.mark.parametrize("number", ["010-\n12345678", "010-1234- \t\r\n\t5678"])
+def test_cli_redacts_landline_wrapped_after_hyphen(tmp_path: Path, number: str) -> None:
+    src = tmp_path / "phone.txt"
+    src.write_bytes(f"电话：{number}\r\n备注：保留。\r\n".encode("utf-8"))
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_bytes().decode("utf-8") == "电话：[电话]\r\n备注：保留。\r\n"
+    verified = _run_cli("verify", str(out), "--profile", "production", "--json", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stderr + verified.stdout
+    report = json.loads(verified.stdout)
+    assert report["status"] == "PASS"
+    assert report["hits"] == []
+
+
+@pytest.mark.parametrize("suffix", [".txt", ".docx"])
+def test_cli_verify_fails_on_unredacted_wrapped_landline(tmp_path: Path, suffix: str) -> None:
+    src = tmp_path / f"phone{suffix}"
+    number = "010-\n12345678"
+    if suffix == ".txt":
+        src.write_text(f"电话：{number}", encoding="utf-8")
+    else:
+        doc = Document()
+        doc.add_paragraph("电话：010-")
+        doc.add_paragraph("12345678")
+        doc.save(src)
+
+    verified = _run_cli("verify", str(src), "--profile", "production", "--json", cwd=tmp_path)
+
+    assert verified.returncode == 2, verified.stderr + verified.stdout
+    report = json.loads(verified.stdout)
+    assert report["status"] == "FAIL"
+    assert [(hit["category"], hit["text"]) for hit in report["hits"]] == [("landline", number)]
+
+
 def test_cli_rejects_undecodable_text(tmp_path: Path) -> None:
     src = tmp_path / "input.txt"
     src.write_bytes(b"\x81")
@@ -387,6 +424,22 @@ def test_cli_landline_does_not_span_docx_table_rows(tmp_path: Path) -> None:
 
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert [tuple(cell.text for cell in row.cells) for row in Document(out).tables[0].rows] == rows
+    residual = json.loads(out.with_suffix(".residual.json").read_text(encoding="utf-8"))
+    assert residual["status"] == "PASS"
+    assert residual["hits"] == []
+
+
+def test_cli_redacts_landline_wrapped_within_docx_paragraph(tmp_path: Path) -> None:
+    src = tmp_path / "phone.docx"
+    doc = Document()
+    doc.add_paragraph("电话：010-\n12345678")
+    doc.save(src)
+    out = tmp_path / "redacted.docx"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert Document(out).paragraphs[0].text == "电话：[电话]\n"
     residual = json.loads(out.with_suffix(".residual.json").read_text(encoding="utf-8"))
     assert residual["status"] == "PASS"
     assert residual["hits"] == []
