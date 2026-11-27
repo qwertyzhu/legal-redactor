@@ -487,6 +487,32 @@ def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
     assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
 
 
+def test_pdf_structure_tree_text_honors_keep_categories(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "keep.pdf",
+        body="Contact phone 13900001111",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Transfer receipt",
+    )
+    out = tmp_path / "keep.out.pdf"
+    redact_file(src, mode="ai", output_path=out, keep_categories={"mobile"})
+    assert "Bank transfer receipt for caller 13900001111" in _structure_strings(out)
+
+
+def test_restore_file_restores_pdf_structure_tree_text(tmp_path: Path):
+    from legal_redactor.ledger_store import restore_file
+
+    alt = "Bank transfer receipt for caller 13900001111"
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111", alt=alt, actual_text="Transfer receipt"
+    )
+    red = tmp_path / "red.pdf"
+    res = redact_file(src, mode="ai", output_path=red)
+    restored = tmp_path / "restored.pdf"
+    restore_file(red, res.ledger_path, restored)
+    assert alt in _structure_strings(restored)
+
+
 def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):
     objects = {
         1: "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",

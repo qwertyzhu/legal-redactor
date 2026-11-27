@@ -158,12 +158,20 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
 
 
 def _scrub_struct_text(
-    doc: "fitz.Document", mapping: list[tuple[str, str]], warnings: list[str] | None
+    doc: "fitz.Document",
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None,
+    categories: set[str] | None,
 ) -> None:
-    """Redact PII in tagged-PDF structure text (/Alt, /ActualText, /E, /T)."""
+    """Apply `mapping` to tagged-PDF structure text (/Alt, /ActualText, /E, /T).
+
+    Structural PII of the active `categories` is replaced too; restore passes none.
+    """
     scrubbed = 0
     for xref, key, value in _struct_text_fields(doc):
-        redacted = scrub_structural_text(apply_mapping_to_text(value, mapping))
+        redacted = apply_mapping_to_text(value, mapping)
+        if categories:
+            redacted = scrub_structural_text(redacted, categories=categories)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1
@@ -534,7 +542,7 @@ def redact_pdf(
         for key in _CLEAR_PDF_META_KEYS:
             meta[key] = ""
         doc.set_metadata(meta)
-        _scrub_struct_text(doc, mapping, warnings)
+        _scrub_struct_text(doc, mapping, warnings, image_categories)
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
