@@ -280,9 +280,9 @@ def _wrapped_rects(
     return out
 
 
-def _kept_name_rects(page: "fitz.Page", names: list[str]) -> list["fitz.Rect"]:
+def _kept_name_rects(page: "fitz.Page", names: list[str]) -> list[tuple[str, "fitz.Rect"]]:
     """Only literal, contiguous names can exempt a matching witness substring."""
-    rects: list[fitz.Rect] = []
+    rects: list[tuple[str, fitz.Rect]] = []
     if not names:
         return rects
     for _, line in _line_chars(page, include_spaces=True):
@@ -293,7 +293,7 @@ def _kept_name_rects(page: "fitz.Page", names: list[str]) -> list["fitz.Rect"]:
                 bounds = fitz.Rect(line[start][1].rect)
                 for _, glyph in line[start + 1 : start + len(name)]:
                     bounds |= glyph.rect
-                rects.append(bounds)
+                rects.append((name, bounds))
                 start = text.find(name, start + 1)
     return rects
 
@@ -304,7 +304,7 @@ def matched_short_names(path: Path, originals: set[str], kept_names: list[str]) 
     with fitz.open(str(path)) as doc:
         for page in doc:
             index = _page_char_index(page)
-            protected = _kept_name_rects(page, kept_names)
+            protected = [rect for _, rect in _kept_name_rects(page, kept_names)]
             found = {
                 name for name in pending
                 if any(
@@ -488,11 +488,14 @@ def redact_pdf(
             search_page = page.get_textpage(flags=_PDF_SEARCH_FLAGS) if ordered_mapping else None
             digits = _searchable_digits(search_page) if search_page is not None and digit_targets else None
 
-            def intersects_kept_name(rect: fitz.Rect) -> bool:
-                return any(rect.intersects(kept) for kept in kept_rects)
+            def conflicts_with_kept_name(rect: fitz.Rect, original: str) -> bool:
+                return any(
+                    rect.intersects(kept) and not (name in original and kept in rect)
+                    for name, kept in kept_rects
+                )
 
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
-                if intersects_kept_name(rect) or _overlaps_claimed(rect, claimed_rects):
+                if conflicts_with_kept_name(rect, original) or _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
                 if fit_replacements and text:
@@ -520,7 +523,9 @@ def redact_pdf(
                 paint_after = not fit_replacements and is_short_cjk_name(original)
                 wrapped = _wrapped_rects(index, original, allow_single_line=not rects)
                 blocked = [
-                    slot.rect for match in wrapped if any(intersects_kept_name(slot.rect) for slot in match)
+                    slot.rect
+                    for match in wrapped
+                    if any(conflicts_with_kept_name(slot.rect, original) for slot in match)
                     for slot in match
                 ] if kept_rects else []
                 for rect in rects:
