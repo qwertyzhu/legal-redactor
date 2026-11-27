@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -252,7 +253,7 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
     field_fill = (0.75, 0.875, 1)
     with fitz.open() as pdf:
         page = pdf.new_page()
-        page.insert_text((36, 50), "Fictional evidence submission form")
+        page.insert_text((36, 50), "Fictional evidence submission form", fontname="tiro")
         for index, (name, value) in enumerate(
             [("description", description), ("status", status), ("phone", MOBILE), ("hidden", hidden_value)]
         ):
@@ -265,6 +266,13 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
             widget.text_fontsize = 12
             widget.fill_color = field_fill
             annot = page.add_widget(widget)
+            kind, appearance = pdf.xref_get_key(annot.xref, "AP/N")
+            assert kind == "xref"
+            appearance_xref = int(appearance.split()[0])
+            kind, font = pdf.xref_get_key(appearance_xref, "Resources/Font/Helv")
+            assert kind == "xref"
+            pdf.xref_set_key(appearance_xref, "Resources/Font", f"<</helv {font}>>")
+            pdf.update_stream(appearance_xref, pdf.xref_stream(appearance_xref).replace(b"/Helv ", b"/helv "))
             if name == "hidden":
                 annot.set_flags(fitz.PDF_ANNOT_IS_NO_VIEW)
         pdf.save(src)
@@ -283,6 +291,8 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
         )
         page = pdf[0]
         assert list(page.widgets()) == []
+        for resource in re.findall(rb"/([\w-]+)\s+[\d.]+\s+Tf\b", page.read_contents()):
+            assert pdf.xref_get_key(page.xref, f"Resources/Font/{resource.decode()}")[0] == "xref", resource
         text = page.get_text()
         assert MOBILE not in text
         assert "[手机号]" in "".join(text.split())

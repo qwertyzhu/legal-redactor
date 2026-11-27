@@ -591,14 +591,35 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
-def _paint_pdf_replacement(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
+def _replacement_font_resource(page: "fitz.Page", fontname: str) -> tuple[str, "fitz.Font | None"]:
+    used_names = {font[4] for font in page.get_fonts()}
+    for name in (("helv", "Helvetica") if fontname == "helv" else (fontname,)):
+        if name not in used_names:
+            return name, None
+    name = next(name for i in count() if (name := f"lr-{fontname}-{i}") not in used_names)
+    font = fitz.Font(fontname)
+    page.insert_font(fontname=name, fontbuffer=font.buffer)
+    return name, font
+
+
+def _paint_pdf_replacement(
+    page: "fitz.Page", rects: list[_NameRect], alias: str,
+    run_fonts: dict[str, tuple[str, "fitz.Font | None"]],
+) -> None:
     lines = []
     for line in alias.splitlines():
         runs = []
         for ascii_run, chars in groupby(line, key=str.isascii):
             text = "".join(chars)
             run_font = "helv" if ascii_run else "china-s"
-            runs.append((text, run_font, fitz.get_text_length(text, fontname=run_font, fontsize=1)))
+            if run_font not in run_fonts:
+                run_fonts[run_font] = _replacement_font_resource(page, run_font)
+            name, embedded = run_fonts[run_font]
+            width = (
+                embedded.text_length(text, fontsize=1)
+                if embedded is not None else fitz.get_text_length(text, fontname=run_font, fontsize=1)
+            )
+            runs.append((text, name, width))
         lines.append(runs)
     fontname = _redaction_fontname(alias)
     width = max((sum(run[2] for run in line) for line in lines), default=0)
@@ -633,8 +654,8 @@ def _paint_pdf_replacement(page: "fitz.Page", rects: list[_NameRect], alias: str
         start = fitz.Point(origin)
         for line in lines:
             offset = 0.0
-            for text, run_font, run_width in line:
-                shape.insert_text(start + advance * offset, text, fontsize=font_size, fontname=run_font, rotate=rotation)
+            for text, name, run_width in line:
+                shape.insert_text(start + advance * offset, text, fontsize=font_size, fontname=name, rotate=rotation)
                 offset += run_width
             start += line_step
         shape.commit()
@@ -835,8 +856,9 @@ def redact_pdf(
             if claimed_rects:
                 lines = _horizontal_text_chars(page) if fitted_text else []
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                run_fonts: dict[str, tuple[str, fitz.Font | None]] = {}
                 for slots, alias in styled_replacements:
-                    _paint_pdf_replacement(page, slots, alias)
+                    _paint_pdf_replacement(page, slots, alias, run_fonts)
             if fitted_text:
                 occupied = claimed_rects + _restoration_obstacles(page)
                 for rect, original, text in fitted_text:
