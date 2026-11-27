@@ -189,19 +189,31 @@ def _next_hidden_phone_token(category: str, taken: set[str], counter: count) -> 
     return token
 
 
-def _structural_hits_with_mobile_copies(text: str, *, include_mobile_copies: bool) -> list[PatternHit]:
+def _structural_hits_with_copies(text: str, categories: set[str]) -> list[PatternHit]:
     hits = detect_structural(text)
-    if not include_mobile_copies:
-        return hits
-    mobiles = {hit.text for hit in hits if hit.category == "mobile" and hit.auto_replace}
-    if not mobiles:
-        return hits
-    copies = [
-        PatternHit("mobile", match[0], match.start(), match.end())
-        for match in _CN_MOBILE_AFTER_COUNTRY_CODE.finditer(text)
-        if match[0] in mobiles and not any(hit.start < match.end() and hit.end > match.start() for hit in hits)
-    ]
-    return sorted([*hits, *copies], key=lambda hit: hit.start)
+    copies: list[PatternHit] = []
+    if "mobile" in categories:
+        mobiles = {hit.text for hit in hits if hit.category == "mobile" and hit.auto_replace}
+        if mobiles:
+            copies.extend(
+                PatternHit("mobile", match[0], match.start(), match.end())
+                for match in _CN_MOBILE_AFTER_COUNTRY_CODE.finditer(text)
+                if match[0] in mobiles
+            )
+    if "share_code" in categories:
+        codes = {hit.text for hit in hits if hit.category == "share_code" and hit.auto_replace}
+        if codes:
+            pattern = "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
+            copies.extend(
+                PatternHit("share_code", match[0], match.start(), match.end())
+                for match in re.finditer(pattern, text)
+            )
+    for copy in copies:
+        if not any(hit.start < copy.end and hit.end > copy.start for hit in hits):
+            hits.append(copy)
+    if copies:
+        hits.sort(key=lambda hit: hit.start)
+    return hits
 
 
 def _scrub_struct_text(
@@ -262,9 +274,7 @@ def _scrub_struct_text(
         if capture_hidden_phones is not None and hidden_phone_categories:
             parts: list[str] = []
             last = 0
-            for hit in _structural_hits_with_mobile_copies(
-                redacted, include_mobile_copies="mobile" in hidden_phone_categories,
-            ):
+            for hit in _structural_hits_with_copies(redacted, scrub_categories):
                 if hit.category not in scrub_categories or hit.category == "url" or not hit.auto_replace:
                     continue
                 if hit.category in hidden_phone_categories:
