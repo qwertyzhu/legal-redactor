@@ -10,10 +10,11 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import main
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
 from legal_redactor.ledger_store import load_ledger, restore_text
 from legal_redactor.pipeline import redact_file
 from legal_redactor.profiles_loader import list_profiles, load_profile
@@ -91,6 +92,159 @@ def test_restore_docx(tmp_path: Path):
     restored = tmp_path / "d.restored.docx"
     assert main(["restore", str(res.output_path), "--ledger", str(res.ledger_path), "-o", str(restored)]) == 0
     assert "张测伟" in docx_io.extract_text(restored)
+
+
+@pytest.mark.parametrize(("label", "original", "placeholder"), [
+    ("邮箱", "restore.roundtrip@example.test", "[邮箱]"),
+    ("银行账号", "622202123456789012", "[账号]"),
+])
+def test_restore_pdf(tmp_path: Path, label: str, original: str, placeholder: str):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    pdf_io.create_sample_pdf(src, f"{label}：{original}")
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    redacted_text = pdf_io.extract_text(redacted)
+    assert original not in redacted_text
+    assert placeholder in redacted_text
+
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    restored_text = pdf_io.extract_text(restored)
+    assert original in restored_text
+    assert placeholder not in restored_text
+    with fitz.open(restored) as doc:
+        restored_rect, = doc[0].search_for(original)
+        assert restored_rect.width == pytest.approx(
+            fitz.get_text_length(original, fontsize=7), rel=0.1
+        )
+
+
+def test_restore_pdf_keeps_adjacent_text(tmp_path: Path):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = "restore.roundtrip@example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((72, 72), "[邮箱]", fontsize=9, fontname="china-s")
+        page.insert_text((145, 72), "Adjacent", fontsize=9)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        page = doc[0]
+        email_rect, = page.search_for(email)
+        adjacent_rect, = page.search_for("Adjacent")
+        assert 60 < email_rect.width < adjacent_rect.x0 - email_rect.x0
+
+
+def test_restore_pdf_keeps_adjacent_numbers_separate(tmp_path: Path):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    phone, account = "010-12345678", "622202123456789012"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        start = fitz.Point(72, 72)
+        page.insert_text(start, phone, fontsize=11, morph=(start, fitz.Matrix(0.55, 1)))
+        phone_width = 0.55 * fitz.get_text_length(phone, fontsize=11)
+        page.insert_text((start.x + phone_width + 3, start.y), account, fontsize=11)
+        doc.save(src)
+
+    assert pdf_io.extract_text(src).split() == [phone, account]
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    assert sorted(pdf_io.extract_text(redacted).split()) == ["[电话]", "[账号]"]
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert pdf_io.extract_text(restored).split() == [phone, account]
+
+
+def test_restore_pdf_keeps_repeated_letters_in_tight_email(tmp_path: Path):
+    src = tmp_path / "input.pdf"
+    redacted = tmp_path / "redacted.pdf"
+    tight = tmp_path / "tight.pdf"
+    ledger = tmp_path / "ledger.json"
+    restored = tmp_path / "restored.pdf"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    with fitz.open() as doc:
+        page = doc.new_page(width=1600)
+        page.insert_text((72, 72), email, fontsize=11)
+        doc.save(src)
+
+    assert main(["redact", str(src), "--mode", "ai", "--ledger", str(ledger), "-o", str(redacted)]) == 0
+    with fitz.open(redacted) as doc:
+        page = doc[0]
+        placeholder, = page.search_for("[邮箱]")
+        page.insert_text((placeholder.x1 + 2, placeholder.y1 - 2), "Adjacent", fontsize=9)
+        doc.save(tight)
+
+    assert main(["restore", str(tight), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert sorted(pdf_io.extract_text(restored).split()) == ["Adjacent", email]
+
+
+@pytest.mark.parametrize("second_row", [False, True])
+def test_restore_pdf_keeps_tight_email_on_label_baseline(tmp_path: Path, second_row: bool):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((72, 72), "邮箱：[邮箱]", fontsize=9, fontname="china-s")
+        placeholder, = page.search_for("[邮箱]")
+        page.insert_text((placeholder.x1 + 2, 72), "Adjacent", fontsize=9)
+        if second_row:
+            page.insert_text((72, 87), "L         Lower", fontsize=24)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        page = doc[0]
+        if not second_row:
+            assert f"邮箱：{email}" in page.get_text(sort=True)
+        baselines = {
+            span["text"].strip(): span["origin"][1]
+            for block in page.get_text("dict")["blocks"]
+            for line in block["lines"]
+            for span in line["spans"]
+        }
+        assert baselines[email] == pytest.approx(baselines["邮箱："])
+
+
+def test_restore_pdf_keeps_identical_placeholders_on_separate_rows(tmp_path: Path):
+    src = tmp_path / "redacted.pdf"
+    restored = tmp_path / "restored.pdf"
+    ledger = tmp_path / "ledger.json"
+    email = f"{'i' * 64}@{'m' * 63}.{'w' * 63}.example.test"
+    ledger.write_text(
+        json.dumps({"entities": [{"original": email, "replacement": "[邮箱]", "category": "email"}]}),
+        encoding="utf-8",
+    )
+    with fitz.open() as doc:
+        page = doc.new_page()
+        rows = [(72, "上栏："), (80, "下栏：")]
+        for y, label in rows:
+            page.insert_text((72, y), f"{label}[邮箱]", fontsize=9, fontname="china-s")
+        first, second = page.search_for("[邮箱]")
+        assert first.intersects(second)
+        for y, _ in rows:
+            page.insert_text((first.x1 + 2, y), "Note", fontsize=9)
+        doc.save(src)
+
+    assert main(["restore", str(src), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        email_rows = [line.strip() for line in doc[0].get_text(sort=True).splitlines() if email in line]
+        assert [line[:3] for line in email_rows] == ["上栏：", "下栏："]
+        assert all(line.count(email) == 1 for line in email_rows)
 
 
 def test_ledger_encrypt_roundtrip(tmp_path: Path, monkeypatch):
