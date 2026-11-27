@@ -63,20 +63,29 @@ def test_production_keeps_evidence_image_with_inherited_page_resources(tmp_path:
     with doc:
         image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 16, 16), 0)
         image.clear_with(90)
-        page.insert_image(fitz.Rect(26, 120, 126, 220), pixmap=image)
+        image_rect = fitz.Rect(26, 120, 126, 220)
+        image_xref = page.insert_image(image_rect, pixmap=image)
         parent_xref = int(doc.xref_get_key(page.xref, "Parent")[1].split()[0])
         resources = doc.xref_get_key(page.xref, "Resources")[1]
+        comment_page = doc.new_page(width=400, height=280)
+        comment_page.insert_image(image_rect, xref=image_xref)
+        comment_page.add_text_annot((24, 40), "Fictional comment")
         doc.xref_set_key(parent_xref, "Resources", resources)
-        doc.xref_set_key(page.xref, "Resources", "null")
+        for page in doc:
+            doc.xref_set_key(page.xref, "Resources", "null")
         doc.save(src)
     with fitz.open(src) as original:
-        assert original.xref_get_key(original[0].xref, "Resources")[0] == "null"
-        assert original[0].get_pixmap().pixel(50, 150) == (90, 90, 90)
+        assert not list(original[1].widgets())
+        assert len(list(original[1].annots())) == 1
+        for page in original:
+            assert original.xref_get_key(page.xref, "Resources")[0] == "null"
+            assert page.get_pixmap().pixel(50, 150) == (90, 90, 90)
 
     redact_pdf(src, out, [], ocr_images="off", mode="production")
 
     with fitz.open(out) as output:
-        assert output[0].get_pixmap().pixel(50, 150) == (90, 90, 90)
+        for page in output:
+            assert page.get_pixmap().pixel(50, 150) == (90, 90, 90), page.number
 
 
 def test_production_drops_widgets_when_appearances_are_untrusted(tmp_path: Path) -> None:

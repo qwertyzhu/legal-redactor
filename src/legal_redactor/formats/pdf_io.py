@@ -187,9 +187,10 @@ def _flatten_pdf_form(
                     value = widget.field_value
                     if isinstance(value, str) and value:
                         widget_values.append(value)
-        if page.number in fields:
-            _copy_inherited_page_resources(doc, page.xref)
     if fields:
+        for page in doc:
+            if page.annot_xrefs():
+                _copy_inherited_page_resources(doc, page.xref)
         doc.bake(annots=False)
     if warnings is not None:
         if flattened:
