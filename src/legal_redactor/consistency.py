@@ -15,12 +15,15 @@ from .allowlist import load_allowlist
 from .draft import extract_text
 from .entities import build_plan, load_entities_file
 from .ledger_store import load_ledger
-from .patterns import DEFAULT_PLACEHOLDERS, structural_placeholder
+from .patterns import DEFAULT_PLACEHOLDERS, STRUCTURAL_CATEGORIES, structural_placeholder
 from .pipeline import _normalize_keep_extra, iter_batch_inputs
 from .profiles_loader import resolve_profile
 
 _PERSON_COUNTER = "甲乙丙丁戊己庚辛壬癸"
 _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_INDEXED_ALIAS_CATEGORIES = STRUCTURAL_CATEGORIES | {
+    "person", "organization", "address", "work_title", "account"
+}
 
 
 def _stable_alias(category: str, index: int, original: str = "") -> str:
@@ -68,6 +71,22 @@ class Conflict:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def describe(self) -> str:
+        return f"{self.original}: {', '.join(self.replacements)}"
+
+
+@dataclass
+class PersonAliasCollision:
+    replacement: str
+    originals: list[str]
+    files: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def describe(self) -> str:
+        return f"{self.replacement} shared by {', '.join(self.originals)}"
+
 
 @dataclass
 class ConsistencyReport:
@@ -75,7 +94,7 @@ class ConsistencyReport:
     entity_count: int
     conflict_count: int
     observations: list[Observation]
-    conflicts: list[Conflict]
+    conflicts: list[Conflict | PersonAliasCollision]
     entities_path: Path | None = None
     report_path: Path | None = None
 
@@ -291,15 +310,29 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
     return merged
 
 
-def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict]:
-    conflicts: list[Conflict] = []
-    for obs in bucket.values():
-        uniq = [r for r in obs.replacements_seen if r]
-        if len(set(uniq)) > 1:
+def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAliasCollision]:
+    conflicts: list[Conflict | PersonAliasCollision] = []
+    person_aliases = {
+        r for obs in bucket.values() if obs.category == "person" for r in obs.replacements_seen if r
+    }
+    by_alias: dict[str, list[Observation]] = {}
+    for obs in sorted(bucket.values(), key=lambda o: o.original):
+        replacements = {r for r in obs.replacements_seen if r}
+        if len(replacements) > 1:
             conflicts.append(
-                Conflict(original=obs.original, replacements=sorted(set(uniq)), files=list(obs.files))
+                Conflict(original=obs.original, replacements=sorted(replacements), files=list(obs.files))
             )
-    conflicts.sort(key=lambda c: c.original)
+        for alias in replacements & person_aliases:
+            by_alias.setdefault(alias, []).append(obs)
+    for alias, observations in sorted(by_alias.items()):
+        if len(observations) > 1:
+            conflicts.append(
+                PersonAliasCollision(
+                    replacement=alias,
+                    originals=[obs.original for obs in observations],
+                    files=sorted({f for obs in observations for f in obs.files}),
+                )
+            )
     return conflicts
 
 
@@ -316,6 +349,7 @@ def build_unified_entities(
     )
     counters: dict[str, int] = {}
     assigned: dict[str, str] = {}
+    reserved = {r for obs in items for r in obs.replacements_seen if r}
     entities: list[dict[str, Any]] = []
 
     for obs in items:
@@ -352,9 +386,14 @@ def build_unified_entities(
         else:
             idx = counters.get(category, 0)
             replacement = _stable_alias(category, idx, obs.original)
+            if category in _INDEXED_ALIAS_CATEGORIES:
+                while replacement in reserved:
+                    idx += 1
+                    replacement = _stable_alias(category, idx, obs.original)
             counters[category] = idx + 1
 
         assigned[obs.original] = replacement
+        reserved.add(replacement)
         row: dict[str, Any] = {
             "original": obs.original,
             "category": category,
@@ -413,8 +452,7 @@ def write_unified_bundle(
                 e["original"]: e.get("files", []) for e in entities if e.get("files")
             },
             "warning": (
-                "Review before use. Conflicts mean the same original had multiple "
-                "replacements across inputs — resolve manually."
+                "Review before use. Resolve conflicting replacements or shared person aliases manually."
             ),
         },
     }
@@ -446,9 +484,9 @@ def write_unified_bundle(
         "",
     ]
     if conflicts:
-        lines.extend(["## Conflicts (same original → different replacements)", ""])
+        lines.extend(["## Conflicts", ""])
         for c in conflicts:
-            lines.append(f"- `{c.original}`: {', '.join(f'`{r}`' for r in c.replacements)}")
+            lines.append(f"- {c.describe()}")
             lines.append(f"  - files: {', '.join(c.files)}")
         lines.append("")
     lines.extend(

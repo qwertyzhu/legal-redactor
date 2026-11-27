@@ -610,6 +610,44 @@ def test_batch_unify_first_uses_stable_aliases(tmp_path: Path):
     assert all(alias in t for t in texts)
 
 
+@pytest.mark.parametrize(
+    ("defendant_alias", "expected_alias", "conflicts"),
+    [
+        pytest.param(None, "某乙", [], id="automatic-skips-reserved"),
+        pytest.param(
+            "某甲",
+            "某甲",
+            [{"replacement": "某甲", "originals": ["陈仿乙", "顾仿甲"]}],
+            id="manual-collision-reported",
+        ),
+    ],
+)
+def test_batch_unify_person_alias_collision(tmp_path: Path, defendant_alias, expected_alias, conflicts):
+    from legal_redactor.cli import main
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.txt").write_text("原告：顾仿甲。\n", encoding="utf-8")
+    (src / "b.txt").write_text("被告：陈仿乙。\n", encoding="utf-8")
+    entities = [{"original": "顾仿甲", "category": "person", "role": "party", "replacement": "某甲"}]
+    if defendant_alias is not None:
+        entities.append(
+            {"original": "陈仿乙", "category": "person", "role": "party", "replacement": defendant_alias}
+        )
+    (src / "entities.json").write_text(json.dumps({"entities": entities}), encoding="utf-8")
+
+    assert main(["redact", str(src), "--mode", "ai", "--unify", "-o", str(out)]) == 0
+    assert (out / "a.redacted-ai.txt").read_text(encoding="utf-8") == "原告：某甲。\n"
+    assert (out / "b.redacted-ai.txt").read_text(encoding="utf-8") == f"被告：{expected_alias}。\n"
+    report = json.loads((src / ".redactor" / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["ok"] is not bool(conflicts)
+    assert report["conflict_count"] == len(conflicts)
+    assert [
+        {k: v for k, v in conflict.items() if k != "files"} for conflict in report["conflicts"]
+    ] == conflicts
+
+
 def test_verify_and_scan_tree(tmp_path: Path):
     from legal_redactor.pipeline import redact_tree, scan_tree, verify_tree
 
