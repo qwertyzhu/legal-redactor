@@ -532,11 +532,15 @@ def test_pdf_hidden_mobile_masks_its_international_copy(tmp_path: Path):
 def test_pdf_structure_tree_masks_unlabeled_copy_of_share_code(tmp_path: Path):
     src = _make_tagged_pdf(
         tmp_path / "src.pdf", body="Transfer receipt",
-        alt="链接 https://pan.baidu.com/s/xxx 提取码 ab12 ... ab12", actual_text="Receipt",
+        alt="链接 https://pan.baidu.com/s/xxx 提取码 ab12 订单 ab123456、XYZab12 ... ab12",
+        actual_text="Receipt",
     )
     redacted = tmp_path / "redacted.pdf"
     assert redact_file(src, mode="ai", output_path=redacted).residual.ok
-    assert "链接 https://pan.baidu.com/s/xxx 提取码 [提取码] ... [提取码]" in _structure_strings(redacted)
+    assert (
+        "链接 https://pan.baidu.com/s/xxx 提取码 [提取码] 订单 ab123456、XYZab12 ... [提取码]"
+        in _structure_strings(redacted)
+    )
 
 
 def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):

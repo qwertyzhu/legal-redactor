@@ -203,7 +203,8 @@ def _structural_hits_with_copies(text: str, categories: set[str]) -> list[Patter
     if "share_code" in categories:
         codes = {hit.text for hit in hits if hit.category == "share_code" and hit.auto_replace}
         if codes:
-            pattern = "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
+            alternatives = "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
+            pattern = rf"(?<![A-Za-z0-9])(?:{alternatives})(?![A-Za-z0-9])"
             copies.extend(
                 PatternHit("share_code", match[0], match.start(), match.end())
                 for match in re.finditer(pattern, text)
