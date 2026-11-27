@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from legal_redactor.cli import main
 from legal_redactor.patterns import detect_structural
 from legal_redactor.pipeline import redact_file
@@ -143,3 +145,110 @@ def test_publish_keeps_county_level_city_whole(tmp_path: Path):
     assert "江苏省苏州市昆山市" in res.output_text
     assert "河南省郑州市" in res.output_text
     assert "测试路" not in res.output_text
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住北京市海淀区中关村大街27号院3号楼502室为约定送达地址", "住北京市海淀区为约定送达地址"),
+        ("送达地址为北京市海淀区中关村大街27号，该地址为约定送达地址。", "送达地址为北京市海淀区，该地址为约定送达地址。"),
+        ("住北京市海淀区测试路27号院为民小区3栋2单元作为通讯地址", "住北京市海淀区作为通讯地址"),
+    ],
+)
+def test_publish_keeps_clause_after_numbered_address(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(("name", "expected"), [("欧阳", "欧某"), ("欧阳明", "欧阳某")])
+def test_publish_never_keeps_a_full_compound_surname_name(tmp_path: Path, name: str, expected: str):
+    src = _src(tmp_path, f"原告{name}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"原告{expected}"
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("苏州市阳光小区5栋", "苏州市"),
+        ("苏州市星河园区8号楼", "苏州市"),
+        ("苏州市云桥社区6号", "苏州市"),
+        ("上海市浦东新区晨光小区3栋", "上海市浦东新区"),
+        ("山东省东营市东营区测试路8号", "山东省东营市东营区"),
+        ("南宁市某部队营区3号楼", "南宁市"),
+        ("某市某部队营区3号楼", "某地址"),
+    ],
+)
+def test_publish_uses_city_when_there_is_no_district(tmp_path: Path, address: str, expected: str):
+    src = _src(tmp_path, f"住{address}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"住{expected}"
+
+
+def test_publish_redacts_both_addresses_when_one_has_a_shorter_prefix(tmp_path: Path):
+    src = _src(tmp_path, "住北京市海淀区测试路8号为约定送达地址。另住北京市海淀区测试路8号院3号楼。")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "住北京市海淀区为约定送达地址。另住北京市海淀区。"
+
+
+def test_publish_finds_address_after_unseparated_clause(tmp_path: Path):
+    src = _src(tmp_path, "住北京市海淀区测试路8号为送达地址住苏州市测试路5号")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "住北京市海淀区为送达地址住苏州市"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住某市某区法院宿舍3号楼为约定送达地址", "住某市某区为约定送达地址"),
+        ("住某市某区法院宿舍3号楼", "住某市某区"),
+        ("地址北京市海淀区法院。", "地址北京市海淀区法院。"),
+        ("地址：上海市浦东新区法院正门。", "地址：上海市浦东新区法院正门。"),
+        ("地址：上海市浦东新区法院外。", "地址：上海市浦东新区法院外。"),
+        ("地址：某市法院阳光小区旁。", "地址：某市法院阳光小区旁。"),
+    ],
+)
+def test_publish_distinguishes_court_housing_from_court_venues(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("住北京市海淀区测试路27号为送达地址原告知悉该道路用途。", "住北京市海淀区为送达地址原告知悉该道路用途。"),
+        ("住北京市海淀区测试路27号院3号楼502室，送达地址为上述地址且该道路为公共道路。", "住北京市海淀区，送达地址某地址。"),
+        ("住北京市海淀区测试路27号为送达地址为上述地址且该道路为公共道路。", "住北京市海淀区为送达地址为上述地址且该道路为公共道路。"),
+        ("住北京市海淀区测试路27号作为送达地址同上3号楼502室。", "住北京市海淀区作为送达地址某地址。"),
+        ("住北京市海淀区测试路27号作为送达地址为上述地址3号楼502室。另在1502室开会。", "住北京市海淀区作为送达地址某地址。另在1502室开会。"),
+        ("送达地址为同上系诉讼文书使用的道路送达地址。", "送达地址某地址。"),
+        ("送达地址：同上。送达地址为上述地址。", "送达地址：同上。送达地址为上述地址。"),
+        ("住址同上3号楼502室", "住址某地址"),
+        ("地址为上述地址3号楼502室", "地址某地址"),
+        ("住址同上3号楼502室经确认无误。", "住址某地址。"),
+        ("住址为同上502室。另在1502室开会。", "住址某地址。另在1502室开会。"),
+        ("住址同上8号楼所在街道已确认。", "住址某地址。"),
+        ("住址同上二层所在街道已确认。两人一同上二层办理立案手续。", "住址某地址。两人一同上二层办理立案手续。"),
+    ],
+)
+def test_publish_preserves_address_references_and_following_prose(tmp_path: Path, text: str, expected: str):
+    src = _src(tmp_path, text)
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == expected
+
+
+@pytest.mark.parametrize("address", ["和平路二十七号", "绿洲公寓第二栋"])
+def test_publish_redacts_numbered_addresses_without_an_administrative_area(tmp_path: Path, address: str):
+    src = _src(tmp_path, f"住{address}")
+    out = tmp_path / "published.md"
+    assert main(["redact", str(src), "--profile", "publish", "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == "住某地址"
