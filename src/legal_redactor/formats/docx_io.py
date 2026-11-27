@@ -3,7 +3,8 @@
 Handles track-changes (w:ins / w:del) and run-split entity strings by:
 1. accepting insertions and dropping deletions;
 2. applying replacements at run granularity when possible, else paragraph level.
-Also cleans core/app/custom props, author/rsid attributes, and mailto/external rels.
+Also cleans core/app/custom props, custom XML data bound to content controls,
+author/rsid attributes, and mailto/external rels.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ W = "{%s}" % W_NS
 _TEXT_PART_RE = re.compile(
     r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
+# Custom XML data store parts; content controls bound to them re-display these values on open
+_CUSTOM_XML_ITEM_RE = re.compile(r"^customXml/item\d+\.xml$")
 _CHART_NAMESPACES = (
     "http://schemas.openxmlformats.org/drawingml/2006/chart",
     "http://purl.oclc.org/ooxml/drawingml/chart",
@@ -385,6 +388,14 @@ def extract_metadata_and_links(path: Path) -> str:
                         chunks.append(el.text.strip())
             except etree.XMLSyntaxError:
                 pass
+        for name in sorted(n for n in names if _CUSTOM_XML_ITEM_RE.match(n)):
+            try:
+                root = etree.fromstring(zin.read(name))
+            except etree.XMLSyntaxError:
+                continue
+            for el in root.iter(etree.Element):
+                values = [el.text, *el.attrib.values()]
+                chunks.extend(v.strip() for v in values if v and v.strip())
         for name in sorted(n for n in names if n.startswith("word/_rels/") and n.endswith(".rels")):
             try:
                 root = etree.fromstring(zin.read(name))
@@ -448,6 +459,28 @@ def _redact_core_props(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
             el.text = scrub_structural_text(apply_mapping_to_text(el.text, mapping))
         if el.tail and isinstance(el.tail, str) and el.tail.strip():
             el.tail = scrub_structural_text(apply_mapping_to_text(el.tail, mapping))
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _redact_custom_xml_item(data: bytes, mapping: list[tuple[str, str]]) -> bytes:
+    try:
+        root = etree.fromstring(data)
+    except etree.XMLSyntaxError:
+        return data
+    changed = False
+    for el in root.iter(etree.Element):
+        if el.text:
+            updated = apply_mapping_to_text(el.text, mapping)
+            if updated != el.text:
+                el.text = updated
+                changed = True
+        for attr, value in el.attrib.items():
+            updated = apply_mapping_to_text(value, mapping)
+            if updated != value:
+                el.set(attr, updated)
+                changed = True
+    if not changed:
+        return data
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -578,6 +611,8 @@ def redact_docx(
                         collected.append(text)
                 elif name == "docProps/core.xml":
                     data = _redact_core_props(data, mapping)
+                elif _CUSTOM_XML_ITEM_RE.match(name):
+                    data = _redact_custom_xml_item(data, mapping)
                 elif name == "docProps/app.xml":
                     data = _clean_app_props(data)
                 elif name == "docProps/custom.xml":

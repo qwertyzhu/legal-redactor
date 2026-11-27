@@ -534,6 +534,57 @@ _PARTY_CLAUSE = "乙方应当在交付时签收。"
 _PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PARTIES[1]}\n{_PARTY_CLAUSE}"
 
 
+def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Path) -> None:
+    phone, id_no = "13700003333", "11010519900101123X"
+    src = tmp_path / "original.docx"
+    docx_io.create_sample_docx(src, f"电话：{phone}，身份证号：{id_no}。")
+    part = "customXml/item2.xml"
+    with zipfile.ZipFile(src, "a") as archive:
+        archive.writestr(
+            part,
+            f'<p:party xmlns:p="urn:example:party" p:id="{id_no}">'
+            f"<p:phone>{phone}</p:phone><p:id>{id_no}</p:id></p:party>",
+        )
+
+    before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert before.returncode == 2, before.stderr + before.stdout
+
+    out = tmp_path / "redacted.docx"
+    work = tmp_path / "work"
+    redacted = _run_cli(
+        "redact", str(src), "--mode", "ai", "-o", str(out), "--work-dir", str(work), cwd=tmp_path
+    )
+    assert redacted.returncode == 0, redacted.stderr + redacted.stdout
+    with zipfile.ZipFile(out) as archive:
+        data = archive.read(part).decode("utf-8")
+    assert phone not in data and id_no not in data
+    assert "[手机号]" in data and "[身份证号]" in data
+
+    after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert after.returncode == 0, after.stderr + after.stdout
+
+    restored = tmp_path / "restored.docx"
+    restore = _run_cli(
+        "restore", str(out), "--ledger", str(work / "redacted.ledger.json"), "-o", str(restored),
+        cwd=tmp_path,
+    )
+    assert restore.returncode == 0, restore.stderr + restore.stdout
+    with zipfile.ZipFile(restored) as archive:
+        data = archive.read(part).decode("utf-8")
+    assert phone in data and id_no in data
+
+    leaked = tmp_path / "leaked.docx"
+    with zipfile.ZipFile(out) as redacted_zip, zipfile.ZipFile(src) as source, zipfile.ZipFile(
+        leaked, "w"
+    ) as archive:
+        for item in redacted_zip.infolist():
+            data = source.read(part) if item.filename == part else redacted_zip.read(item)
+            archive.writestr(item, data)
+    leaked_verify = _run_cli("verify", str(leaked), "--mode", "ai", "--strict", cwd=tmp_path)
+    assert leaked_verify.returncode == 2, leaked_verify.stderr + leaked_verify.stdout
+    assert phone in leaked_verify.stdout
+
+
 @pytest.fixture(params=["txt", "docx", "pdf"])
 def party_contract_file(request: pytest.FixtureRequest, tmp_path: Path) -> Path:
     src = tmp_path / f"party-contract.{request.param}"
