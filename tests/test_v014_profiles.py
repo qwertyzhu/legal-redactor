@@ -114,7 +114,7 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
     if suffix == "pdf":
         with fitz.open() as doc:
             page = doc.new_page()
-            page.insert_text((24, 40), "原告：张明\n华。", fontname="china-s")
+            page.insert_text((24, 40), "原告：张明华。", fontname="china-s")
             page.insert_text((24, 85), "证人：张明。", fontname="china-s")
             doc.save(src)
         verify = ["--profile", "judgment-online", "--entities", str(entities), "--strict"]
@@ -146,12 +146,15 @@ def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, s
     assert code == 0
 
 
-def test_judgment_online_pdf_does_not_protect_a_name_across_unrelated_blocks(tmp_path: Path):
+@pytest.mark.parametrize("suffix_pos", [(200, 135), (24, 58)], ids=["distant", "aligned"])
+def test_judgment_online_pdf_does_not_protect_a_name_across_unrelated_blocks(
+    tmp_path: Path, suffix_pos: tuple[int, int]
+):
     src = tmp_path / "judgment.pdf"
     with fitz.open() as doc:
         page = doc.new_page()
         page.insert_text((24, 40), "证人：张明", fontname="china-s")
-        page.insert_text((200, 135), "华强", fontname="china-s")
+        page.insert_text(suffix_pos, "华强到庭。", fontname="china-s")
         doc.save(src)
     entities = tmp_path / "entities.json"
     entities.write_text(
@@ -202,7 +205,7 @@ def test_judgment_online_pdf_verify_checks_hidden_overlapping_witness_name(tmp_p
 
 
 @pytest.mark.parametrize("wrap", [True, False], ids=["aligned-blocks", "space"])
-def test_judgment_online_pdf_keeps_local_party_name_overlapping_witness(tmp_path: Path, wrap: bool):
+def test_judgment_online_pdf_does_not_exempt_noncontiguous_party_prefix(tmp_path: Path, wrap: bool):
     party_only = tmp_path / "party-only.pdf"
     src = tmp_path / "judgment.pdf"
     with fitz.open() as doc:
@@ -228,14 +231,15 @@ def test_judgment_online_pdf_keeps_local_party_name_overlapping_witness(tmp_path
         encoding="utf-8",
     )
     flags = ["--profile", "judgment-online", "--entities", str(entities)]
-    assert main(["verify", str(party_only), *flags, "--strict"]) == 0
+    assert main(["verify", str(party_only), *flags, "--strict"]) == 2
     assert main(["verify", str(src), *flags, "--strict"]) == 2
     out = tmp_path / "redacted.pdf"
     assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
     with fitz.open(out) as doc:
         text = "".join(doc[0].get_text().split())
-    assert "原告：张明华强到庭。" in text
-    assert text.count("张明") == text.count("张某") == 1
+    assert "华强到庭。" in text
+    assert "张明" not in text
+    assert text.count("张某") == 2
     assert main(["verify", str(out), *flags, "--strict"]) == 0
 
 

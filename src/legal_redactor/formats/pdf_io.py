@@ -164,8 +164,10 @@ def _scrub_pdf_links(
         warn.append(f"pdf: {scrubbed} external link target(s) scrubbed")
 
 
-def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]]]]:
-    """Per-line non-space characters with their layout, in reading order."""
+def _line_chars(
+    page: "fitz.Page", *, include_spaces: bool = False
+) -> list[tuple[int, list[tuple[str, _NameRect]]]]:
+    """Per-line characters with their layout, in reading order."""
     lines: list[tuple[int, list[tuple[str, _NameRect]]]] = []
     raw = page.get_text("rawdict")
     for block_id, block in enumerate(raw.get("blocks", [])):
@@ -174,7 +176,7 @@ def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]
             for span in line.get("spans", []):
                 for ch in span.get("chars", []):
                     char = ch.get("c", "")
-                    if not char or char.isspace():
+                    if not char or (not include_spaces and char.isspace()):
                         continue
                     chars.append((char, _NameRect(
                         fitz.Rect(ch["bbox"]), ch["origin"][1], span["size"], line["dir"],
@@ -206,14 +208,12 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     return "".join(parts), rects, rows, line_info, text_style
 
 
-def _name_is_local(
+def _short_name_is_local(
     rects: list["fitz.Rect"],
     rows: list[int],
     line_info: list[tuple[float, float, int]],
     start: int,
     end: int,
-    *,
-    allow_aligned_blocks: bool = False,
 ) -> bool:
     for i in range(start + 1, end):
         prev, curr = rects[i - 1], rects[i]
@@ -231,11 +231,10 @@ def _name_is_local(
             if max(prev_left, curr_left) >= min(prev_right, curr_right):
                 return False
             indent = abs(curr_left - prev_left)
-            if prev_block != curr_block:
-                hanging = width < indent <= 2 * width and curr_left <= prev.x0
-                aligned = allow_aligned_blocks and indent <= 0.5
-                if gap > 1.5 * height or not (hanging or aligned):
-                    return False
+            if prev_block != curr_block and not (
+                width < indent <= 2 * width and gap <= 1.5 * height and curr_left <= prev.x0
+            ):
+                return False
     return True
 
 
@@ -244,7 +243,6 @@ def _wrapped_rects(
     original: str,
     *,
     allow_single_line: bool = False,
-    kept_name: bool = False,
 ) -> list[list[_NameRect]]:
     """Rects for occurrences of `original` split by whitespace or line breaks.
 
@@ -259,9 +257,7 @@ def _wrapped_rects(
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
-        if not (short_name or kept_name) or _name_is_local(
-            rects, rows, line_info, start, start + len(target), allow_aligned_blocks=kept_name
-        ):
+        if not short_name or _short_name_is_local(rects, rows, line_info, start, start + len(target)):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
                 match: list[_NameRect] = []
@@ -279,12 +275,22 @@ def _wrapped_rects(
     return out
 
 
-def _kept_name_rects(page: "fitz.Page", index: _CharIndex, name: str) -> list["fitz.Rect"]:
-    return page.search_for(name) + [
-        slot.rect
-        for match in _wrapped_rects(index, name, allow_single_line=True, kept_name=True)
-        for slot in match
-    ]
+def _kept_name_rects(page: "fitz.Page", names: list[str]) -> dict[str, list["fitz.Rect"]]:
+    """Only literal, contiguous names can exempt a matching witness substring."""
+    rects: dict[str, list[fitz.Rect]] = {name: [] for name in names}
+    if not rects:
+        return rects
+    for _, line in _line_chars(page, include_spaces=True):
+        text = "".join(char for char, _ in line)
+        for name, matches in rects.items():
+            start = text.find(name)
+            while start >= 0:
+                bounds = fitz.Rect(line[start][1].rect)
+                for _, glyph in line[start + 1 : start + len(name)]:
+                    bounds |= glyph.rect
+                matches.append(bounds)
+                start = text.find(name, start + 1)
+    return rects
 
 
 def matched_short_names(path: Path, originals: set[str], kept_names: list[str]) -> set[str]:
@@ -293,7 +299,7 @@ def matched_short_names(path: Path, originals: set[str], kept_names: list[str]) 
     with fitz.open(str(path)) as doc:
         for page in doc:
             index = _page_char_index(page)
-            protected = [rect for name in kept_names for rect in _kept_name_rects(page, index, name)]
+            protected = [rect for rects in _kept_name_rects(page, kept_names).values() for rect in rects]
             found = {
                 name for name in pending
                 if any(
@@ -445,6 +451,7 @@ def redact_pdf(
 ) -> str:
     warn = warnings if warnings is not None else []
     ordered_mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
+    kept_names = [o for o, r in ordered_mapping if o and o == r]
     doc = fitz.open(str(input_path))
     try:
         if not _has_text_layer(doc):
@@ -456,6 +463,7 @@ def redact_pdf(
             )
 
         for page in doc:
+            kept_by_name = _kept_name_rects(page, kept_names)
             claimed_rects: list[fitz.Rect] = []
             kept_rects: list[fitz.Rect] = []
             split_aliases: list[tuple[list[_NameRect], str]] = []
@@ -463,7 +471,7 @@ def redact_pdf(
             index: _CharIndex | None = None
 
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
-                if _overlaps_claimed(rect, kept_rects) or _overlaps_claimed(rect, claimed_rects):
+                if any(rect in kept for kept in kept_rects) or _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
                 if fit_replacements and text:
@@ -482,15 +490,15 @@ def redact_pdf(
             for original, replacement in ordered_mapping:
                 if not original:
                     continue
-                if index is None:
-                    index = _page_char_index(page)
                 if original == replacement:
-                    kept_rects.extend(_kept_name_rects(page, index, original))
+                    kept_rects.extend(kept_by_name[original])
                     continue
                 rects = page.search_for(original)
                 for rect in rects:
                     add_redaction(rect, original, replacement)
                 # search_for misses names split by spaces or line breaks.
+                if index is None:
+                    index = _page_char_index(page)
                 paint_after = not fit_replacements and is_short_cjk_name(original)
                 for match in _wrapped_rects(index, original, allow_single_line=not rects):
                     applied: list[_NameRect] = []

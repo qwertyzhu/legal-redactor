@@ -90,8 +90,8 @@ def unreplaced_originals(
 
     short = {o for o in originals if is_short_cjk_name(o)}
     split_matches = matched_short_names(pdf_path, short, kept_names) if short else set()
-    # For overlapping short names only layout can distinguish a standalone
-    # original from the first line of a kept name that wraps.
+    # Overlapping short names in the page body are checked against exact
+    # kept-name rectangles, not the flattened page text.
     checked_by_layout = {o for o in short if any(o in name for name in kept_names)}
     joined = output_text.replace("\n", "")
     return [
