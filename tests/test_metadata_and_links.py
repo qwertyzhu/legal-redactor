@@ -99,6 +99,40 @@ def _make_pdf_with_hidden_pii(
     return path
 
 
+def _make_tagged_pdf(path: Path, *, body: str, alt: str, actual_text: str) -> Path:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), body, fontsize=11)
+    root, figure, span = (doc.get_new_xref() for _ in range(3))
+    doc.update_object(root, f"<< /Type /StructTreeRoot /K [ {figure} 0 R {span} 0 R ] >>")
+    doc.update_object(
+        figure,
+        f"<< /Type /StructElem /S /Figure /P {root} 0 R /Pg {page.xref} 0 R /K 0 "
+        f"/Alt {fitz.get_pdf_str(alt)} /T {fitz.get_pdf_str(alt)} >>",
+    )
+    doc.update_object(
+        span,
+        f"<< /S /Span /P {root} 0 R /Pg {page.xref} 0 R /K 1 "
+        f"/ActualText {fitz.get_pdf_str(actual_text)} /E {fitz.get_pdf_str(actual_text)} >>",
+    )
+    doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
+    doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<< /Marked true >>")
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def _structure_strings(path: Path) -> list[str]:
+    with fitz.open(str(path)) as doc:
+        return [
+            value
+            for xref in range(1, doc.xref_length())
+            for key in ("Alt", "ActualText", "E", "T")
+            for kind, value in [doc.xref_get_key(xref, key)]
+            if kind == "string"
+        ]
+
+
 @pytest.mark.parametrize("profile", ALL_PROFILES)
 def test_docx_metadata_only_phone_stripped_all_modes(tmp_path: Path, profile: str):
     src = _make_docx_with_hidden_pii(tmp_path / f"src-{profile}.docx")
@@ -423,3 +457,99 @@ def test_standalone_html_scrubs_docx_rels_and_metadata():
     assert "word\\/_rels\\/" in docs_html
     assert "TargetMode" in docs_html
     assert "docProps/custom.xml" in docs_html
+
+
+@pytest.mark.parametrize("profile", ALL_PROFILES)
+def test_pdf_structure_tree_text_scrubbed_all_modes(tmp_path: Path, profile: str):
+    src = _make_tagged_pdf(
+        tmp_path / f"tagged-{profile}.pdf",
+        body="Contact phone 13900001111",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Caller 13800002222",
+    )
+    out = tmp_path / f"tagged-{profile}.out.pdf"
+    res = redact_file(src, mode="ai", profile=profile, output_path=out)
+    assert res.residual.ok
+    strings = _structure_strings(out)
+    assert len(strings) == 4
+    joined = "\n".join(strings)
+    assert "13900001111" not in joined and "13800002222" not in joined
+    assert "Bank transfer receipt for caller [手机号]" in strings
+
+
+def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "alt_only.pdf",
+        body="Exhibit 1. Transfer receipt.",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Transfer receipt",
+    )
+    assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
+
+
+def test_pdf_structure_tree_text_honors_keep_categories(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "keep.pdf",
+        body="Contact phone 13900001111",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Transfer receipt",
+    )
+    out = tmp_path / "keep.out.pdf"
+    redact_file(src, mode="ai", output_path=out, keep_categories={"mobile"})
+    assert "Bank transfer receipt for caller 13900001111" in _structure_strings(out)
+
+
+def test_restore_file_restores_pdf_structure_tree_text(tmp_path: Path):
+    from legal_redactor.ledger_store import restore_file
+
+    alt = "Bank transfer receipt for caller 13900001111"
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111", alt=alt, actual_text="Transfer receipt"
+    )
+    red = tmp_path / "red.pdf"
+    res = redact_file(src, mode="ai", output_path=red)
+    restored = tmp_path / "restored.pdf"
+    restore_file(red, res.ledger_path, restored)
+    assert alt in _structure_strings(restored)
+
+
+def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):
+    objects = {
+        1: "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",
+        2: "<< /Type /Pages /Kids [ 3 0 R ] /Count 1 >>",
+        3: "<< /Type /Page /Parent 2 0 R /MediaBox [ 0 0 200 200 ] >>",
+        4: "<< /Type /StructTreeRoot /K 10 0 R >>",
+        10: "<< /S /Figure /P 4 0 R /Alt (Receipt for caller 13900001111) >>",
+    }
+    body, offsets = b"%PDF-1.7\n", {}
+    for num, obj in objects.items():
+        offsets[num] = len(body)
+        body += f"{num} 0 obj\n{obj}\nendobj\n".encode()
+    xref = (
+        "xref\n0 5\n0000000000 65535 f \n"
+        + "".join(f"{offsets[num]:010d} 00000 n \n" for num in range(1, 5))
+        + f"10 1\n{offsets[10]:010d} 00000 n \n"
+    )
+    trailer = f"trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n{len(body)}\n%%EOF\n"
+    src = tmp_path / "sparse.pdf"
+    src.write_bytes(body + xref.encode() + trailer.encode())
+    assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
+
+
+def test_pdf_structure_tree_text_under_indirect_kids_array(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "indirect.pdf",
+        body="Contact phone 13900001111",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Transfer receipt",
+    )
+    with fitz.open(str(src)) as doc:
+        root = int(doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")[1].split()[0])
+        kids = doc.get_new_xref()
+        doc.update_object(kids, doc.xref_get_key(root, "K")[1])
+        doc.xref_set_key(root, "K", f"{kids} 0 R")
+        doc.save(str(tmp_path / "indirect-kids.pdf"))
+    out = tmp_path / "indirect.out.pdf"
+    redact_file(tmp_path / "indirect-kids.pdf", mode="ai", output_path=out)
+    assert "Bank transfer receipt for caller [手机号]" in _structure_strings(out)
+    assert main(["verify", str(tmp_path / "indirect-kids.pdf"), "--mode", "ai", "--strict"]) == 2

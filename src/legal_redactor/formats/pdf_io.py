@@ -15,6 +15,8 @@ from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
+_STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
+_INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
 _PDF_SEARCH_FLAGS = (
@@ -49,6 +51,32 @@ def extract_text(path: Path) -> str:
         doc.close()
 
 
+def _struct_text_fields(doc: fitz.Document) -> list[tuple[int, str, str]]:
+    """(xref, key, value) for alt text, actual text, expansions and titles in the structure tree."""
+    kind, root = doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")
+    if kind != "xref":
+        return []
+    fields: list[tuple[int, str, str]] = []
+    pending, seen = [int(root.split()[0])], set()
+    while pending:
+        xref = pending.pop()
+        if xref in seen:
+            continue
+        seen.add(xref)
+        kids = doc.xref_object(xref, compressed=True)
+        if not kids.startswith("["):
+            for key in _STRUCT_TEXT_KEYS:
+                kind, value = doc.xref_get_key(xref, key)
+                if kind == "string" and value.strip():
+                    fields.append((xref, key, value))
+            kind, kids = doc.xref_get_key(xref, "K")
+            if kind not in ("xref", "array"):
+                continue
+        # Inline marked-content / object references point at pages and annotations, not children.
+        pending.extend(int(num) for num in _INDIRECT_REF.findall(re.sub(r"<<.*?>>", "", kids)))
+    return fields
+
+
 def extract_metadata_and_links(path: Path) -> str:
     """Extract PDF metadata values and external link targets for residual verification."""
     doc = fitz.open(str(path))
@@ -70,6 +98,7 @@ def extract_metadata_and_links(path: Path) -> str:
                 file_target = (link.get("file") or "").strip()
                 if file_target:
                     parts.append(file_target)
+        parts.extend(value.strip() for _, _, value in _struct_text_fields(doc))
         return FIELD_BOUNDARY.join(parts)
     finally:
         doc.close()
@@ -134,6 +163,28 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         doc.embfile_del(name)
     if names:
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
+
+
+def _scrub_struct_text(
+    doc: "fitz.Document",
+    mapping: list[tuple[str, str]],
+    warnings: list[str] | None,
+    categories: set[str] | None,
+) -> None:
+    """Apply `mapping` to tagged-PDF structure text (/Alt, /ActualText, /E, /T).
+
+    Structural PII of the active `categories` is replaced too; restore passes none.
+    """
+    scrubbed = 0
+    for xref, key, value in _struct_text_fields(doc):
+        redacted = apply_mapping_to_text(value, mapping)
+        if categories:
+            redacted = scrub_structural_text(redacted, categories=categories)
+        if redacted != value:
+            doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
+            scrubbed += 1
+    if scrubbed and warnings is not None:
+        warnings.append(f"pdf: {scrubbed} structure tree text field(s) scrubbed")
 
 
 def _scrub_pdf_links(
@@ -513,6 +564,7 @@ def redact_pdf(
         for key in _CLEAR_PDF_META_KEYS:
             meta[key] = ""
         doc.set_metadata(meta)
+        _scrub_struct_text(doc, mapping, warnings, image_categories)
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
