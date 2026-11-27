@@ -482,6 +482,16 @@ def test_pdf_structure_tree_text_scrubbed_all_modes(tmp_path: Path, profile: str
     assert "Bank transfer receipt for caller [手机号]" in strings
 
 
+def test_pdf_hidden_phone_does_not_leave_partially_scrubbed_email(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Transfer receipt",
+        alt="Phone 13800002222; Email a13800002222@x.com", actual_text="Receipt",
+    )
+    out = tmp_path / "redacted.pdf"
+    assert redact_file(src, mode="ai", output_path=out).residual.ok
+    assert "Phone [PDF手机号1]; Email [邮箱]" in _structure_strings(out)
+
+
 def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
     src = _make_tagged_pdf(
         tmp_path / "alt_only.pdf",

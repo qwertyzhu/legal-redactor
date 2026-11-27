@@ -224,6 +224,8 @@ def _scrub_struct_text(
                 taken.update(_HIDDEN_PHONE_TOKEN.findall(mapped))
     scrubbed = 0
     for xref, key, value, redacted in mapped_fields:
+        if scrub_categories:
+            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if capture_hidden_phones is not None and hidden_phone_categories:
             phones: list[tuple[str, str]] = []
             for hit in detect_structural(redacted):
@@ -235,8 +237,6 @@ def _scrub_struct_text(
                     capture_hidden_phones.structure[token] = hit.text
                 phones.append((hit.text, captured[hit.text]))
             redacted = apply_mapping_to_text(redacted, phones)
-        if scrub_categories:
-            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1
