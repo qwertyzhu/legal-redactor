@@ -271,15 +271,20 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> tupl
 _XPATH_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 
+_XPATH_BARE_TOKEN_RE = re.compile(r"[^\s\[\]()=!<>,|/@'\"]+")
+_XPATH_NUMBER_RE = re.compile(r"\d+(?:\.\d*)?|\.\d+")
+
+
 def _quote_mapped_tokens(segment: str, mapping: list[tuple[str, str]]) -> str:
-    parts: list[str] = []
-    last = 0
-    for start, end, replacement in find_mapping_spans(segment, mapping):
-        quote = '"' if "'" in replacement else "'"
-        parts.append(f"{segment[last:start]}{quote}{replacement}{quote}")
-        last = end
-    parts.append(segment[last:])
-    return "".join(parts)
+    def redact_token(match: re.Match[str]) -> str:
+        token = match.group()
+        updated = apply_mapping_to_text(token, mapping)
+        if updated == token or _XPATH_NUMBER_RE.fullmatch(updated):
+            return updated
+        quote = '"' if "'" in updated else "'"
+        return f"{quote}{updated}{quote}"
+
+    return _XPATH_BARE_TOKEN_RE.sub(redact_token, segment)
 
 
 def _redact_xpath(xpath: str, mapping: list[tuple[str, str]]) -> str:
