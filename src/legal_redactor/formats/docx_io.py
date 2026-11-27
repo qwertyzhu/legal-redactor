@@ -32,7 +32,7 @@ _TEXT_PART_RE = re.compile(
     r"^word/(document|header\d+|footer\d+|footnotes|endnotes|comments|(?:charts|diagrams)/[^/]+)\.xml$"
 )
 # Custom XML data store parts; content controls bound to them re-display these values on open
-_CUSTOM_XML_ITEM_RE = re.compile(r"^customXml/item\d+\.xml$")
+_CUSTOM_XML_ITEM_RE = re.compile(r"^customXml/(?!itemProps)[^/]+\.xml$", re.IGNORECASE)
 _CHART_NAMESPACES = (
     "http://schemas.openxmlformats.org/drawingml/2006/chart",
     "http://purl.oclc.org/ooxml/drawingml/chart",
@@ -290,6 +290,11 @@ def _process_xml_bytes(
                         el.attrib[attr] = _scrub_hyperlink_instr(
                             el.attrib[attr], mapping, drop_http=drop_http
                         )
+            elif local == "dataBinding":
+                # Keep XPath predicates in step with the redacted custom XML values they select
+                for attr in list(el.attrib):
+                    if _local(attr) == "xpath":
+                        el.attrib[attr] = apply_mapping_to_text(el.attrib[attr], mapping)
 
     texts: list[str] = []
     chart_fields: list[str] = []
@@ -394,7 +399,7 @@ def extract_metadata_and_links(path: Path) -> str:
             except etree.XMLSyntaxError:
                 continue
             for el in root.iter(etree.Element):
-                values = [el.text, *el.attrib.values()]
+                values = [el.text, el.tail, *el.attrib.values()]
                 chunks.extend(v.strip() for v in values if v and v.strip())
         for name in sorted(n for n in names if n.startswith("word/_rels/") and n.endswith(".rels")):
             try:
@@ -469,11 +474,13 @@ def _redact_custom_xml_item(data: bytes, mapping: list[tuple[str, str]]) -> byte
         return data
     changed = False
     for el in root.iter(etree.Element):
-        if el.text:
-            updated = apply_mapping_to_text(el.text, mapping)
-            if updated != el.text:
-                el.text = updated
-                changed = True
+        for field in ("text", "tail"):
+            value = getattr(el, field)
+            if value:
+                updated = apply_mapping_to_text(value, mapping)
+                if updated != value:
+                    setattr(el, field, updated)
+                    changed = True
         for attr, value in el.attrib.items():
             updated = apply_mapping_to_text(value, mapping)
             if updated != value:

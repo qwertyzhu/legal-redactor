@@ -534,16 +534,29 @@ _PARTY_CLAUSE = "乙方应当在交付时签收。"
 _PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PARTIES[1]}\n{_PARTY_CLAUSE}"
 
 
-def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Path) -> None:
+@pytest.mark.parametrize("part", ["customXml/item2.xml", "customXml/partyData.xml"])
+def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Path, part: str) -> None:
     phone, id_no = "13700003333", "11010519900101123X"
+    ns = {"p": "urn:example:party", "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    xpath = f"/p:party[@p:id='{id_no}']/p:id"
+    sample = tmp_path / "sample.docx"
+    docx_io.create_sample_docx(sample, f"电话：{phone}，身份证号：{id_no}。")
+    sdt = (
+        f'<w:p><w:sdt><w:sdtPr><w:dataBinding w:prefixMappings="xmlns:p=\'{ns["p"]}\'" '
+        f'w:xpath="{xpath}" w:storeItemID="{{00000000-0000-0000-0000-000000000001}}"/></w:sdtPr>'
+        f"<w:sdtContent><w:r><w:t>{id_no}</w:t></w:r></w:sdtContent></w:sdt></w:p><w:sectPr"
+    )
     src = tmp_path / "original.docx"
-    docx_io.create_sample_docx(src, f"电话：{phone}，身份证号：{id_no}。")
-    part = "customXml/item2.xml"
-    with zipfile.ZipFile(src, "a") as archive:
+    with zipfile.ZipFile(sample) as source, zipfile.ZipFile(src, "w") as archive:
+        for item in source.infolist():
+            data = source.read(item)
+            if item.filename == "word/document.xml":
+                data = data.decode("utf-8").replace("<w:sectPr", sdt, 1).encode("utf-8")
+            archive.writestr(item, data)
         archive.writestr(
             part,
-            f'<p:party xmlns:p="urn:example:party" p:id="{id_no}">'
-            f"<p:phone>{phone}</p:phone><p:id>{id_no}</p:id></p:party>",
+            f'<p:party xmlns:p="{ns["p"]}" p:id="{id_no}">'
+            f"<p:contact>电话<p:sep/>{phone}</p:contact><p:id>{id_no}</p:id></p:party>",
         )
 
     before = _run_cli("verify", str(src), "--mode", "ai", "--strict", cwd=tmp_path)
@@ -556,9 +569,12 @@ def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Pat
     )
     assert redacted.returncode == 0, redacted.stderr + redacted.stdout
     with zipfile.ZipFile(out) as archive:
-        data = archive.read(part).decode("utf-8")
-    assert phone not in data and id_no not in data
-    assert "[手机号]" in data and "[身份证号]" in data
+        data = archive.read(part)
+        document = etree.fromstring(archive.read("word/document.xml"))
+    assert phone.encode() not in data and id_no.encode() not in data
+    assert "[手机号]".encode() in data and "[身份证号]".encode() in data
+    binding = document.find(".//w:dataBinding", ns).get(f"{{{ns['w']}}}xpath")
+    assert etree.fromstring(data).getroottree().xpath(binding, namespaces=ns)
 
     after = _run_cli("verify", str(out), "--mode", "ai", "--strict", cwd=tmp_path)
     assert after.returncode == 0, after.stderr + after.stdout
@@ -571,7 +587,9 @@ def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Pat
     assert restore.returncode == 0, restore.stderr + restore.stdout
     with zipfile.ZipFile(restored) as archive:
         data = archive.read(part).decode("utf-8")
+        document_xml = archive.read("word/document.xml").decode("utf-8")
     assert phone in data and id_no in data
+    assert xpath in document_xml
 
     leaked = tmp_path / "leaked.docx"
     with zipfile.ZipFile(out) as redacted_zip, zipfile.ZipFile(src) as source, zipfile.ZipFile(
