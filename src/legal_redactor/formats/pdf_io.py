@@ -26,6 +26,7 @@ _PDF_SEARCH_FLAGS = (
 _HIDDEN_WIDGET_FLAGS = (
     fitz.PDF_ANNOT_IS_INVISIBLE | fitz.PDF_ANNOT_IS_HIDDEN | fitz.PDF_ANNOT_IS_NO_VIEW
 )
+_WIDGET_FONTS = {"/Courier": "Cour", "/Helvetica": "Helv", "/Times-Roman": "TiRo", "/ZapfDingbats": "ZaDb"}
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
 _TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
@@ -145,6 +146,30 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
             return
 
 
+def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
+    value = (widget.field_value or "").split()
+
+    def matches_value() -> bool:
+        return widget._annot.get_textpage().extractText().split() == value
+
+    if matches_value():
+        return True
+    font = widget.text_font
+    if font and font.lower() not in ("cour", "helv", "tiro", "zadb"):
+        _, base_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
+        if base_font not in _WIDGET_FONTS:
+            return False
+        widget.text_font = _WIDGET_FONTS[base_font]
+    widget.update()
+    if matches_value():
+        return True
+    if widget.text_fontsize:
+        widget.text_fontsize = 0
+        widget.update()
+        return matches_value()
+    return False
+
+
 def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> dict[int, list[fitz.Rect]]:
     fields: dict[int, list[fitz.Rect]] = {}
     if not doc.is_form_pdf:
@@ -153,7 +178,10 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
     if appearance_kind == "xref":
         appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
     regenerate = appearance_value == "true"
-    flattened = hidden = passwords = 0
+    if regenerate:
+        # Inspect the stored appearance, not MuPDF's temporary synthesized view.
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "false")
+    flattened = hidden = passwords = failed_appearances = 0
     for page in doc:
         for widget in list(page.widgets() or []):
             kind, flags = doc.xref_get_key(widget.xref, "F")
@@ -169,8 +197,11 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
                 page.delete_widget(widget)
                 passwords += 1
             else:
-                if regenerate and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
-                    widget.update()
+                if (regenerate and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
+                        and not _ensure_current_widget_appearance(doc, widget)):
+                    page.delete_widget(widget)
+                    failed_appearances += 1
+                    continue
                 flattened += 1
                 fields.setdefault(page.number, []).append(widget.rect)
         if page.annot_xrefs():
@@ -183,6 +214,8 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
             warnings.append(f"pdf: {hidden} hidden form field(s) removed")
         if passwords:
             warnings.append(f"pdf: {passwords} password form field(s) removed")
+        if failed_appearances:
+            warnings.append(f"pdf: {failed_appearances} form field(s) removed (appearance could not be regenerated)")
     return fields
 
 
