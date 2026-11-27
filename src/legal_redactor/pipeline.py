@@ -687,12 +687,16 @@ def redact_tree(
     used_names: set[str] = set()
     for src in iter_batch_inputs(input_dir, recursive=recursive):
         name = f"{src.stem}.redacted-{mode}{src.suffix}"
-        if name in used_names:
+        if name.casefold() in used_names:
             # recursive batches can collide on basename — disambiguate
             rel = src.relative_to(input_dir)
             safe = "__".join(rel.with_suffix("").parts)
             name = f"{safe}.redacted-{mode}{src.suffix}"
-        used_names.add(name)
+            index = 2
+            while name.casefold() in used_names:
+                name = f"{safe}.{index}.redacted-{mode}{src.suffix}"
+                index += 1
+        used_names.add(name.casefold())
         batch_paths.append((src, output_dir / name))
 
     stem_counts = Counter(out.stem for _, out in batch_paths)
