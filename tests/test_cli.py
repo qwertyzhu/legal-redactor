@@ -243,6 +243,49 @@ def test_cli_redacts_and_verifies_text_pdf_with_blank_page(tmp_path: Path) -> No
     assert "status: PASS" in verify.stdout
 
 
+def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path) -> None:
+    src = tmp_path / "form.pdf"
+    description = "Payment receipt for bank transfer"
+    status = "Original verified"
+    hidden_value = "Internal form notes"
+    with fitz.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((36, 50), "Fictional evidence submission form")
+        for index, (name, value) in enumerate(
+            [("description", description), ("status", status), ("phone", MOBILE), ("hidden", hidden_value)]
+        ):
+            widget = fitz.Widget()
+            widget.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+            widget.field_name = name
+            widget.field_value = value
+            y = 80 + index * 40
+            widget.rect = fitz.Rect(36, y, 336, y + 25)
+            widget.text_fontsize = 12
+            annot = page.add_widget(widget)
+            if name == "hidden":
+                annot.set_flags(fitz.PDF_ANNOT_IS_NO_VIEW)
+        pdf.save(src)
+    out = tmp_path / "redacted.pdf"
+
+    redact = _run_cli("redact", str(src), "--mode", "production", "-o", str(out), cwd=tmp_path)
+    verify = _run_cli("verify", str(out), "--mode", "production", "--strict", cwd=tmp_path)
+
+    assert redact.returncode == 0, redact.stderr + redact.stdout
+    assert verify.returncode == 0, verify.stderr + verify.stdout
+    assert "status: PASS" in verify.stdout
+    with fitz.open(out) as pdf:
+        page = pdf[0]
+        assert list(page.widgets()) == []
+        text = page.get_text()
+        assert MOBILE not in text
+        assert "[手机号]" in "".join(text.split())
+        assert description in text
+        assert status in text
+        assert hidden_value not in text
+        assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
+    assert "pdf: 3 form field(s) flattened" in redact.stdout
+
+
 @pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
 @pytest.mark.parametrize("allow_residual", [False, True])
 def test_cli_batch_reports_skipped_scan(

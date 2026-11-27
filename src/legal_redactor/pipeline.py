@@ -320,7 +320,9 @@ def redact_file(
     if input_path.suffix.lower() == ".pdf":
         from .ocr_engine import pdf_has_full_page_scan
 
-        source_text, scan_pages = pdf_io.extract_text_with_scan_pages(input_path)
+        source_text, scan_pages = pdf_io.extract_text_with_scan_pages(
+            input_path, flatten_form=mode == "production",
+        )
         if scan_pages or not source_text.strip():
             notice = _scan_page_notice(scan_pages) if scan_pages else "这份 PDF 没有文字层。"
             raise PDFTextLayerError(

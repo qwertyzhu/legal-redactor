@@ -23,6 +23,9 @@ _PDF_SEARCH_FLAGS = (
     fitz.TEXT_DEHYPHENATE | fitz.TEXT_PRESERVE_WHITESPACE
     | fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_MEDIABOX_CLIP
 )
+_HIDDEN_WIDGET_FLAGS = (
+    fitz.PDF_ANNOT_IS_INVISIBLE | fitz.PDF_ANNOT_IS_HIDDEN | fitz.PDF_ANNOT_IS_NO_VIEW
+)
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
 _TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
@@ -104,17 +107,41 @@ def extract_metadata_and_links(path: Path) -> str:
         doc.close()
 
 
-def extract_text_with_scan_pages(path: Path) -> tuple[str, list[int]]:
+def extract_text_with_scan_pages(path: Path, *, flatten_form: bool = False) -> tuple[str, list[int]]:
     """Return text and 1-based pages with raster content but no extractable text."""
     parts: list[str] = []
     scan_pages: list[int] = []
     with fitz.open(str(path)) as doc:
+        if flatten_form:
+            _flatten_pdf_form(doc)
         for page in doc:
             text = page.get_text("text")
             parts.append(text)
             if not text.strip() and page.get_image_info():
                 scan_pages.append(page.number + 1)
     return "\n".join(parts), scan_pages
+
+
+def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> None:
+    if not doc.is_form_pdf:
+        return
+    flattened = hidden = 0
+    for page in doc:
+        for widget in list(page.widgets() or []):
+            kind, flags = doc.xref_get_key(widget.xref, "F")
+            if kind == "int" and int(flags) & _HIDDEN_WIDGET_FLAGS:
+                page.delete_widget(widget)
+                hidden += 1
+            else:
+                flattened += 1
+    doc.bake(annots=False)
+    if warnings is not None:
+        if flattened:
+            warnings.append(f"pdf: {flattened} form field(s) flattened")
+        if hidden:
+            warnings.append(f"pdf: {hidden} hidden form field(s) removed")
+
+
 def _has_text_layer(doc: fitz.Document) -> bool:
     for page in doc:
         if page.get_text("text").strip():
@@ -485,6 +512,8 @@ def redact_pdf(
     digit_targets = {original for original, _ in ordered_mapping if original.isascii() and original.isdecimal()}
     doc = fitz.open(str(input_path))
     try:
+        if mode.lower().strip() == "production":
+            _flatten_pdf_form(doc, warn)
         if not _has_text_layer(doc):
             raise ValueError(
                 "PDF has no extractable text layer (likely a scan). "
