@@ -592,7 +592,15 @@ def unify_from_ledgers(
     ledgers = [path for pattern in patterns for path in ledger_dir.glob(pattern)]
     if not ledgers:
         ledgers = [path for pattern in patterns for path in ledger_dir.rglob(pattern)]
-    return unify_ledger_paths(ledgers, output_dir, mode=mode)
+
+    newest: dict[Path, Path] = {}
+    for path in ledgers:
+        base = path.with_suffix("") if path.suffix == ".enc" else path
+        previous = newest.get(base)
+        # Encrypted copies are discovered second and win an exact timestamp tie.
+        if previous is None or path.stat().st_mtime_ns >= previous.stat().st_mtime_ns:
+            newest[base] = path
+    return unify_ledger_paths(newest.values(), output_dir, mode=mode)
 
 
 def unify_ledger_paths(

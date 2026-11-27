@@ -321,6 +321,34 @@ def test_cli_unify_from_encrypted_ledgers_requires_password(
     assert not (output / "consistency.report.json").exists()
 
 
+@pytest.mark.parametrize("newest_encrypted", [False, True], ids=["plaintext", "encrypted"])
+def test_cli_unify_uses_newest_ledger_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newest_encrypted: bool
+) -> None:
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-unify-pass")
+    ledgers = tmp_path / "ledgers"
+    plain = ledgers / "a.ledger.json"
+    encrypted = write_ledger_payload(
+        plain, {"entities": [{"original": "13900001111"}]}, encrypt=True
+    )
+    write_ledger_payload(plain, {"entities": [{"original": "13900002222"}]})
+    older, newer = (plain, encrypted) if newest_encrypted else (encrypted, plain)
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_010, 1_700_000_010))
+    if not newest_encrypted:
+        monkeypatch.delenv("LEGAL_REDACTOR_LEDGER_PASS")
+
+    output = tmp_path / "report"
+    proc = _run_cli("unify", str(ledgers), "--from-ledgers", "--mode", "ai", "-o", str(output))
+
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((output / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["files_scanned"] == 1
+    assert [obs["files"] for obs in report["observations"]] == [[newer.name]]
+    assert plain.is_file() and encrypted.is_file()
+
+
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:
     src = tmp_path / "sample_contract.md"
     src.write_text(SAMPLE, encoding="utf-8")
