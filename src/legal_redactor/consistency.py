@@ -161,7 +161,7 @@ def _add_obs(
         obs.role = role
     if replacement and replacement not in obs.replacements_seen:
         obs.replacements_seen.append(replacement)
-    if abbr_of and not obs.abbr_of:
+    if abbr_of and category == obs.category and not obs.abbr_of:
         obs.abbr_of = abbr_of
 
 
@@ -305,13 +305,13 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
             for r in obs.replacements_seen:
                 if r not in existing.replacements_seen:
                     existing.replacements_seen.append(r)
-            if obs.abbr_of and not existing.abbr_of:
-                existing.abbr_of = obs.abbr_of
             if existing.category in {"other", "unknown"} and obs.category not in {
                 "other",
                 "unknown",
             }:
                 existing.category = obs.category
+            if obs.abbr_of and obs.category == existing.category and not existing.abbr_of:
+                existing.abbr_of = obs.abbr_of
             if existing.role in {"unknown", "other"} and obs.role not in {"unknown", "other"}:
                 existing.role = obs.role
             # Prefer non-suspect source labels when merging
@@ -322,19 +322,13 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
 
 def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAliasCollision]:
     conflicts: list[Conflict | PersonAliasCollision] = []
-    links: dict[str, str] = {}
 
-    def identity(original: str) -> str:
-        while original in links:
-            original = links[original]
-        return original
-
-    for obs in bucket.values():
-        target = bucket.get(obs.abbr_of) if obs.abbr_of else None
-        if obs.category == "person" and target is not None and target.category == "person":
-            original, full = identity(obs.original), identity(target.original)
-            if original != full:
-                links[original] = full
+    def identity(obs: Observation) -> tuple[str, str]:
+        if obs.category == "person" and obs.abbr_of:
+            target = bucket.get(obs.abbr_of)
+            if target is None or target.category == "person":
+                return ("person", obs.abbr_of)
+        return (obs.category, obs.original)
 
     person_aliases = {
         r for obs in bucket.values() if obs.category == "person" for r in obs.replacements_seen if r
@@ -349,7 +343,7 @@ def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAlia
         for alias in replacements & person_aliases:
             by_alias.setdefault(alias, []).append(obs)
     for alias, observations in sorted(by_alias.items()):
-        if len({identity(obs.original) for obs in observations}) > 1:
+        if len({identity(obs) for obs in observations}) > 1:
             conflicts.append(
                 PersonAliasCollision(
                     replacement=alias,

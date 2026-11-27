@@ -674,6 +674,29 @@ def test_unify_allows_linked_person_names_to_share_alias(tmp_path: Path):
     assert report["ok"] and report["conflicts"] == []
 
 
+def test_unify_links_person_variants_when_full_name_is_absent(tmp_path: Path):
+    from legal_redactor.cli import main
+
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.txt").write_text("原告：顾仿甲。\n", encoding="utf-8")
+    (src / "b.txt").write_text("原告：顾仿乙。\n", encoding="utf-8")
+    first = {
+        "original": "顾仿甲",
+        "category": "person",
+        "replacement": "某甲",
+        "notes": "以下简称:顾虚构",
+    }
+    entities = src / "entities.json"
+    entities.write_text(
+        json.dumps({"entities": [first, dict(first, original="顾仿乙")]}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    assert main(["unify", str(src), "--entities", str(entities), "-o", str(out)]) == 0
+    report = json.loads((out / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["ok"] and report["conflicts"] == []
+
+
 def test_unify_company_abbreviation_does_not_hide_person_alias_collision(tmp_path: Path):
     from legal_redactor.cli import main
 
