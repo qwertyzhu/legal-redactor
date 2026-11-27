@@ -271,7 +271,8 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> tupl
 _XPATH_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
 
-_XPATH_BARE_TOKEN_RE = re.compile(r"[^\s\[\]()=!<>,|/@'\"]+")
+# XPath 1.0 Number tokens, else name-like runs; operators such as `and` stay separate tokens
+_XPATH_BARE_TOKEN_RE = re.compile(r"\d+(?:\.\d*)?|\.\d+|[^\W\d][\w.\-]*")
 _XPATH_NUMBER_RE = re.compile(r"\d+(?:\.\d*)?|\.\d+")
 
 
