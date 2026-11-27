@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pymupdf as fitz
 import pytest
+from docx import Document
 
 from legal_redactor.cli import main
 from legal_redactor.patterns import detect_structural
@@ -93,6 +95,208 @@ def test_judgment_online_keeps_parties_and_truncates_address(tmp_path: Path):
     assert "周测童" not in out and "周测宁" not in out
     assert "周某1" in out and "周某2" in out
     assert main(["verify", str(res.output_path), "--profile", "judgment-online", "--strict"]) == 0
+
+
+@pytest.mark.parametrize("suffix", ["txt", "docx", "pdf"])
+def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, suffix: str):
+    src = tmp_path / f"judgment.{suffix}"
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    if suffix == "pdf":
+        with fitz.open() as doc:
+            page = doc.new_page()
+            page.insert_text((24, 40), "原告：张明华。", fontname="china-s")
+            page.insert_text((24, 85), "证人：张明。", fontname="china-s")
+            doc.save(src)
+    elif suffix == "docx":
+        doc = Document()
+        p = doc.add_paragraph("原告：张明")
+        p.add_run("华").bold = True
+        p.add_run("。证人：张明。")
+        doc.save(src)
+    else:
+        _src(tmp_path, "原告：张明华。\n证人：张明。\n", src.name)
+
+    verify = ["--profile", "judgment-online", "--entities", str(entities), "--strict"]
+    assert main(["verify", str(src), *verify]) == 2
+    out = tmp_path / f"redacted.{suffix}"
+    code = main(["redact", str(src), "--profile", "judgment-online", "-o", str(out)])
+    if suffix == "pdf":
+        with fitz.open(out) as doc:
+            text = "".join(doc[0].get_text().split())
+        assert "原告：张明华。" in text
+        assert "张某" in text
+        assert text.count("张明") == 1
+    elif suffix == "docx":
+        p = Document(out).paragraphs[0]
+        assert p.text == "原告：张明华。证人：张某。"
+        assert p.runs[1].text == "华" and p.runs[1].bold
+    else:
+        assert out.read_text(encoding="utf-8") == "原告：张明华。\n证人：张某。\n"
+    assert code == 0
+    assert main(["verify", str(out), *verify]) == 0
+
+
+@pytest.mark.parametrize("suffix_pos", [(200, 135), (24, 58)], ids=["distant", "aligned"])
+def test_judgment_online_pdf_does_not_protect_a_name_across_unrelated_blocks(
+    tmp_path: Path, suffix_pos: tuple[int, int]
+):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "证人：张明", fontname="china-s")
+        page.insert_text(suffix_pos, "华强到庭。", fontname="china-s")
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华强", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    assert main(["verify", str(src), *flags, "--strict"]) == 2
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "张某" in text and "张明" not in text
+    assert "华强" in text
+
+
+def test_judgment_online_pdf_verify_checks_hidden_overlapping_witness_name(tmp_path: Path):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "原告：张明华。", fontname="china-s")
+        doc.set_metadata({"title": "原告：张明华。证人：张明。"})
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    assert main(["verify", str(src), *flags, "--strict"]) == 2
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        assert doc.metadata["title"] == ""
+    assert main(["verify", str(out), *flags, "--strict"]) == 0
+
+
+@pytest.mark.parametrize("wrap", [True, False], ids=["aligned-blocks", "space"])
+def test_judgment_online_pdf_does_not_exempt_noncontiguous_party_prefix(tmp_path: Path, wrap: bool):
+    party_only = tmp_path / "party-only.pdf"
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        if wrap:
+            page.insert_text((24, 40), "原告：张明", fontname="china-s")
+            page.insert_text((24, 58), "华强到庭。", fontname="china-s")
+            assert len(page.get_text("blocks")) == 2
+        else:
+            page.insert_text((24, 40), "原告：张明 华强到庭。", fontname="china-s")
+        doc.save(party_only)
+        page.insert_text((24, 100), "证人：张明。", fontname="china-s")
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华强", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    assert main(["verify", str(party_only), *flags, "--strict"]) == 2
+    assert main(["verify", str(src), *flags, "--strict"]) == 2
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = "".join(doc[0].get_text().split())
+    assert "华强到庭。" in text
+    assert "张明" not in text
+    assert text.count("张某") == 2
+    assert main(["verify", str(out), *flags, "--strict"]) == 0
+
+
+def test_judgment_online_pdf_flags_a_witness_match_crossing_a_kept_name(tmp_path: Path):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "原告：张明华强烈反对。", fontname="china-s")
+        page.insert_text((24, 85), "证人：华强。", fontname="china-s")
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "华强", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 2
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "原告：张明华强烈反对。" in text
+    assert "华某" in text
+    assert main(["verify", str(out), *flags, "--strict"]) == 2
+
+
+def test_judgment_online_pdf_redacts_a_witness_name_containing_a_shorter_kept_name(tmp_path: Path):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "原告：张明。", fontname="china-s")
+        page.insert_text((24, 85), "证人：张明华。", fontname="china-s")
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明", "category": "person", "role": "party"},
+                {"original": "张明华", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "原告：张明。" in text
+    assert "张某" in text and "张明华" not in text
+    assert main(["verify", str(out), *flags, "--strict"]) == 0
 
 
 def test_judgment_online_strict_verify_checks_explicit_entities(tmp_path: Path, capsys):

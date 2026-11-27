@@ -220,8 +220,10 @@ def _scrub_pdf_links(
         warn.append(f"pdf: {scrubbed} external link target(s) scrubbed")
 
 
-def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]]]]:
-    """Per-line non-space characters with their layout, in reading order."""
+def _line_chars(
+    page: "fitz.Page", *, include_spaces: bool = False
+) -> list[tuple[int, list[tuple[str, _NameRect]]]]:
+    """Per-line characters with their layout, in reading order."""
     lines: list[tuple[int, list[tuple[str, _NameRect]]]] = []
     raw = page.get_text("rawdict")
     for block_id, block in enumerate(raw.get("blocks", [])):
@@ -230,7 +232,7 @@ def _line_chars(page: "fitz.Page") -> list[tuple[int, list[tuple[str, _NameRect]
             for span in line.get("spans", []):
                 for ch in span.get("chars", []):
                     char = ch.get("c", "")
-                    if not char or char.isspace():
+                    if not char or (not include_spaces and char.isspace()):
                         continue
                     chars.append((char, _NameRect(
                         fitz.Rect(ch["bbox"]), ch["origin"][1], span["size"], line["dir"],
@@ -329,13 +331,45 @@ def _wrapped_rects(
     return out
 
 
-def matched_short_names(path: Path, originals: set[str]) -> set[str]:
+def _kept_name_rects(page: "fitz.Page", names: list[str]) -> list[tuple[str, "fitz.Rect"]]:
+    """Only literal, contiguous names can exempt a matching witness substring."""
+    rects: list[tuple[str, fitz.Rect]] = []
+    if not names:
+        return rects
+    for _, line in _line_chars(page, include_spaces=True):
+        text = "".join(char for char, _ in line)
+        for name in names:
+            start = text.find(name)
+            while start >= 0:
+                bounds = fitz.Rect(line[start][1].rect)
+                for _, glyph in line[start + 1 : start + len(name)]:
+                    bounds |= glyph.rect
+                rects.append((name, bounds))
+                start = text.find(name, start + 1)
+    return rects
+
+
+def matched_short_names(path: Path, originals: set[str], kept_names: list[str]) -> set[str]:
     pending = set(originals)
     matches: set[str] = set()
     with fitz.open(str(path)) as doc:
         for page in doc:
             index = _page_char_index(page)
-            found = {name for name in pending if _wrapped_rects(index, name)}
+            protected = [rect for _, rect in _kept_name_rects(page, kept_names)]
+            found = {
+                name for name in pending
+                if any(
+                    not all(any(slot.rect in rect for rect in protected) for slot in match)
+                    for match in _wrapped_rects(index, name)
+                )
+                or (
+                    any(name in kept for kept in kept_names)
+                    and any(
+                        not any(rect in kept_rect for kept_rect in protected)
+                        for rect in page.search_for(name)
+                    )
+                )
+            }
             matches.update(found)
             pending.difference_update(found)
             if not pending:
@@ -481,8 +515,11 @@ def redact_pdf(
     fit_replacements: bool = False,
 ) -> str:
     warn = warnings if warnings is not None else []
-    ordered_mapping = sorted((pair for pair in mapping if pair[0]), key=lambda p: len(p[0]), reverse=True)
+    ordered_mapping = sorted(
+        ((o, r) for o, r in mapping if o and o != r), key=lambda p: len(p[0]), reverse=True
+    )
     digit_targets = {original for original, _ in ordered_mapping if original.isascii() and original.isdecimal()}
+    kept_names = [o for o, r in mapping if o and o == r]
     doc = fitz.open(str(input_path))
     try:
         if not _has_text_layer(doc):
@@ -495,14 +532,21 @@ def redact_pdf(
 
         for page in doc:
             claimed_rects: list[fitz.Rect] = []
+            kept_rects = _kept_name_rects(page, kept_names)
             split_aliases: list[tuple[list[_NameRect], str]] = []
             fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: _CharIndex | None = None
             search_page = page.get_textpage(flags=_PDF_SEARCH_FLAGS) if ordered_mapping else None
             digits = _searchable_digits(search_page) if search_page is not None and digit_targets else None
 
+            def conflicts_with_kept_name(rect: fitz.Rect, original: str) -> bool:
+                return any(
+                    rect.intersects(kept) and not (name in original and kept in rect)
+                    for name, kept in kept_rects
+                )
+
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
-                if _overlaps_claimed(rect, claimed_rects):
+                if conflicts_with_kept_name(rect, original) or _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
                 if fit_replacements and text:
@@ -524,13 +568,23 @@ def redact_pdf(
                     if digits is None or original not in digit_targets or original in digits
                     else []
                 )
-                for rect in rects:
-                    add_redaction(rect, original, replacement)
                 # search_for misses names split by spaces or line breaks.
                 if index is None:
                     index = _page_char_index(page)
                 paint_after = not fit_replacements and is_short_cjk_name(original)
-                for match in _wrapped_rects(index, original, allow_single_line=not rects):
+                wrapped = _wrapped_rects(index, original, allow_single_line=not rects)
+                blocked = [
+                    slot.rect
+                    for match in wrapped
+                    if any(conflicts_with_kept_name(slot.rect, original) for slot in match)
+                    for slot in match
+                ] if kept_rects else []
+                for rect in rects:
+                    if not any(rect.intersects(slot) for slot in blocked):
+                        add_redaction(rect, original, replacement)
+                for match in wrapped:
+                    if any(slot.rect in blocked for slot in match):
+                        continue
                     applied: list[_NameRect] = []
                     for i, slot in enumerate(match):
                         text = replacement if i == 0 and not paint_after else ""
@@ -609,7 +663,7 @@ def _redact_embedded_images(
     from ..patterns import categories_for_mode
 
     cats = categories if categories is not None else categories_for_mode("ai")
-    terms = [o for o, _ in mapping]
+    terms = [o for o, r in mapping if o != r]
     total = 0
     for page in pages_with_images:
         page_hits = 0

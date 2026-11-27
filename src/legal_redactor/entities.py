@@ -36,9 +36,10 @@ class RedactionPlan:
     mode: str
     entities: list[EntityRecord] = field(default_factory=list)
     deferred_structural: list[PatternHit] = field(default_factory=list)
+    kept_party_names: list[str] = field(default_factory=list)
 
     def mapping(self) -> list[tuple[str, str]]:
-        """Longest original first to avoid partial clobber."""
+        """Longest original first; kept names claim spans without changing them."""
         pairs = [(e.original, e.replacement) for e in self.entities if e.original and e.replacement]
         # de-dupe by original, first wins
         seen: set[str] = set()
@@ -50,6 +51,8 @@ class RedactionPlan:
                 continue
             seen.add(o)
             uniq.append((o, r))
+        if uniq:
+            uniq.extend((name, name) for name in self.kept_party_names if name not in seen)
         uniq.sort(key=lambda p: len(p[0]), reverse=True)
         return uniq
 
@@ -340,6 +343,8 @@ def build_plan(
         }:
             # Keep litigation/contract parties unless explicitly given a replacement
             if not replacement:
+                if category == "person" and original not in plan.kept_party_names:
+                    plan.kept_party_names.append(original)
                 continue
 
         if not replacement:
@@ -514,7 +519,7 @@ def find_mapping_spans(
     """Non-overlapping (start, end, replacement) spans, mapping order wins.
 
     mapping is longest-first, so a longer original claims its span before a
-    shorter one inside it; replacements are never re-scanned.
+    shorter one inside it; identity entries claim spans but are not returned.
     """
     # Claimed spans are disjoint and kept sorted, so only the one with the largest
     # start < end can overlap a new [pos, end).
@@ -533,7 +538,7 @@ def find_mapping_spans(
             starts.insert(i, pos)
             claimed.insert(i, (pos, end, replacement))
             pos = text.find(original, end)
-    return claimed
+    return [span for span in claimed if text[span[0]:span[1]] != span[2]]
 
 
 def apply_mapping_to_text(text: str, mapping: list[tuple[str, str]]) -> str:

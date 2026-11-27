@@ -431,6 +431,7 @@ def redact_file(
             output_text,
             mapping,
             pdf_path=output_path if input_path.suffix.lower() == ".pdf" else None,
+            pdf_hidden_text=hidden_output,
         ),
     )
     _add_image_pii(residual, image_pii)
@@ -776,18 +777,17 @@ def verify_file(
     else:
         text = text_io.extract_text(path)
     hidden = _extract_hidden(path)
-    if hidden:
-        text = f"{text}{FIELD_BOUNDARY}{hidden}" if text else hidden
+    verify_text = f"{text}{FIELD_BOUNDARY}{hidden}" if text and hidden else text or hidden
 
     report = scan_residual(
-        text, mode=mode, nl=True, keep_categories=keep_categories,
+        verify_text, mode=mode, nl=True, keep_categories=keep_categories,
         extra_categories=extra_categories, only_categories=only_categories, **scan_options,
     )
     pdf_path = path if suffix == ".pdf" else None
     check_explicit_entities = profile is not None and profile.name == "judgment-online"
     if entities_path is not None and not scan_pages and (check_explicit_entities or pdf_path is not None):
         plan = build_plan(
-            text,
+            verify_text,
             mode=mode,
             entities_file=entities_path,
             allowlist=scan_options.get("allowlist"),
@@ -798,8 +798,16 @@ def verify_file(
         )
         mapping = plan.mapping()
         if not check_explicit_entities:
-            mapping = [(o, r) for o, r in mapping if pdf_io.is_short_cjk_name(o)]
-        add_unreplaced(report, unreplaced_originals(text, mapping, pdf_path=pdf_path))
+            mapping = [(o, r) for o, r in mapping if o == r or pdf_io.is_short_cjk_name(o)]
+        add_unreplaced(
+            report,
+            unreplaced_originals(
+                text if pdf_path is not None else verify_text,
+                mapping,
+                pdf_path=pdf_path,
+                pdf_hidden_text=hidden,
+            ),
+        )
     if suffix == ".docx":
         _, image_pii = docx_io.scan_media(
             path,
