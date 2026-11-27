@@ -15,12 +15,16 @@ from .allowlist import load_allowlist
 from .draft import extract_text
 from .entities import build_plan, load_entities_file
 from .ledger_store import load_ledger
-from .patterns import DEFAULT_PLACEHOLDERS, structural_placeholder
+from .patterns import DEFAULT_PLACEHOLDERS, STRUCTURAL_CATEGORIES, structural_placeholder
 from .pipeline import _normalize_keep_extra, iter_batch_inputs
 from .profiles_loader import resolve_profile
 
 _PERSON_COUNTER = "甲乙丙丁戊己庚辛壬癸"
 _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_INDEXED_ALIAS_CATEGORIES = STRUCTURAL_CATEGORIES | {
+    "person", "organization", "address", "work_title", "account"
+}
+_ABBR_NOTE_PREFIX = "以下简称:"
 
 
 def _stable_alias(category: str, index: int, original: str = "") -> str:
@@ -43,6 +47,12 @@ def _stable_alias(category: str, index: int, original: str = "") -> str:
     if category == "case_number":
         return structural_placeholder("case_number", original or "（20XX）民初1号", index)
     return structural_placeholder(category, original, index)
+
+
+def _abbreviation_of(notes: str) -> str | None:
+    if notes.startswith(_ABBR_NOTE_PREFIX):
+        return notes[len(_ABBR_NOTE_PREFIX):].strip() or None
+    return None
 
 
 @dataclass
@@ -68,6 +78,22 @@ class Conflict:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def describe(self) -> str:
+        return f"{self.original}: {', '.join(self.replacements)}"
+
+
+@dataclass
+class PersonAliasCollision:
+    replacement: str
+    originals: list[str]
+    files: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def describe(self) -> str:
+        return f"{self.replacement} shared by {', '.join(self.originals)}"
+
 
 @dataclass
 class ConsistencyReport:
@@ -75,7 +101,7 @@ class ConsistencyReport:
     entity_count: int
     conflict_count: int
     observations: list[Observation]
-    conflicts: list[Conflict]
+    conflicts: list[Conflict | PersonAliasCollision]
     entities_path: Path | None = None
     report_path: Path | None = None
 
@@ -208,9 +234,11 @@ def collect_observations_from_file(
         redact_third_party=prof.redact_third_party if prof else True,
     )
     for ent in plan.entities:
-        abbr_of = ent.notes.split(":", 1)[1] if ent.notes.startswith("以下简称:") else None
         keep_fixed_repl = (
-            ent.source not in {"structural", "auto-confident"}
+            (
+                ent.category not in _INDEXED_ALIAS_CATEGORIES
+                and ent.source not in {"structural", "auto-confident"}
+            )
             or ent.category == "amount"
             or (ent.category == "address" and address_granularity == "district")
             or (ent.category == "person" and (alias_style == "court" or ent.role == "article8"))
@@ -223,7 +251,7 @@ def collect_observations_from_file(
             source=ent.source,
             file_label=label,
             replacement=ent.replacement if keep_fixed_repl else None,
-            abbr_of=abbr_of,
+            abbr_of=_abbreviation_of(ent.notes),
         )
     return bucket
 
@@ -250,6 +278,7 @@ def collect_observations_from_ledgers(ledger_paths: Iterable[Path]) -> dict[str,
                 source=str(raw.get("source") or "ledger"),
                 file_label=label,
                 replacement=str(raw.get("replacement") or "").strip() or None,
+                abbr_of=_abbreviation_of(str(raw.get("notes") or "")),
             )
     return bucket
 
@@ -291,15 +320,37 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
     return merged
 
 
-def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict]:
-    conflicts: list[Conflict] = []
-    for obs in bucket.values():
-        uniq = [r for r in obs.replacements_seen if r]
-        if len(set(uniq)) > 1:
+def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAliasCollision]:
+    conflicts: list[Conflict | PersonAliasCollision] = []
+
+    def identity(obs: Observation) -> tuple[str, str]:
+        if obs.category == "person" and obs.abbr_of:
+            target = bucket.get(obs.abbr_of)
+            if target is None or target.category == "person":
+                return ("person", obs.abbr_of)
+        return (obs.category, obs.original)
+
+    person_aliases = {
+        r for obs in bucket.values() if obs.category == "person" for r in obs.replacements_seen if r
+    }
+    by_alias: dict[str, list[Observation]] = {}
+    for obs in sorted(bucket.values(), key=lambda o: o.original):
+        replacements = {r for r in obs.replacements_seen if r}
+        if len(replacements) > 1:
             conflicts.append(
-                Conflict(original=obs.original, replacements=sorted(set(uniq)), files=list(obs.files))
+                Conflict(original=obs.original, replacements=sorted(replacements), files=list(obs.files))
             )
-    conflicts.sort(key=lambda c: c.original)
+        for alias in replacements & person_aliases:
+            by_alias.setdefault(alias, []).append(obs)
+    for alias, observations in sorted(by_alias.items()):
+        if len({identity(obs) for obs in observations}) > 1:
+            conflicts.append(
+                PersonAliasCollision(
+                    replacement=alias,
+                    originals=[obs.original for obs in observations],
+                    files=sorted({f for obs in observations for f in obs.files}),
+                )
+            )
     return conflicts
 
 
@@ -316,6 +367,7 @@ def build_unified_entities(
     )
     counters: dict[str, int] = {}
     assigned: dict[str, str] = {}
+    reserved = {r for obs in items for r in obs.replacements_seen if r}
     entities: list[dict[str, Any]] = []
 
     for obs in items:
@@ -352,16 +404,25 @@ def build_unified_entities(
         else:
             idx = counters.get(category, 0)
             replacement = _stable_alias(category, idx, obs.original)
+            if category in _INDEXED_ALIAS_CATEGORIES:
+                while replacement in reserved:
+                    idx += 1
+                    replacement = _stable_alias(category, idx, obs.original)
             counters[category] = idx + 1
 
         assigned[obs.original] = replacement
+        reserved.add(replacement)
         row: dict[str, Any] = {
             "original": obs.original,
             "category": category,
             "role": role if role != "structural" else "structural",
             "replacement": replacement,
             "source": "unified",
-            "notes": f"stable across {len(obs.files)} file(s); from {obs.source}",
+            "notes": (
+                f"{_ABBR_NOTE_PREFIX}{obs.abbr_of}"
+                if obs.abbr_of
+                else f"stable across {len(obs.files)} file(s); from {obs.source}"
+            ),
             "files": list(obs.files),
         }
         entities.append(row)
@@ -413,8 +474,7 @@ def write_unified_bundle(
                 e["original"]: e.get("files", []) for e in entities if e.get("files")
             },
             "warning": (
-                "Review before use. Conflicts mean the same original had multiple "
-                "replacements across inputs — resolve manually."
+                "Review before use. Resolve conflicting replacements or shared person aliases manually."
             ),
         },
     }
@@ -446,9 +506,9 @@ def write_unified_bundle(
         "",
     ]
     if conflicts:
-        lines.extend(["## Conflicts (same original → different replacements)", ""])
+        lines.extend(["## Conflicts", ""])
         for c in conflicts:
-            lines.append(f"- `{c.original}`: {', '.join(f'`{r}`' for r in c.replacements)}")
+            lines.append(f"- {c.describe()}")
             lines.append(f"  - files: {', '.join(c.files)}")
         lines.append("")
     lines.extend(

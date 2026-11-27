@@ -995,12 +995,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"unified:    {report.entities_path}")
             print(f"report:     {report.report_path}")
             if report.conflicts:
-                print("CONFLICTS (same original → different replacements):", file=sys.stderr)
+                print("CONFLICTS:", file=sys.stderr)
                 for c in report.conflicts:
-                    print(
-                        f"  - {c.original}: {', '.join(c.replacements)}",
-                        file=sys.stderr,
-                    )
+                    print(f"  - {c.describe()}", file=sys.stderr)
                 return 2
             return 0
 

@@ -121,6 +121,23 @@ def test_batch_unify_ai_links_abbreviations_across_files_and_keeps_evidence_url(
     assert by_orig["北京星澜影业有限公司"] == by_orig["星澜影业"]
 
 
+def test_batch_unify_links_company_short_name_first_detected_as_person(tmp_path: Path):
+    src = tmp_path / "case"
+    out = tmp_path / "out"
+    src.mkdir()
+    (src / "a.txt").write_text("原告：王仿乙。\n", encoding="utf-8")
+    (src / "b.txt").write_text(
+        "原告：北京星澜影业有限公司（以下简称“王仿乙”）。\n", encoding="utf-8"
+    )
+
+    batch = redact_tree(src, mode="ai", output_dir=out, unify_first=True)
+    assert batch.ok
+    assert (out / "a.redacted-ai.txt").read_text(encoding="utf-8") == "原告：某单位A。\n"
+    assert (out / "b.redacted-ai.txt").read_text(encoding="utf-8") == (
+        "原告：某单位A（以下简称“某单位A”）。\n"
+    )
+
+
 # --- P0-3: PDF overlap & Sandwich PDF protection ---------------------------
 
 
