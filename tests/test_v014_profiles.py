@@ -93,6 +93,37 @@ def test_judgment_online_keeps_parties_and_truncates_address(tmp_path: Path):
     assert main(["verify", str(res.output_path), "--profile", "judgment-online", "--strict"]) == 0
 
 
+def test_judgment_online_strict_verify_checks_explicit_entities(tmp_path: Path, capsys):
+    witness = "顾仿乙"
+    party = "顾仿甲"
+    district = "北京市海淀区"
+    src = _src(
+        tmp_path, f"原告：{party}，证人：{witness}。\n住所地：{district}测试路27号院3号楼502室。\n",
+    )
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([
+            {"original": witness, "category": "person", "role": "article8"},
+            {"original": party, "category": "person", "role": "party"},
+            {"original": district, "category": "address"},
+        ], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    options = ["--profile", "judgment-online", "--entities", str(entities)]
+
+    for verify_input in (src, tmp_path):
+        assert main(["verify", str(verify_input), *options, "--strict"]) == 2
+        printed = capsys.readouterr().out
+        assert f"unreplaced_entity: {witness}" in printed
+        assert f"unreplaced_entity: {party}" not in printed
+        assert f"unreplaced_entity: {district}" not in printed
+
+    out = tmp_path / "redacted.md"
+    assert main(["redact", str(src), *options, "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == f"原告：{party}，证人：顾某。\n住所地：{district}。\n"
+    assert main(["verify", str(out), *options, "--strict"]) == 0
+
+
 def test_publish_still_renames_everyone(tmp_path: Path):
     src = _src(tmp_path, "原告：张测伟，住北京市朝阳区测试路88号。审判长 赵测审\n")
     res = redact_file(src, mode="ai", output_path=tmp_path / "p.md", profile="publish")

@@ -756,6 +756,7 @@ def verify_file(
     *,
     entities_path: Path | None = None,
     alias_style: str = "generic",
+    profile: Profile | None = None,
     keep_categories: set[str] | None = None,
     extra_categories: set[str] | None = None,
     only_categories: set[str] | None = None,
@@ -778,18 +779,24 @@ def verify_file(
         text, mode=mode, nl=True, keep_categories=keep_categories,
         extra_categories=extra_categories, only_categories=only_categories, **scan_options,
     )
-    if suffix == ".pdf" and entities_path is not None and not scan_pages:
+    pdf_path = path if suffix == ".pdf" else None
+    check_explicit_entities = profile is not None and profile.name == "judgment-online"
+    if entities_path is not None and not scan_pages and (check_explicit_entities or pdf_path is not None):
         plan = build_plan(
             text,
             mode=mode,
             entities_file=entities_path,
             allowlist=scan_options.get("allowlist"),
-            preserve=list(scan_options.get("known") or ()),
-            alias_style=alias_style,
+            preserve=[*(scan_options.get("known") or ()), *(profile.preserve if profile else ())],
+            alias_style=profile.alias_style if profile else alias_style,
+            address_granularity=profile.address_granularity if profile else "full",
+            only_categories=set() if check_explicit_entities else None,
         )
-        short_names = [(o, r) for o, r in plan.mapping() if pdf_io.is_short_cjk_name(o)]
-        add_unreplaced(report, unreplaced_originals(text, short_names, pdf_path=path))
-    elif suffix == ".docx":
+        mapping = plan.mapping()
+        if not check_explicit_entities:
+            mapping = [(o, r) for o, r in mapping if pdf_io.is_short_cjk_name(o)]
+        add_unreplaced(report, unreplaced_originals(text, mapping, pdf_path=pdf_path))
+    if suffix == ".docx":
         _, image_pii = docx_io.scan_media(
             path,
             categories=categories_for_mode(
@@ -821,6 +828,7 @@ def verify_tree(
     only_categories: set[str] | None = None,
     entities_path: Path | None = None,
     alias_style: str = "generic",
+    profile: Profile | None = None,
     known: set[str] | None = None,
     **_ignored: Any,
 ) -> dict[str, Any]:
@@ -852,6 +860,7 @@ def verify_tree(
             allowlist=allow,
             entities_path=entities_path,
             alias_style=alias_style,
+            profile=profile,
             known=known,
             redact_court_staff=bool(_ignored.get("redact_court_staff")),
         )
