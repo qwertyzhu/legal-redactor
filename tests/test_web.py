@@ -13,6 +13,7 @@ import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import docx
@@ -231,6 +232,46 @@ def test_inspect_and_redact_pdf(web_server):
         assert resp.status == 200
         ledger_data = json.loads(resp.read().decode("utf-8"))
         assert "entities" in ledger_data or "plan" in ledger_data
+
+
+@pytest.fixture
+def mixed_pdf_bytes():
+    with fitz.open() as source, fitz.open() as mixed:
+        page = source.new_page(width=150, height=100)
+        page.insert_text((10, 30), "Fictional scan")
+        mixed.new_page().insert_text((10, 30), "Fictional vector cover")
+        mixed.new_page(width=150, height=100).insert_image(page.rect, pixmap=page.get_pixmap())
+        return mixed.tobytes()
+
+
+def test_inspect_mixed_pdf_reports_scan_page(web_server, mixed_pdf_bytes):
+    ctype, body = _build_multipart({}, {"file": ("mixed.pdf", mixed_pdf_bytes, "application/pdf")})
+    req = Request(f"{web_server}/api/inspect", data=body, headers={"Content-Type": ctype})
+    with urlopen(req) as resp:
+        result = json.load(resp)
+
+    assert result["page_count"] == 2
+    assert result["has_text_layer"] is False
+    assert result["mixed_scan_pages"] == [2]
+    assert result["preview"] == "Fictional vector cover"
+
+
+def test_redact_mixed_pdf_returns_client_error(web_server, mixed_pdf_bytes):
+    ctype, body = _build_multipart(
+        {"mode": "ai"},
+        {"file": ("mixed.pdf", mixed_pdf_bytes, "application/pdf")},
+    )
+    req = Request(f"{web_server}/api/redact-file", data=body, headers={"Content-Type": ctype})
+    with pytest.raises(HTTPError) as caught:
+        urlopen(req)
+    with caught.value as resp:
+        assert resp.code == 400
+        result = json.load(resp)
+
+    assert result["ok"] is False
+    assert "第 2 页" in result["error"]
+    assert "ocr.normalized.md" in result["error"]
+    assert "download_file_url" not in result
 
 
 def test_visual_scan_zero_hits_requires_manual_review(web_server, monkeypatch):

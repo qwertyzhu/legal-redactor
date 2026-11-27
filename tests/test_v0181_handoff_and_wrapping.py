@@ -10,7 +10,7 @@ import pytest
 
 from legal_redactor.cli import _print_handoff, main
 from legal_redactor.formats.pdf_io import redact_pdf
-from legal_redactor.ledger_store import restore_text
+from legal_redactor.ledger_store import restore_file, restore_text
 from legal_redactor.patterns import detect_structural
 from legal_redactor.suspects import Suspect, detect_suspects
 
@@ -120,9 +120,15 @@ def test_pdf_rotated_split_name_keeps_exact_alias_for_restore(tmp_path, alias):
         doc.save(src)
     text = redact_pdf(src, out, [("李明", alias)])
     assert alias in text.splitlines()
-    restored, _ = restore_text(text, {"entities": [{"original": "李明", "replacement": alias}]})
+    ledger = {"entities": [{"original": "李明", "replacement": alias}]}
+    restored, _ = restore_text(text, ledger)
     assert alias not in restored
     assert "李明" in restored
+    ledger_file = tmp_path / "ledger.json"
+    ledger_file.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
+    restored_pdf, _ = restore_file(out, ledger_file, tmp_path / "restored.pdf")
+    assert alias not in restored_pdf
+    assert all(text in restored_pdf for text in ("上下", "李明", "前后"))
 
 
 @pytest.mark.parametrize("line", ["被告郝测\n一于2024年签署", "签字确认：郝 测 一"])

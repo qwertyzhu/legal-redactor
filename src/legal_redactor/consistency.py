@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from .allowlist import load_allowlist
 from .draft import extract_text
 from .entities import build_plan, load_entities_file
+from .ledger_store import load_ledger
 from .patterns import DEFAULT_PLACEHOLDERS, structural_placeholder
 from .pipeline import _normalize_keep_extra, iter_batch_inputs
 from .profiles_loader import resolve_profile
@@ -228,11 +229,11 @@ def collect_observations_from_file(
 
 
 def collect_observations_from_ledgers(ledger_paths: Iterable[Path]) -> dict[str, Observation]:
-    """Rebuild observations from per-file ledger.json outputs."""
+    """Rebuild observations from plain or encrypted per-file ledgers."""
     bucket: dict[str, Observation] = {}
     for path in ledger_paths:
         path = Path(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = load_ledger(path)
         entities = data.get("entities") if isinstance(data, dict) else data
         if not isinstance(entities, list):
             continue
@@ -527,9 +528,20 @@ def unify_from_ledgers(
 ) -> ConsistencyReport:
     """Merge already-written *.ledger.json files (post-batch check)."""
     ledger_dir = Path(ledger_dir)
-    ledgers = sorted(ledger_dir.glob("*.ledger.json"))
+    ledgers = list(ledger_dir.glob("*.ledger.json"))
     if not ledgers:
-        ledgers = sorted(ledger_dir.rglob("*.ledger.json"))
+        ledgers = list(ledger_dir.rglob("*.ledger.json"))
+    return unify_ledger_paths(ledgers, output_dir, mode=mode)
+
+
+def unify_ledger_paths(
+    ledger_paths: Iterable[Path],
+    output_dir: Path,
+    *,
+    mode: str = "ai",
+) -> ConsistencyReport:
+    """Write the consistency bundle for an explicit set of ledger files."""
+    ledgers = sorted(ledger_paths)
     bucket = collect_observations_from_ledgers(ledgers)
     return write_unified_bundle(
         bucket, output_dir, mode=mode, files_scanned=len(ledgers)

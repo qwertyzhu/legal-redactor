@@ -546,6 +546,41 @@ def test_batch_redact_writes_consistency_bundle(tmp_path: Path):
     assert (out / "consistency.report.md").is_file()
 
 
+def test_batch_redact_writes_consistency_bundle_with_encrypted_ledgers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from legal_redactor.pipeline import redact_tree
+
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-batch-pass")
+    src = tmp_path / "in"
+    src.mkdir()
+    for name in ("a.md", "b.md"):
+        (src / name).write_text("联系电话：13900001111\n", encoding="utf-8")
+
+    batch = redact_tree(
+        src,
+        mode="ai",
+        output_dir=tmp_path / "out",
+        auto_confident=True,
+        ledger_encrypt=True,
+    )
+
+    assert batch.ok
+    work_dir = src / ".redactor"
+    ledgers = sorted(work_dir.glob("*.ledger.json.enc"))
+    assert len(ledgers) == 2
+    assert not list(work_dir.glob("*.ledger.json"))
+    assert batch.consistency_path is not None
+    report = json.loads(batch.consistency_path.read_text(encoding="utf-8"))
+    assert report["files_scanned"] == 2
+    assert report["entity_count"] == 1
+    assert report["conflict_count"] == 0
+    assert batch.entities_consistent_path is not None
+    entities = json.loads(batch.entities_consistent_path.read_text(encoding="utf-8"))
+    assert entities["_meta"]["per_entity_files"]["13900001111"] == [p.name for p in ledgers]
+
+
 def test_batch_unify_first_uses_stable_aliases(tmp_path: Path):
     from legal_redactor.pipeline import redact_tree
 
