@@ -26,9 +26,6 @@ _PDF_SEARCH_FLAGS = (
 _HIDDEN_WIDGET_FLAGS = (
     fitz.PDF_ANNOT_IS_INVISIBLE | fitz.PDF_ANNOT_IS_HIDDEN | fitz.PDF_ANNOT_IS_NO_VIEW
 )
-_WIDGET_FONT_FAMILIES = {
-    "Courier": "Cour", "Helvetica": "Helv", "Times": "TiRo", "Symbol": "Helv", "ZapfDingbats": "ZaDb",
-}
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
 _TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
@@ -149,69 +146,6 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
             return
 
 
-def _multiline_widget_fontsize(widget: fitz.Widget, value: str) -> float | None:
-    width, height = widget.rect.width, widget.rect.height
-    inset = 2 * max(0, widget.border_width or 0)
-    box = fitz.Rect(inset, inset, width - inset, height - inset)
-    if box.is_empty:
-        return None
-
-    fontname = (widget.text_font or "Helv").lower()
-    font = fitz.Font(fontname)
-    max_size = widget.text_fontsize if widget.text_fontsize > 0 else 12
-    min_size = min(max_size, 4)
-    # The textbox can split a long word that the widget appearance would clip.
-    word_width = max((font.text_length(word, fontsize=1) for word in value.split()), default=0)
-    if word_width:
-        max_size = min(max_size, box.width / word_width)
-    if max_size < min_size:
-        return None
-
-    with fitz.open() as scratch:
-        page = scratch.new_page(width=width, height=height)
-
-        def fits(size: float) -> bool:
-            return page.insert_textbox(box, value, fontname=fontname, fontsize=size) >= 0
-
-        if fits(max_size):
-            return max_size
-        if not fits(min_size):
-            return None
-        while max_size - min_size > 0.25:
-            size = (min_size + max_size) / 2
-            if fits(size):
-                min_size = size
-            else:
-                max_size = size
-        return min_size
-
-
-def _regenerate_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
-    if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
-        return False
-
-    try:
-        font = widget.text_font
-        if font:
-            base_font = fitz.Base14_fontdict.get(font.lower())
-            if base_font is None:
-                _, resource_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
-                base_font = fitz.Base14_fontdict.get(resource_font.lstrip("/").lower())
-            widget.text_font = _WIDGET_FONT_FAMILIES[base_font.split("-", 1)[0]] if base_font else "Helv"
-        value = widget.field_value or ""
-        size = (
-            _multiline_widget_fontsize(widget, value)
-            if value and widget.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE else 0
-        )
-        if size is None:
-            return False
-        widget.text_fontsize = size
-        widget.update()
-    except (ValueError, RuntimeError, fitz.mupdf.FzErrorBase):
-        return False
-    return True
-
-
 def _flatten_pdf_form(
     doc: fitz.Document, warnings: list[str] | None = None, *, widget_values: list[str] | None = None,
 ) -> dict[int, list[fitz.Rect]]:
@@ -221,11 +155,8 @@ def _flatten_pdf_form(
     appearance_kind, appearance_value = doc.xref_get_key(doc.pdf_catalog(), "AcroForm/NeedAppearances")
     if appearance_kind == "xref":
         appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
-    regenerate = appearance_value == "true"
-    if regenerate:
-        # Use the explicitly regenerated appearances when baking.
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "false")
-    flattened = hidden = passwords = failed_appearances = 0
+    untrusted = appearance_value == "true"
+    flattened = hidden = passwords = untrusted_removed = unusable = 0
     for page in doc:
         for widget in list(page.widgets() or []):
             kind, flags = doc.xref_get_key(widget.xref, "F")
@@ -240,24 +171,26 @@ def _flatten_pdf_form(
             ):
                 page.delete_widget(widget)
                 passwords += 1
+            elif untrusted:
+                page.delete_widget(widget)
+                untrusted_removed += 1
+            elif (
+                widget.rect.is_empty or widget.rect.is_infinite
+                or doc.xref_get_key(widget.xref, "AP/N")[0] not in ("xref", "dict")
+            ):
+                page.delete_widget(widget)
+                unusable += 1
             else:
-                if (
-                    regenerate
-                    and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
-                    and not _regenerate_widget_appearance(doc, widget)
-                ):
-                    page.delete_widget(widget)
-                    failed_appearances += 1
-                    continue
                 flattened += 1
                 fields.setdefault(page.number, []).append(widget.rect)
                 if widget_values is not None:
                     value = widget.field_value
                     if isinstance(value, str) and value:
                         widget_values.append(value)
-        if page.annot_xrefs():
+        if page.number in fields:
             _copy_inherited_page_resources(doc, page.xref)
-    doc.bake(annots=False)
+    if fields:
+        doc.bake(annots=False)
     if warnings is not None:
         if flattened:
             warnings.append(f"pdf: {flattened} form field(s) flattened")
@@ -265,8 +198,10 @@ def _flatten_pdf_form(
             warnings.append(f"pdf: {hidden} hidden form field(s) removed")
         if passwords:
             warnings.append(f"pdf: {passwords} password form field(s) removed")
-        if failed_appearances:
-            warnings.append(f"pdf: {failed_appearances} form field(s) removed (appearance could not be regenerated)")
+        if untrusted_removed:
+            warnings.append(f"pdf: {untrusted_removed} form field(s) removed (NeedAppearances set, appearances not trusted)")
+        if unusable:
+            warnings.append(f"pdf: {unusable} form field(s) removed (no usable stored appearance)")
     return fields
 
 

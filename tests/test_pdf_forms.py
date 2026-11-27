@@ -7,7 +7,7 @@ from legal_redactor.formats.pdf_io import extract_text_with_scan_pages, redact_p
 from legal_redactor.pipeline import redact_file, verify_file
 
 
-def _form(value: str = "Earlier evidence value", font: str = "Helv") -> tuple[fitz.Document, fitz.Page, int]:
+def _form(value: str = "Earlier evidence value") -> tuple[fitz.Document, fitz.Page, int]:
     doc = fitz.open()
     page = doc.new_page(width=400, height=280)
     page.insert_text((24, 40), "Fictional evidence")
@@ -17,7 +17,7 @@ def _form(value: str = "Earlier evidence value", font: str = "Helv") -> tuple[fi
     widget.field_value = value
     widget.rect = fitz.Rect(24, 60, 300, 90)
     widget.text_fontsize = 12
-    widget.text_font = font
+    widget.text_font = "Helv"
     return doc, page, page.add_widget(widget).xref
 
 
@@ -79,10 +79,9 @@ def test_production_keeps_evidence_image_with_inherited_page_resources(tmp_path:
         assert output[0].get_pixmap().pixel(50, 150) == (90, 90, 90)
 
 
-def test_production_redacts_current_widget_value_when_appearance_is_stale(tmp_path: Path) -> None:
+def test_production_drops_widgets_when_appearances_are_untrusted(tmp_path: Path) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    phone = "13900001111"
-    value = f"Current evidence value: {phone}"
+    value = "Current evidence value"
     doc, _, widget_xref = _form()
     with doc:
         doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
@@ -98,86 +97,9 @@ def test_production_redacts_current_widget_value_when_appearance_is_stale(tmp_pa
 
     assert result.ok
     with fitz.open(out) as output:
-        text = output[0].get_text()
-        assert text.count("Current evidence value:") == 1
-        assert "[手机号]" in "".join(text.split())
-        assert phone not in text
-        assert "Earlier evidence value" not in text
-
-
-@pytest.mark.parametrize("stale_appearance", [False, True])
-def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_appearance: bool) -> None:
-    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    value = "Full fictional evidence payment reference ABCDEFGHIJK" if stale_appearance else "Current evidence value"
-    doc, page, widget_xref = _form("Earlier evidence value" if stale_appearance else value, "Cour")
-    with doc:
-        font_xref = page.insert_font(fontname="cour")
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/DR", f"<</Font<</EvidenceFont {font_xref} 0 R>>>>")
-        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str("/EvidenceFont 24 Tf 0 g"))
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true" if stale_appearance else "false")
-        doc.save(src)
-
-    redact_pdf(src, out, [], mode="production")
-
-    with fitz.open(out) as result:
-        spans = [
-            span for block in result[0].get_text("dict", clip=fitz.Rect(24, 60, 300, 90))["blocks"]
-            for line in block["lines"] for span in line["spans"]
-        ]
-        assert [(span["text"], span["font"]) for span in spans] == [(value, "Courier")]
-        if not stale_appearance:
-            assert spans[0]["size"] == pytest.approx(12)
-
-
-@pytest.mark.parametrize(("width", "height", "da_size"), [(276, 30, 0), (276, 30, 8), (80, 90, 12), (276, 8, 12)])
-def test_production_fits_multiline_widget_value(tmp_path: Path, width: int, height: int, da_size: int) -> None:
-    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    lines = ["First evidence line", "Second evidence line", "Third evidence line"]
-    if width == 80:
-        lines[-1] = "FictionalEvidenceReference"
-    doc, _, widget_xref = _form()
-    with doc:
-        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
-        doc.xref_set_key(widget_xref, "Rect", f"[24 {220 - height} {24 + width} 220]")
-        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str(f"/Helv {da_size} Tf 0 g"))
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("\n".join(lines)))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
-        doc.save(src)
-
-    warnings: list[str] = []
-    text = redact_pdf(src, out, [], mode="production", warnings=warnings)
-
-    assert "Earlier evidence value" not in text
-    if height == 8:
-        assert text.splitlines() == ["Fictional evidence"]
-        assert "pdf: 1 form field(s) removed (appearance could not be regenerated)" in warnings
-    else:
-        assert text.splitlines() == ["Fictional evidence", *lines]
-        with fitz.open(out) as output:
-            spans = [
-                span for block in output[0].get_text("dict")["blocks"]
-                for line in block.get("lines", ()) for span in line["spans"] if span["text"] in lines
-            ]
-            assert len(spans) == len(lines)
-            assert all(4 <= span["size"] <= (da_size or 12) for span in spans)
-
-
-def test_production_keeps_multiline_cjk_widget_value(tmp_path: Path) -> None:
-    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    lines = ["证据说明确认", "原件已经核验"]
-    doc, _, widget_xref = _form()
-    with doc:
-        doc.set_language("zh-CN")
-        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("\n".join(lines)))
-        doc.xref_set_key(widget_xref, "Rect", "[24 160 300 220]")
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
-        doc.save(src)
-
-    text = redact_pdf(src, out, [], mode="production")
-
-    assert text.splitlines()[-2:] == lines
+        assert output[0].get_text().splitlines() == ["Fictional evidence"]
+        assert not list(output[0].widgets())
+    assert "pdf: 1 form field(s) removed (NeedAppearances set, appearances not trusted)" in result.warnings
 
 
 def test_production_redacts_email_wrapped_in_widget_appearance(tmp_path: Path) -> None:
@@ -204,35 +126,12 @@ def test_production_redacts_email_wrapped_in_widget_appearance(tmp_path: Path) -
     assert verify_file(out, "production").status == "PASS"
 
 
-@pytest.mark.parametrize(
-    ("alias", "fontname"), [("HeBo", "hebo"), ("EvidenceBold", "hebo"), ("TiRo", "tiro"), ("Cour", "cour")],
-)
-def test_production_regenerates_stale_widget_with_standard_font(tmp_path: Path, alias: str, fontname: str) -> None:
-    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    value = "Current evidence value"
-    doc, page, widget_xref = _form()
-    with doc:
-        font_xref = page.insert_font(fontname=fontname)
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/DR", f"<</Font<< /{alias} {font_xref} 0 R>>>>")
-        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str(f"/{alias} 12 Tf 0 g"))
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
-        doc.save(src)
-
-    text = redact_pdf(src, out, [], mode="production")
-
-    assert value in text
-    assert "Earlier evidence value" not in text
-
-
-@pytest.mark.parametrize(("key", "value"), [("T", "null"), ("Rect", "[24 220 24 220]")])
-def test_production_drops_malformed_widgets_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
+@pytest.mark.parametrize(("key", "value"), [("Rect", "[24 220 24 220]"), ("AP", "null")])
+def test_production_drops_unusable_widget_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
     doc, _, widget_xref = _form()
     with doc:
         doc.xref_set_key(widget_xref, key, value)
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("Current evidence value"))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
         doc.save(src)
 
     warnings: list[str] = []
@@ -240,5 +139,4 @@ def test_production_drops_malformed_widgets_without_aborting_export(tmp_path: Pa
 
     assert "Fictional evidence" in text
     assert "Earlier evidence value" not in text
-    assert "Current evidence value" not in text
-    assert "pdf: 1 form field(s) removed (appearance could not be regenerated)" in warnings
+    assert "pdf: 1 form field(s) removed (no usable stored appearance)" in warnings
