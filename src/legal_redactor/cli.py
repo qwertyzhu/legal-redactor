@@ -217,6 +217,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pv.add_argument("input", type=Path, help="已脱敏文件或目录")
     pv.add_argument("--mode", choices=("ai", "production"), default=None)
     pv.add_argument("--profile", default=None, help="与 redact 使用的 profile 一致")
+    pv.add_argument("--entities", type=Path, help="与 redact 相同的实体表，检查 PDF 中指定的短中文姓名")
     pv.add_argument(
         "--strict",
         action="store_true",
@@ -867,6 +868,9 @@ def main(argv: list[str] | None = None) -> int:
                     only_categories=only,
                     redact_court_staff=staff,
                     allowlist_files=list(args.allowlist or []),
+                    entities_path=args.entities,
+                    alias_style=prof.alias_style if prof else "generic",
+                    known={p.strip() for p in (args.preserve or []) if p.strip()} if args.entities else None,
                 )
                 if args.json:
                     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -893,6 +897,8 @@ def main(argv: list[str] | None = None) -> int:
                     allowlist=resolve_allowlist(src, list(args.allowlist or [])),
                     known={p.strip() for p in (args.preserve or []) if p.strip()},
                     redact_court_staff=staff,
+                    entities_path=args.entities,
+                    alias_style=prof.alias_style if prof else "generic",
                 )
                 if args.json:
                     print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))

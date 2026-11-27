@@ -71,15 +71,28 @@ def nl_residual(
 
 
 def unreplaced_originals(
-    output_text: str, mapping: list[tuple[str, str]], *, join_lines: bool = False
+    output_text: str,
+    mapping: list[tuple[str, str]],
+    *,
+    join_lines: bool = False,
+    pdf_path: Path | None = None,
 ) -> list[str]:
-    """Planned originals that survived into the output — a definite leak.
-
-    join_lines: PDF text extraction breaks a wrapped entity with a newline.
-    """
-    hay = output_text.replace("\n", "") if join_lines else output_text
+    """Planned originals that survived into the output — a definite leak."""
     replacements = "\n".join(r for _, r in mapping)
-    return [o for o, _ in mapping if o and o in hay and o not in replacements]
+    originals = [o for o, _ in mapping if o and o not in replacements]
+    if pdf_path is None:
+        hay = output_text.replace("\n", "") if join_lines else output_text
+        return [o for o in originals if o in hay]
+
+    from .formats.pdf_io import is_short_cjk_name, matched_short_names
+
+    short = {o for o in originals if is_short_cjk_name(o)}
+    split_matches = matched_short_names(pdf_path, short) if short else set()
+    joined = output_text.replace("\n", "")
+    return [
+        o for o in originals
+        if o in (output_text if o in short else joined) or o in split_matches
+    ]
 
 
 def add_unreplaced(report: ResidualReport, leftovers: list[str]) -> ResidualReport:
