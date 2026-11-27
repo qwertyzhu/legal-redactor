@@ -15,6 +15,7 @@ from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 _STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
+_INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
 _TextStyle = tuple[float, float, tuple[float, float]]
@@ -45,22 +46,26 @@ def extract_text(path: Path) -> str:
         doc.close()
 
 
-def _is_struct_elem(doc: fitz.Document, xref: int) -> bool:
-    if doc.xref_get_key(xref, "Type") == ("name", "/StructElem"):
-        return True
-    return doc.xref_get_key(xref, "S")[0] == "name" and doc.xref_get_key(xref, "P")[0] == "xref"
-
-
 def _struct_text_fields(doc: fitz.Document) -> list[tuple[int, str, str]]:
     """(xref, key, value) for alt text, actual text, expansions and titles in the structure tree."""
+    kind, root = doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")
+    if kind != "xref":
+        return []
     fields: list[tuple[int, str, str]] = []
-    for xref in range(1, doc.xref_length()):
-        if not _is_struct_elem(doc, xref):
+    pending, seen = [int(root.split()[0])], set()
+    while pending:
+        xref = pending.pop()
+        if xref in seen:
             continue
+        seen.add(xref)
         for key in _STRUCT_TEXT_KEYS:
             kind, value = doc.xref_get_key(xref, key)
             if kind == "string" and value.strip():
                 fields.append((xref, key, value))
+        kind, kids = doc.xref_get_key(xref, "K")
+        if kind in ("xref", "array"):
+            # Inline marked-content / object references point at pages and annotations, not children.
+            pending.extend(int(num) for num in _INDIRECT_REF.findall(re.sub(r"<<.*?>>", "", kids)))
     return fields
 
 

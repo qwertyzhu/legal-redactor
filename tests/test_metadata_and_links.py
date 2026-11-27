@@ -485,3 +485,26 @@ def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
         actual_text="Transfer receipt",
     )
     assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
+
+
+def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):
+    objects = {
+        1: "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",
+        2: "<< /Type /Pages /Kids [ 3 0 R ] /Count 1 >>",
+        3: "<< /Type /Page /Parent 2 0 R /MediaBox [ 0 0 200 200 ] >>",
+        4: "<< /Type /StructTreeRoot /K 10 0 R >>",
+        10: "<< /S /Figure /P 4 0 R /Alt (Receipt for caller 13900001111) >>",
+    }
+    body, offsets = b"%PDF-1.7\n", {}
+    for num, obj in objects.items():
+        offsets[num] = len(body)
+        body += f"{num} 0 obj\n{obj}\nendobj\n".encode()
+    xref = (
+        "xref\n0 5\n0000000000 65535 f \n"
+        + "".join(f"{offsets[num]:010d} 00000 n \n" for num in range(1, 5))
+        + f"10 1\n{offsets[10]:010d} 00000 n \n"
+    )
+    trailer = f"trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n{len(body)}\n%%EOF\n"
+    src = tmp_path / "sparse.pdf"
+    src.write_bytes(body + xref.encode() + trailer.encode())
+    assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
