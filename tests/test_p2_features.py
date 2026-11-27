@@ -251,6 +251,32 @@ def test_revisions_extract_views(tmp_path: Path):
     assert "13912345678" in both and "13800138000" in both
 
 
+@pytest.mark.parametrize(
+    "mode,expected",
+    [
+        ("accept", "before inserted moved-in also-inserted between after"),
+        ("reject", "before between deleted moved-out also-deleted after"),
+    ],
+)
+def test_flatten_nested_revisions_preserves_run_order(mode, expected):
+    body = (
+        f'<w:p xmlns:w="{W}">'
+        "<w:r><w:t>before </w:t></w:r>"
+        "<w:ins><w:r><w:t>inserted </w:t></w:r>"
+        "<w:moveTo><w:r><w:t>moved-in </w:t></w:r></w:moveTo></w:ins>"
+        "<w:ins><w:r><w:t>also-inserted </w:t></w:r></w:ins>"
+        "<w:r><w:t>between </w:t></w:r>"
+        "<w:del><w:r><w:delText>deleted </w:delText></w:r>"
+        "<w:moveFrom><w:r><w:delText>moved-out </w:delText></w:r></w:moveFrom></w:del>"
+        "<w:del><w:r><w:delText>also-deleted </w:delText></w:r></w:del>"
+        "<w:r><w:t>after</w:t></w:r>"
+        "</w:p>"
+    )
+    xml, text, _ = docx_io._process_xml_bytes("word/document.xml", body.encode(), None, mode)
+    assert text == expected
+    assert all(tag not in xml for tag in (b"<w:ins", b"<w:del", b"<w:move"))
+
+
 def test_docx_revision_warning_isolated_between_redactions(tmp_path: Path, monkeypatch):
     revision_src = tmp_path / "revision.docx"
     revision_out = tmp_path / "revision.redacted.docx"

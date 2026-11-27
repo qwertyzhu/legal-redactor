@@ -70,16 +70,6 @@ def _local(tag: str) -> str:
 REVISION_MODES = ("accept", "reject", "keep-and-redact")
 
 
-def _unwrap(el: etree._Element) -> None:
-    parent = el.getparent()
-    if parent is None:
-        return
-    idx = parent.index(el)
-    for offset, child in enumerate(list(el)):
-        parent.insert(idx + offset, child)
-    parent.remove(el)
-
-
 def _flatten_revisions(root: etree._Element, revisions: str = "accept") -> None:
     """Resolve tracked changes.
 
@@ -104,14 +94,12 @@ def _flatten_revisions(root: etree._Element, revisions: str = "accept") -> None:
                 el.tag = f"{W}t"
             elif _local(el.tag) == "delInstrText":
                 el.tag = f"{W}instrText"
-    changed = True
-    while changed:
-        changed = False
-        for el in list(root.iter()):
-            if _local(el.tag) in keep and el.getparent() is not None:
-                _unwrap(el)
-                changed = True
-                break
+    for el in [node for node in root.iter() if _local(node.tag) in keep]:
+        parent = el.getparent()
+        if parent is not None:
+            for child in list(el):
+                el.addprevious(child)
+            parent.remove(el)
 
 
 def _scrub_authors_and_rsids(root: etree._Element) -> None:
