@@ -492,6 +492,18 @@ def test_pdf_hidden_phone_does_not_leave_partially_scrubbed_email(tmp_path: Path
     assert "Phone [PDF手机号1]; Email [邮箱]" in _structure_strings(out)
 
 
+def test_pdf_hidden_landlines_with_shared_prefix_round_trip(tmp_path: Path):
+    alt = "Phone 010-1234567; Phone 010-1234567 8"
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Transfer receipt", alt=alt, actual_text="Receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "ledger.json").ledger_path
+    assert "Phone [PDF电话1]; Phone [PDF电话2]" in _structure_strings(redacted)
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert alt in _structure_strings(restored)
+
+
 def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
     src = _make_tagged_pdf(
         tmp_path / "alt_only.pdf",
