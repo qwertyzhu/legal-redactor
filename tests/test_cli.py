@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -242,6 +243,100 @@ def test_cli_redacts_and_verifies_text_pdf_with_blank_page(tmp_path: Path) -> No
     assert redact.returncode == 0, redact.stderr + redact.stdout
     assert verify.returncode == 0, verify.stderr + verify.stdout
     assert "status: PASS" in verify.stdout
+
+
+@pytest.mark.parametrize("cjk_font", ["none", "indirect", "inline"])
+def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path, cjk_font: str) -> None:
+    src = tmp_path / "form.pdf"
+    description = "Payment receipt for bank transfer"
+    status = "Original verified"
+    hidden_value = "Internal form notes"
+    field_fill = (0.75, 0.875, 1)
+    with fitz.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((36, 50), "Fictional evidence submission form", fontname="tiro")
+        if cjk_font != "none":
+            page.insert_text((36, 65), "证据", fontname="china-s")
+        if cjk_font == "inline":
+            _, resources = pdf.xref_get_key(page.xref, "Resources")
+            _, font = pdf.xref_get_key(page.xref, "Resources/Font/china-s")
+            resources_xref = int(resources.split()[0])
+            pdf.xref_set_key(resources_xref, "Font/china-s", pdf.xref_object(int(font.split()[0])))
+            assert pdf.xref_get_key(page.xref, "Resources/Font/china-s")[0] == "dict"
+        for index, (name, value) in enumerate(
+            [("description", description), ("status", status), ("phone", MOBILE), ("hidden", hidden_value)]
+        ):
+            widget = fitz.Widget()
+            widget.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+            widget.field_name = name
+            widget.field_value = value
+            y = 80 + index * 40
+            widget.rect = fitz.Rect(36, y, 336, y + 25)
+            widget.text_fontsize = 12
+            widget.fill_color = field_fill
+            annot = page.add_widget(widget)
+            kind, appearance = pdf.xref_get_key(annot.xref, "AP/N")
+            assert kind == "xref"
+            appearance_xref = int(appearance.split()[0])
+            kind, font = pdf.xref_get_key(appearance_xref, "Resources/Font/Helv")
+            assert kind == "xref"
+            pdf.xref_set_key(appearance_xref, "Resources/Font", f"<</helv {font}>>")
+            pdf.update_stream(appearance_xref, pdf.xref_stream(appearance_xref).replace(b"/Helv ", b"/helv "))
+            if name == "hidden":
+                annot.set_flags(fitz.PDF_ANNOT_IS_NO_VIEW)
+        pdf.save(src)
+    out = tmp_path / "redacted.pdf"
+
+    redact = _run_cli("redact", str(src), "--mode", "production", "-o", str(out), cwd=tmp_path)
+    verify = _run_cli("verify", str(out), "--mode", "production", "--strict", cwd=tmp_path)
+
+    assert redact.returncode == 0, redact.stderr + redact.stdout
+    assert verify.returncode == 0, verify.stderr + verify.stdout
+    assert "status: PASS" in verify.stdout
+    assert out.stat().st_size < src.stat().st_size + 16 * 1024
+    with fitz.open(src) as source, fitz.open(out) as pdf:
+        original_phone = next(
+            span for block in source[0].get_text("dict")["blocks"] for line in block["lines"]
+            for span in line["spans"] if span["text"] == MOBILE
+        )
+        page = pdf[0]
+        assert list(page.widgets()) == []
+        for resource in re.findall(rb"/([\w-]+)\s+[\d.]+\s+Tf\b", page.read_contents()):
+            assert pdf.xref_get_key(page.xref, f"Resources/Font/{resource.decode()}")[0] in {"xref", "dict"}, resource
+        text = page.get_text()
+        assert MOBILE not in text
+        assert "[手机号]" in "".join(text.split())
+        assert description in text
+        assert status in text
+        assert hidden_value not in text
+        if cjk_font != "none":
+            assert "证据" in text
+        assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
+        placeholder = next(
+            line["spans"] for block in page.get_text("rawdict")["blocks"] for line in block["lines"]
+            if "".join(c["c"] for span in line["spans"] for c in span["chars"] if not c["c"].isspace()) == "[手机号]"
+        )
+        assert placeholder[0]["origin"] == pytest.approx(original_phone["origin"], abs=0.01)
+        for span in placeholder:
+            assert span["size"] == pytest.approx(original_phone["size"], abs=0.01)
+            assert span["origin"][1] == pytest.approx(original_phone["origin"][1], abs=0.01)
+
+        def ink_bounds(char: dict) -> tuple[int, int]:
+            pixels = page.get_pixmap(matrix=fitz.Matrix(6, 6), clip=fitz.Rect(char["bbox"]), colorspace=fitz.csGRAY)
+            samples = pixels.samples
+            ink = [pixels.x + x for x in range(pixels.width) if min(samples[x::pixels.stride]) < 128]
+            return ink[0], ink[-1]
+
+        opening, first, _, last, closing = [
+            ink_bounds(c) for span in placeholder for c in span["chars"] if not c["c"].isspace()
+        ]
+        assert (first[0] - opening[1]) / 6 == pytest.approx((closing[0] - last[1]) / 6, abs=1.5)
+        phone_field = next(widget.rect for widget in source[0].widgets() if widget.field_name == "phone")
+        assert [
+            drawing["fill"] for drawing in page.get_drawings()
+            if drawing.get("fill") and phone_field.intersects(drawing["rect"])
+        ] == [field_fill]
+    assert "pdf: 3 form field(s) flattened" in redact.stdout
 
 
 @pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])

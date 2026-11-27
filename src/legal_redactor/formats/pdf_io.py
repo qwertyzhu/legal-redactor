@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from itertools import count
+from itertools import count, groupby
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -27,6 +27,9 @@ _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]
 _PDF_SEARCH_FLAGS = (
     fitz.TEXT_DEHYPHENATE | fitz.TEXT_PRESERVE_WHITESPACE
     | fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_MEDIABOX_CLIP
+)
+_HIDDEN_WIDGET_FLAGS = (
+    fitz.PDF_ANNOT_IS_INVISIBLE | fitz.PDF_ANNOT_IS_HIDDEN | fitz.PDF_ANNOT_IS_NO_VIEW
 )
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
@@ -120,17 +123,105 @@ def extract_metadata_and_links(path: Path) -> str:
         doc.close()
 
 
-def extract_text_with_scan_pages(path: Path) -> tuple[str, list[int]]:
+def extract_text_with_scan_pages(path: Path, *, flatten_form: bool = False) -> tuple[str, list[int]]:
     """Return text and 1-based pages with raster content but no extractable text."""
     parts: list[str] = []
+    widget_values: list[str] = []
     scan_pages: list[int] = []
     with fitz.open(str(path)) as doc:
+        if flatten_form:
+            _flatten_pdf_form(doc, widget_values=widget_values)
         for page in doc:
             text = page.get_text("text")
             parts.append(text)
             if not text.strip() and page.get_image_info():
                 scan_pages.append(page.number + 1)
-    return "\n".join(parts), scan_pages
+    return FIELD_BOUNDARY.join(["\n".join(parts), *widget_values]), scan_pages
+
+
+def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
+    if doc.xref_get_key(page_xref, "Resources")[0] != "null":
+        return
+    xref, seen = page_xref, {page_xref}
+    while True:
+        kind, parent = doc.xref_get_key(xref, "Parent")
+        if kind != "xref":
+            return
+        xref = int(parent.split()[0])
+        if xref in seen:
+            return
+        seen.add(xref)
+        kind, resources = doc.xref_get_key(xref, "Resources")
+        if kind in ("dict", "xref"):
+            if kind == "xref":
+                resources = doc.xref_object(int(resources.split()[0]))
+            doc.xref_set_key(page_xref, "Resources", resources)
+            kind, xobjects = doc.xref_get_key(page_xref, "Resources/XObject")
+            if kind == "xref":
+                doc.xref_set_key(page_xref, "Resources/XObject", doc.xref_object(int(xobjects.split()[0])))
+            return
+
+
+def _flatten_pdf_form(
+    doc: fitz.Document, warnings: list[str] | None = None, *, widget_values: list[str] | None = None,
+) -> dict[int, list[fitz.Rect]]:
+    fields: dict[int, list[fitz.Rect]] = {}
+    if not doc.is_form_pdf:
+        return fields
+    appearance_kind, appearance_value = doc.xref_get_key(doc.pdf_catalog(), "AcroForm/NeedAppearances")
+    if appearance_kind == "xref":
+        appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
+    untrusted = appearance_value == "true"
+    flattened = hidden = passwords = untrusted_removed = unusable = 0
+    for page in doc:
+        for widget in list(page.widgets() or []):
+            kind, flags = doc.xref_get_key(widget.xref, "F")
+            if kind == "xref":
+                flags = doc.xref_object(int(flags.split()[0])).strip()
+            if flags.lstrip("+-").isdecimal() and int(flags) & _HIDDEN_WIDGET_FLAGS:
+                page.delete_widget(widget)
+                hidden += 1
+            elif (
+                widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
+                and widget.field_flags & fitz.PDF_TX_FIELD_IS_PASSWORD
+            ):
+                page.delete_widget(widget)
+                passwords += 1
+            elif untrusted:
+                page.delete_widget(widget)
+                untrusted_removed += 1
+            elif (
+                widget.rect.is_empty or widget.rect.is_infinite
+                or doc.xref_get_key(widget.xref, "AP/N")[0] not in ("xref", "dict")
+            ):
+                page.delete_widget(widget)
+                unusable += 1
+            else:
+                flattened += 1
+                fields.setdefault(page.number, []).append(widget.rect)
+                if widget_values is not None:
+                    value = widget.field_value
+                    if isinstance(value, str) and value:
+                        widget_values.append(value)
+    if fields:
+        for page in doc:
+            if page.annot_xrefs():
+                _copy_inherited_page_resources(doc, page.xref)
+        doc.bake(annots=False)
+    if warnings is not None:
+        if flattened:
+            warnings.append(f"pdf: {flattened} form field(s) flattened")
+        if hidden:
+            warnings.append(f"pdf: {hidden} hidden form field(s) removed")
+        if passwords:
+            warnings.append(f"pdf: {passwords} password form field(s) removed")
+        if untrusted_removed:
+            warnings.append(f"pdf: {untrusted_removed} form field(s) removed (NeedAppearances set, appearances not trusted)")
+        if unusable:
+            warnings.append(f"pdf: {unusable} form field(s) removed (no usable stored appearance)")
+    return fields
+
+
 def _has_text_layer(doc: fitz.Document) -> bool:
     for page in doc:
         if page.get_text("text").strip():
@@ -500,10 +591,67 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
     return False
 
 
-def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
-    lines = alias.splitlines()
+def _replacement_font_resource(page: "fitz.Page", fontname: str) -> tuple[str, "fitz.Font | None"]:
+    fonts = page.get_fonts(full=True)
+    if fontname == "china-s":
+        existing = next((font for font in fonts if font[4] == fontname), None)
+        if existing is not None and existing[2:] == ("Type0", "Heiti", "china-s", "UniGB-UTF16-H", 0):
+            if existing[0] > 0 or _make_inline_font_indirect(page, fontname):
+                return fontname, None
+    used_names = {font[4] for font in fonts}
+    for name in (("helv", "Helvetica") if fontname == "helv" else (fontname,)):
+        if name not in used_names:
+            return name, None
+    name = next(name for i in count() if (name := f"lr-{fontname}-{i}") not in used_names)
+    font = fitz.Font(fontname)
+    page.insert_font(fontname=name, fontbuffer=font.buffer)
+    return name, font
+
+
+def _make_inline_font_indirect(page: "fitz.Page", fontname: str) -> bool:
+    doc = page.parent
+    owner = page.xref
+    path = ""
+    for key in ("Resources", "Font"):
+        path += key
+        kind, value = doc.xref_get_key(owner, path)
+        if kind == "xref":
+            owner = int(value.split()[0])
+            path = ""
+        elif kind == "dict":
+            path += "/"
+        else:
+            return False
+    kind, value = doc.xref_get_key(owner, path + fontname)
+    if kind != "dict":
+        return False
+    xref = doc.get_new_xref()
+    doc.update_object(xref, value)
+    doc.xref_set_key(owner, path + fontname, f"{xref} 0 R")
+    return True
+
+
+def _paint_pdf_replacement(
+    page: "fitz.Page", rects: list[_NameRect], alias: str,
+    run_fonts: dict[str, tuple[str, "fitz.Font | None"]],
+) -> None:
+    lines = []
+    for line in alias.splitlines():
+        runs = []
+        for ascii_run, chars in groupby(line, key=str.isascii):
+            text = "".join(chars)
+            run_font = "helv" if ascii_run else "china-s"
+            if run_font not in run_fonts:
+                run_fonts[run_font] = _replacement_font_resource(page, run_font)
+            name, embedded = run_fonts[run_font]
+            width = (
+                embedded.text_length(text, fontsize=1)
+                if embedded is not None else fitz.get_text_length(text, fontname=run_font, fontsize=1)
+            )
+            runs.append((text, name, width))
+        lines.append(runs)
     fontname = _redaction_fontname(alias)
-    width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
+    width = max((sum(run[2] for run in line) for line in lines), default=0)
     if not width:
         return
     font = fitz.Font(fontname=fontname)
@@ -528,7 +676,18 @@ def _paint_split_alias(page: "fitz.Page", rects: list[_NameRect], alias: str) ->
 
     font_size, origin, rotation = max(map(layout, rects), key=lambda placement: placement[0])
     if font_size > 0:
-        page.insert_text(origin, lines, fontsize=font_size, lineheight=lineheight, fontname=fontname, rotate=rotation)
+        shape = page.new_shape()
+        matrix = fitz.Matrix(-rotation)
+        advance = fitz.Point(font_size, 0) * matrix
+        line_step = fitz.Point(0, font_size * lineheight) * matrix
+        start = fitz.Point(origin)
+        for line in lines:
+            offset = 0.0
+            for text, name, run_width in line:
+                shape.insert_text(start + advance * offset, text, fontsize=font_size, fontname=name, rotate=rotation)
+                offset += run_width
+            start += line_step
+        shape.commit()
 
 
 def _restoration_obstacles(page: fitz.Page) -> list[fitz.Rect]:
@@ -638,6 +797,8 @@ def redact_pdf(
     kept_names = [o for o, r in mapping if o and o == r]
     doc = fitz.open(str(input_path))
     try:
+        production = mode.lower().strip() == "production"
+        form_fields = _flatten_pdf_form(doc, warn) if production else {}
         if not _has_text_layer(doc):
             raise ValueError(
                 "PDF has no extractable text layer (likely a scan). "
@@ -647,13 +808,19 @@ def redact_pdf(
             )
 
         for page in doc:
+            widget_rects = form_fields.get(page.number, [])
             claimed_rects: list[fitz.Rect] = []
             kept_rects = _kept_name_rects(page, kept_names)
-            split_aliases: list[tuple[list[_NameRect], str]] = []
+            styled_replacements: list[tuple[list[_NameRect], str]] = []
             fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: _CharIndex | None = None
             search_page = page.get_textpage(flags=_PDF_SEARCH_FLAGS) if ordered_mapping else None
             digits = _searchable_digits(search_page) if search_page is not None and digit_targets else None
+            widget_spans = [
+                _NameRect(fitz.Rect(span["bbox"]), span["origin"][1], span["size"], line["dir"])
+                for block in search_page.extractDICT()["blocks"] for line in block.get("lines", ())
+                for span in line["spans"]
+            ] if widget_rects and search_page is not None else []
 
             def conflicts_with_kept_name(rect: fitz.Rect, original: str) -> bool:
                 return any(
@@ -665,13 +832,20 @@ def redact_pdf(
                 if conflicts_with_kept_name(rect, original) or _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
+                in_widget = any(field.contains(rect) for field in widget_rects)
                 if fit_replacements and text:
                     fitted_text.append((rect, original, text))
                     text = ""
+                elif in_widget and text:
+                    style = max(widget_spans, key=lambda span: (span.rect & rect).get_area(), default=None)
+                    if style is not None and style.rect.intersects(rect):
+                        slot = _NameRect(rect, style.baseline, style.font_size, style.direction)
+                        styled_replacements.append(([slot], text))
+                        text = ""
                 page.add_redact_annot(
                     rect,
                     text=text,
-                    fill=(1, 1, 1),
+                    fill=False if in_widget else (1, 1, 1),
                     text_color=(0, 0, 0),
                     fontsize=9,
                     fontname=_redaction_fontname(text),
@@ -707,12 +881,13 @@ def redact_pdf(
                         if add_redaction(slot.rect, original, text):
                             applied.append(slot)
                     if paint_after and applied:
-                        split_aliases.append((applied, replacement))
+                        styled_replacements.append((applied, replacement))
             if claimed_rects:
                 lines = _horizontal_text_chars(page) if fitted_text else []
                 page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-                for slots, alias in split_aliases:
-                    _paint_split_alias(page, slots, alias)
+                run_fonts: dict[str, tuple[str, fitz.Font | None]] = {}
+                for slots, alias in styled_replacements:
+                    _paint_pdf_replacement(page, slots, alias, run_fonts)
             if fitted_text:
                 occupied = claimed_rects + _restoration_obstacles(page)
                 for rect, original, text in fitted_text:
@@ -749,6 +924,8 @@ def redact_pdf(
             restoring=restoring,
         )
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
+        if production:
+            doc.xref_set_key(doc.pdf_catalog(), "AcroForm", "null")
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
             mode.lower().strip() != "production" or strip_urls
