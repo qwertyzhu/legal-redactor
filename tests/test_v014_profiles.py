@@ -243,6 +243,34 @@ def test_judgment_online_pdf_does_not_exempt_noncontiguous_party_prefix(tmp_path
     assert main(["verify", str(out), *flags, "--strict"]) == 0
 
 
+def test_judgment_online_pdf_flags_a_witness_match_crossing_a_kept_name(tmp_path: Path):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "原告：张明华强烈反对。", fontname="china-s")
+        page.insert_text((24, 85), "证人：华强。", fontname="china-s")
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "华强", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 2
+    with fitz.open(out) as doc:
+        text = doc[0].get_text()
+    assert "原告：张明华强烈反对。" in text
+    assert "华某" in text
+    assert main(["verify", str(out), *flags, "--strict"]) == 2
+
+
 def test_publish_still_renames_everyone(tmp_path: Path):
     src = _src(tmp_path, "原告：张测伟，住北京市朝阳区测试路88号。审判长 赵测审\n")
     res = redact_file(src, mode="ai", output_path=tmp_path / "p.md", profile="publish")

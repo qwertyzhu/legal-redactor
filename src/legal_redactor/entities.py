@@ -51,10 +51,8 @@ class RedactionPlan:
                 continue
             seen.add(o)
             uniq.append((o, r))
-        uniq += [
-            (name, name) for name in self.kept_party_names
-            if name not in seen and any(original in name for original in seen)
-        ]
+        if uniq:
+            uniq.extend((name, name) for name in self.kept_party_names if name not in seen)
         uniq.sort(key=lambda p: len(p[0]), reverse=True)
         return uniq
 
