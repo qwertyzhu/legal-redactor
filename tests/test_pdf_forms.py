@@ -145,9 +145,11 @@ def test_production_regenerates_widget_with_stale_word_boundaries(tmp_path: Path
     assert stale not in text
 
 
-def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "lines", [["证据说明确认", "原件已经核验"], ["证据编号", "AB12"]], ids=["cjk", "mixed-cjk-latin"],
+)
+def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path, lines: list[str]) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    lines = ["证据说明确认", "原件已经核验"]
     doc, page, widget_xref = _form()
     with doc:
         font_xref = page.insert_font(fontname="china-s")
