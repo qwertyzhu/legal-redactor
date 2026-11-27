@@ -596,7 +596,8 @@ def _replacement_font_resource(page: "fitz.Page", fontname: str) -> tuple[str, "
     if fontname == "china-s":
         existing = next((font for font in fonts if font[4] == fontname), None)
         if existing is not None and existing[2:] == ("Type0", "Heiti", "china-s", "UniGB-UTF16-H", 0):
-            return fontname, None
+            if existing[0] > 0 or _make_inline_font_indirect(page, fontname):
+                return fontname, None
     used_names = {font[4] for font in fonts}
     for name in (("helv", "Helvetica") if fontname == "helv" else (fontname,)):
         if name not in used_names:
@@ -605,6 +606,29 @@ def _replacement_font_resource(page: "fitz.Page", fontname: str) -> tuple[str, "
     font = fitz.Font(fontname)
     page.insert_font(fontname=name, fontbuffer=font.buffer)
     return name, font
+
+
+def _make_inline_font_indirect(page: "fitz.Page", fontname: str) -> bool:
+    doc = page.parent
+    owner = page.xref
+    path = ""
+    for key in ("Resources", "Font"):
+        path += key
+        kind, value = doc.xref_get_key(owner, path)
+        if kind == "xref":
+            owner = int(value.split()[0])
+            path = ""
+        elif kind == "dict":
+            path += "/"
+        else:
+            return False
+    kind, value = doc.xref_get_key(owner, path + fontname)
+    if kind != "dict":
+        return False
+    xref = doc.get_new_xref()
+    doc.update_object(xref, value)
+    doc.xref_set_key(owner, path + fontname, f"{xref} 0 R")
+    return True
 
 
 def _paint_pdf_replacement(

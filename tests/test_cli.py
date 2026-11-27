@@ -245,8 +245,8 @@ def test_cli_redacts_and_verifies_text_pdf_with_blank_page(tmp_path: Path) -> No
     assert "status: PASS" in verify.stdout
 
 
-@pytest.mark.parametrize("uses_cjk_font", [False, True])
-def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path, uses_cjk_font: bool) -> None:
+@pytest.mark.parametrize("cjk_font", ["none", "indirect", "inline"])
+def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path, cjk_font: str) -> None:
     src = tmp_path / "form.pdf"
     description = "Payment receipt for bank transfer"
     status = "Original verified"
@@ -255,8 +255,14 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path,
     with fitz.open() as pdf:
         page = pdf.new_page()
         page.insert_text((36, 50), "Fictional evidence submission form", fontname="tiro")
-        if uses_cjk_font:
+        if cjk_font != "none":
             page.insert_text((36, 65), "证据", fontname="china-s")
+        if cjk_font == "inline":
+            _, resources = pdf.xref_get_key(page.xref, "Resources")
+            _, font = pdf.xref_get_key(page.xref, "Resources/Font/china-s")
+            resources_xref = int(resources.split()[0])
+            pdf.xref_set_key(resources_xref, "Font/china-s", pdf.xref_object(int(font.split()[0])))
+            assert pdf.xref_get_key(page.xref, "Resources/Font/china-s")[0] == "dict"
         for index, (name, value) in enumerate(
             [("description", description), ("status", status), ("phone", MOBILE), ("hidden", hidden_value)]
         ):
@@ -296,14 +302,14 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path,
         page = pdf[0]
         assert list(page.widgets()) == []
         for resource in re.findall(rb"/([\w-]+)\s+[\d.]+\s+Tf\b", page.read_contents()):
-            assert pdf.xref_get_key(page.xref, f"Resources/Font/{resource.decode()}")[0] == "xref", resource
+            assert pdf.xref_get_key(page.xref, f"Resources/Font/{resource.decode()}")[0] in {"xref", "dict"}, resource
         text = page.get_text()
         assert MOBILE not in text
         assert "[手机号]" in "".join(text.split())
         assert description in text
         assert status in text
         assert hidden_value not in text
-        if uses_cjk_font:
+        if cjk_font != "none":
             assert "证据" in text
         assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
         placeholder = next(
