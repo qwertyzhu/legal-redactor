@@ -206,12 +206,14 @@ def _page_char_index(page: "fitz.Page") -> _CharIndex:
     return "".join(parts), rects, rows, line_info, text_style
 
 
-def _short_name_is_local(
+def _name_is_local(
     rects: list["fitz.Rect"],
     rows: list[int],
     line_info: list[tuple[float, float, int]],
     start: int,
     end: int,
+    *,
+    allow_aligned_blocks: bool = False,
 ) -> bool:
     for i in range(start + 1, end):
         prev, curr = rects[i - 1], rects[i]
@@ -229,10 +231,11 @@ def _short_name_is_local(
             if max(prev_left, curr_left) >= min(prev_right, curr_right):
                 return False
             indent = abs(curr_left - prev_left)
-            if prev_block != curr_block and not (
-                width < indent <= 2 * width and gap <= 1.5 * height and curr_left <= prev.x0
-            ):
-                return False
+            if prev_block != curr_block:
+                hanging = width < indent <= 2 * width and curr_left <= prev.x0
+                aligned = allow_aligned_blocks and indent <= 0.5
+                if gap > 1.5 * height or not (hanging or aligned):
+                    return False
     return True
 
 
@@ -241,7 +244,7 @@ def _wrapped_rects(
     original: str,
     *,
     allow_single_line: bool = False,
-    require_local: bool = False,
+    kept_name: bool = False,
 ) -> list[list[_NameRect]]:
     """Rects for occurrences of `original` split by whitespace or line breaks.
 
@@ -256,8 +259,8 @@ def _wrapped_rects(
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
-        if not (short_name or require_local) or _short_name_is_local(
-            rects, rows, line_info, start, start + len(target)
+        if not (short_name or kept_name) or _name_is_local(
+            rects, rows, line_info, start, start + len(target), allow_aligned_blocks=kept_name
         ):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
@@ -279,7 +282,7 @@ def _wrapped_rects(
 def _kept_name_rects(page: "fitz.Page", index: _CharIndex, name: str) -> list["fitz.Rect"]:
     return page.search_for(name) + [
         slot.rect
-        for match in _wrapped_rects(index, name, allow_single_line=True, require_local=True)
+        for match in _wrapped_rects(index, name, allow_single_line=True, kept_name=True)
         for slot in match
     ]
 
