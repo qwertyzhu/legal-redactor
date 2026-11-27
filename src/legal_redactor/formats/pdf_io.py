@@ -147,26 +147,31 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
 
 
 def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
+    if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
+        return False
     value = (widget.field_value or "").split()
 
     def matches_value() -> bool:
         return widget._annot.get_textpage().extractText().split() == value
 
-    if matches_value():
-        return True
-    font = widget.text_font
-    if font and font.lower() not in ("cour", "helv", "tiro", "zadb"):
-        _, base_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
-        if base_font not in _WIDGET_FONTS:
-            return False
-        widget.text_font = _WIDGET_FONTS[base_font]
-    widget.update()
-    if matches_value():
-        return True
-    if widget.text_fontsize:
-        widget.text_fontsize = 0
+    try:
+        if matches_value():
+            return True
+        font = widget.text_font
+        if font and font.lower() not in ("cour", "helv", "tiro", "zadb"):
+            _, base_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
+            if base_font not in _WIDGET_FONTS:
+                return False
+            widget.text_font = _WIDGET_FONTS[base_font]
         widget.update()
-        return matches_value()
+        if matches_value():
+            return True
+        if widget.text_fontsize:
+            widget.text_fontsize = 0
+            widget.update()
+            return matches_value()
+    except (ValueError, RuntimeError, fitz.mupdf.FzErrorBase):
+        return False
     return False
 
 
@@ -197,8 +202,11 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
                 page.delete_widget(widget)
                 passwords += 1
             else:
-                if (regenerate and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
-                        and not _ensure_current_widget_appearance(doc, widget)):
+                if (
+                    regenerate
+                    and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
+                    and not _ensure_current_widget_appearance(doc, widget)
+                ):
                     page.delete_widget(widget)
                     failed_appearances += 1
                     continue

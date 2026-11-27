@@ -128,3 +128,22 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
         assert [(span["text"], span["font"]) for span in spans] == [(value, "Courier")]
         if not stale_appearance:
             assert spans[0]["size"] == pytest.approx(12)
+
+
+@pytest.mark.parametrize(("key", "value"), [("T", "null"), ("Rect", "[24 220 24 220]")])
+def test_production_drops_malformed_widgets_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    doc, _, widget_xref = _form()
+    with doc:
+        doc.xref_set_key(widget_xref, key, value)
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("Current evidence value"))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    warnings: list[str] = []
+    text = redact_pdf(src, out, [], warnings=warnings, mode="production")
+
+    assert "Fictional evidence" in text
+    assert "Earlier evidence value" not in text
+    assert "Current evidence value" not in text
+    assert "pdf: 1 form field(s) removed (appearance could not be regenerated)" in warnings
