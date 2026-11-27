@@ -153,7 +153,7 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
     if appearance_kind == "xref":
         appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
     regenerate = appearance_value == "true"
-    flattened = hidden = 0
+    flattened = hidden = passwords = 0
     for page in doc:
         for widget in list(page.widgets() or []):
             kind, flags = doc.xref_get_key(widget.xref, "F")
@@ -162,6 +162,12 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
             if flags.lstrip("+-").isdecimal() and int(flags) & _HIDDEN_WIDGET_FLAGS:
                 page.delete_widget(widget)
                 hidden += 1
+            elif (
+                widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
+                and widget.field_flags & fitz.PDF_TX_FIELD_IS_PASSWORD
+            ):
+                page.delete_widget(widget)
+                passwords += 1
             else:
                 if regenerate and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
                     widget.update()
@@ -175,6 +181,8 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
             warnings.append(f"pdf: {flattened} form field(s) flattened")
         if hidden:
             warnings.append(f"pdf: {hidden} hidden form field(s) removed")
+        if passwords:
+            warnings.append(f"pdf: {passwords} password form field(s) removed")
     return fields
 
 

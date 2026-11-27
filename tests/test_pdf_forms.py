@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pymupdf as fitz
+import pytest
 
 from legal_redactor.formats.pdf_io import redact_pdf
 from legal_redactor.pipeline import redact_file
@@ -34,6 +35,25 @@ def test_production_does_not_flatten_indirectly_hidden_widget(tmp_path: Path) ->
     text = redact_pdf(src, out, [], mode="production")
 
     assert "Earlier evidence value" not in text
+
+
+@pytest.mark.parametrize("need_appearances", [False, True])
+def test_production_does_not_flatten_password_widgets(tmp_path: Path, need_appearances: bool) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    doc, _, widget_xref = _form()
+    with doc:
+        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_PASSWORD))
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("Fictional secret"))
+        if need_appearances:
+            doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    warnings: list[str] = []
+    text = redact_pdf(src, out, [], warnings=warnings, mode="production")
+
+    assert "Fictional secret" not in text
+    assert "Earlier evidence value" not in text
+    assert "pdf: 1 password form field(s) removed" in warnings
 
 
 def test_production_keeps_evidence_image_with_inherited_page_resources(tmp_path: Path) -> None:
