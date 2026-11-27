@@ -12,7 +12,7 @@ from urllib.parse import unquote
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
-from ..patterns import DEFAULT_PLACEHOLDERS, detect_structural
+from ..patterns import DEFAULT_PLACEHOLDERS, PatternHit, detect_structural
 from . import FIELD_BOUNDARY, _replacement_for_hit, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
@@ -20,6 +20,7 @@ _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryptio
 _STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
 _PHONE_CATEGORIES = frozenset({"mobile", "landline"})
 _HIDDEN_PHONE_TOKEN = re.compile(r"\[PDF(?:手机号|电话)[0-9]+\]")
+_CN_MOBILE_AFTER_COUNTRY_CODE = re.compile(r"(?<=\+86)1[3-9][0-9]{9}(?!\d)")
 _INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
@@ -188,6 +189,21 @@ def _next_hidden_phone_token(category: str, taken: set[str], counter: count) -> 
     return token
 
 
+def _structural_hits_with_mobile_copies(text: str, *, include_mobile_copies: bool) -> list[PatternHit]:
+    hits = detect_structural(text)
+    if not include_mobile_copies:
+        return hits
+    mobiles = {hit.text for hit in hits if hit.category == "mobile" and hit.auto_replace}
+    if not mobiles:
+        return hits
+    copies = [
+        PatternHit("mobile", match[0], match.start(), match.end())
+        for match in _CN_MOBILE_AFTER_COUNTRY_CODE.finditer(text)
+        if match[0] in mobiles and not any(hit.start < match.end() and hit.end > match.start() for hit in hits)
+    ]
+    return sorted([*hits, *copies], key=lambda hit: hit.start)
+
+
 def _scrub_struct_text(
     doc: "fitz.Document",
     mapping: list[tuple[str, str]],
@@ -246,7 +262,9 @@ def _scrub_struct_text(
         if capture_hidden_phones is not None and hidden_phone_categories:
             parts: list[str] = []
             last = 0
-            for hit in detect_structural(redacted):
+            for hit in _structural_hits_with_mobile_copies(
+                redacted, include_mobile_copies="mobile" in hidden_phone_categories,
+            ):
                 if hit.category not in scrub_categories or hit.category == "url" or not hit.auto_replace:
                     continue
                 if hit.category in hidden_phone_categories:
