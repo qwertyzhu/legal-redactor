@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
@@ -16,6 +17,10 @@ _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "sub
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
+_PDF_SEARCH_FLAGS = (
+    fitz.TEXT_DEHYPHENATE | fitz.TEXT_PRESERVE_WHITESPACE
+    | fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_MEDIABOX_CLIP
+)
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
 _TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
@@ -402,6 +407,15 @@ def _insert_fitted_text(
     occupied.append(fitz.Rect(rect.x0, rect.y0, rect.x0 + fitted_width, rect.y1))
 
 
+def _searchable_digits(text_page: fitz.TextPage) -> str | None:
+    text = text_page.extractText()
+    if not text.isascii() and any(unicodedata.category(char) == "Cn" for char in text):
+        return None
+    # A superset of native digit matches, allowing compatibility digits and
+    # matches spanning any separators without having to reproduce MuPDF search.
+    return re.sub(r"[^0-9]", "", unicodedata.normalize("NFKD", text))
+
+
 def redact_pdf(
     input_path: Path,
     output_path: Path,
@@ -416,7 +430,8 @@ def redact_pdf(
     fit_replacements: bool = False,
 ) -> str:
     warn = warnings if warnings is not None else []
-    ordered_mapping = sorted(mapping, key=lambda p: len(p[0]), reverse=True)
+    ordered_mapping = sorted((pair for pair in mapping if pair[0]), key=lambda p: len(p[0]), reverse=True)
+    digit_targets = {original for original, _ in ordered_mapping if original.isascii() and original.isdecimal()}
     doc = fitz.open(str(input_path))
     try:
         if not _has_text_layer(doc):
@@ -432,6 +447,8 @@ def redact_pdf(
             split_aliases: list[tuple[list[_NameRect], str]] = []
             fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: _CharIndex | None = None
+            search_page = page.get_textpage(flags=_PDF_SEARCH_FLAGS) if ordered_mapping else None
+            digits = _searchable_digits(search_page) if search_page is not None and digit_targets else None
 
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
                 if _overlaps_claimed(rect, claimed_rects):
@@ -451,9 +468,11 @@ def redact_pdf(
                 return True
 
             for original, replacement in ordered_mapping:
-                if not original:
-                    continue
-                rects = page.search_for(original)
+                rects = (
+                    page.search_for(original, textpage=search_page)
+                    if digits is None or original not in digit_targets or original in digits
+                    else []
+                )
                 for rect in rects:
                     add_redaction(rect, original, replacement)
                 # search_for misses names split by spaces or line breaks.
