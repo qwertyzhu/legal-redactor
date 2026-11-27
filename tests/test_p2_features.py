@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pymupdf as fitz
 import pytest
@@ -247,6 +249,55 @@ def test_revisions_extract_views(tmp_path: Path):
     assert "13912345678" in docx_io.extract_text(src, revisions="reject")
     both = docx_io.extract_text(src, revisions="keep-and-redact")
     assert "13912345678" in both and "13800138000" in both
+
+
+def test_docx_revision_warning_isolated_between_redactions(tmp_path: Path, monkeypatch):
+    revision_src = tmp_path / "revision.docx"
+    revision_out = tmp_path / "revision.redacted.docx"
+    _revision_docx(revision_src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps([{"original": "13912345678\n13800138000", "replacement": "[masked]"}]),
+        encoding="utf-8",
+    )
+    plain_src = tmp_path / "plain.docx"
+    docx_io.create_sample_docx(plain_src, "联系电话 13700001111")
+
+    revision_written = Event()
+    resume_revision = Event()
+    writestr = zipfile.ZipFile.writestr
+
+    def pause_after_revision_xml(archive, zinfo_or_arcname, *args, **kwargs):
+        writestr(archive, zinfo_or_arcname, *args, **kwargs)
+        part = getattr(zinfo_or_arcname, "filename", zinfo_or_arcname)
+        if archive.filename == str(revision_out) and part == "word/document.xml":
+            # The split was detected, but the redaction hasn't reported its warnings yet.
+            revision_written.set()
+            assert resume_revision.wait(timeout=10)
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", pause_after_revision_xml)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        revision_job = executor.submit(
+            redact_file,
+            revision_src,
+            mode="ai",
+            output_path=revision_out,
+            entities_path=entities,
+            revisions="keep-and-redact",
+        )
+        try:
+            assert revision_written.wait(timeout=10)
+            plain_result = redact_file(plain_src, mode="ai", output_path=tmp_path / "plain.redacted.docx")
+        finally:
+            resume_revision.set()
+        revision_result = revision_job.result(timeout=10)
+
+    split_warning = (
+        "keep-and-redact: entity spans a tracked-change boundary in "
+        "1 paragraph(s); not collapsed — check residual report"
+    )
+    assert (revision_result.warnings, plain_result.warnings) == ([split_warning], [])
+    assert "13700001111" not in docx_io.extract_text(plain_result.output_path)
 
 
 def test_doctor_cli(capsys):
