@@ -3,6 +3,7 @@ from pathlib import Path
 import pymupdf as fitz
 
 from legal_redactor.formats.pdf_io import redact_pdf
+from legal_redactor.pipeline import redact_file
 
 
 def _form() -> tuple[fitz.Document, fitz.Page, int]:
@@ -55,3 +56,28 @@ def test_production_keeps_evidence_image_with_inherited_page_resources(tmp_path:
 
     with fitz.open(out) as output:
         assert output[0].get_pixmap().pixel(50, 150) == (90, 90, 90)
+
+
+def test_production_redacts_current_widget_value_when_appearance_is_stale(tmp_path: Path) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    phone = "13900001111"
+    value = f"Current evidence value: {phone}"
+    doc, _, widget_xref = _form()
+    with doc:
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+    with fitz.open(src) as original:
+        page = original[0]
+        assert next(page.widgets()).field_value == value
+        assert "Earlier evidence value" in page.get_text()
+
+    result = redact_file(src, "production", out, work_dir=tmp_path)
+
+    assert result.ok
+    with fitz.open(out) as output:
+        text = output[0].get_text()
+        assert text.count("Current evidence value:") == 1
+        assert "[手机号]" in "".join(text.split())
+        assert phone not in text
+        assert "Earlier evidence value" not in text

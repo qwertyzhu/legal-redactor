@@ -149,6 +149,10 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
     fields: dict[int, list[fitz.Rect]] = {}
     if not doc.is_form_pdf:
         return fields
+    appearance_kind, appearance_value = doc.xref_get_key(doc.pdf_catalog(), "AcroForm/NeedAppearances")
+    if appearance_kind == "xref":
+        appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
+    regenerate = appearance_value == "true"
     flattened = hidden = 0
     for page in doc:
         for widget in list(page.widgets() or []):
@@ -159,6 +163,8 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
                 page.delete_widget(widget)
                 hidden += 1
             else:
+                if regenerate and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT:
+                    widget.update()
                 flattened += 1
                 fields.setdefault(page.number, []).append(widget.rect)
         if page.annot_xrefs():
