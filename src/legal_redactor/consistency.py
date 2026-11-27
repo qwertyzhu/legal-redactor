@@ -586,11 +586,12 @@ def unify_from_ledgers(
     *,
     mode: str = "ai",
 ) -> ConsistencyReport:
-    """Merge already-written *.ledger.json files (post-batch check)."""
+    """Merge already-written plain and encrypted per-file ledgers."""
     ledger_dir = Path(ledger_dir)
-    ledgers = list(ledger_dir.glob("*.ledger.json"))
+    patterns = ("*.ledger.json", "*.ledger.json.enc")
+    ledgers = [path for pattern in patterns for path in ledger_dir.glob(pattern)]
     if not ledgers:
-        ledgers = list(ledger_dir.rglob("*.ledger.json"))
+        ledgers = [path for pattern in patterns for path in ledger_dir.rglob(pattern)]
     return unify_ledger_paths(ledgers, output_dir, mode=mode)
 
 
