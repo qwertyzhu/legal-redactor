@@ -137,6 +137,33 @@ def test_pdf_substring_mapping_does_not_double_paint(tmp_path: Path):
     assert txt.count("某单位B") == 1
 
 
+def test_pdf_skips_off_page_phone_searches_but_redacts_wrapped_phone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    src = tmp_path / "phones.pdf"
+    out = tmp_path / "redacted.pdf"
+    first, second = "13800001234", "13900001235"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), first)
+        doc.new_page().insert_text((72, 72), f"{second[:5]}\n{second[5:]}")
+        doc.save(src)
+
+    calls = []
+    search_for = fitz.Page.search_for
+
+    def trace_search(page, original, *args, **kwargs):
+        calls.append((page.number, original))
+        return search_for(page, original, *args, **kwargs)
+
+    monkeypatch.setattr(fitz.Page, "search_for", trace_search)
+    pdf_io.redact_pdf(src, out, [(first, "A"), (second, "B")])
+
+    assert calls == [(0, first), (1, second)]
+    with fitz.open(out) as doc:
+        assert doc[0].get_text().strip() == "A"
+        assert doc[1].get_text().strip() == "B"
+
+
 def test_sandwich_pdf_refused_in_ai_mode_and_warned_in_production(tmp_path: Path):
     # Create a sandwich PDF: full-page raster image + hidden/overlay text layer
     raw_doc = fitz.open()
