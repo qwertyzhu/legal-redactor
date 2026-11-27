@@ -161,7 +161,7 @@ def _add_obs(
         obs.role = role
     if replacement and replacement not in obs.replacements_seen:
         obs.replacements_seen.append(replacement)
-    if abbr_of and category == obs.category and not obs.abbr_of:
+    if abbr_of and not obs.abbr_of:
         obs.abbr_of = abbr_of
 
 
@@ -305,13 +305,13 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
             for r in obs.replacements_seen:
                 if r not in existing.replacements_seen:
                     existing.replacements_seen.append(r)
+            if obs.abbr_of and not existing.abbr_of:
+                existing.abbr_of = obs.abbr_of
             if existing.category in {"other", "unknown"} and obs.category not in {
                 "other",
                 "unknown",
             }:
                 existing.category = obs.category
-            if obs.abbr_of and obs.category == existing.category and not existing.abbr_of:
-                existing.abbr_of = obs.abbr_of
             if existing.role in {"unknown", "other"} and obs.role not in {"unknown", "other"}:
                 existing.role = obs.role
             # Prefer non-suspect source labels when merging
