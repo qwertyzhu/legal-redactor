@@ -130,6 +130,39 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
             assert spans[0]["size"] == pytest.approx(12)
 
 
+@pytest.mark.parametrize(("width", "height", "da_size"), [(276, 30, 0), (276, 30, 8), (80, 90, 12), (276, 8, 12)])
+def test_production_fits_multiline_widget_value(tmp_path: Path, width: int, height: int, da_size: int) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    lines = ["First evidence line", "Second evidence line", "Third evidence line"]
+    if width == 80:
+        lines[-1] = "FictionalEvidenceReference"
+    doc, _, widget_xref = _form()
+    with doc:
+        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
+        doc.xref_set_key(widget_xref, "Rect", f"[24 {220 - height} {24 + width} 220]")
+        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str(f"/Helv {da_size} Tf 0 g"))
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("\n".join(lines)))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    warnings: list[str] = []
+    text = redact_pdf(src, out, [], mode="production", warnings=warnings)
+
+    assert "Earlier evidence value" not in text
+    if height == 8:
+        assert text.splitlines() == ["Fictional evidence"]
+        assert "pdf: 1 form field(s) removed (appearance could not be regenerated)" in warnings
+    else:
+        assert text.splitlines() == ["Fictional evidence", *lines]
+        with fitz.open(out) as output:
+            spans = [
+                span for block in output[0].get_text("dict")["blocks"]
+                for line in block.get("lines", ()) for span in line["spans"] if span["text"] in lines
+            ]
+            assert len(spans) == len(lines)
+            assert all(4 <= span["size"] <= (da_size or 12) for span in spans)
+
+
 def test_production_keeps_multiline_cjk_widget_value(tmp_path: Path) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
     lines = ["证据说明确认", "原件已经核验"]

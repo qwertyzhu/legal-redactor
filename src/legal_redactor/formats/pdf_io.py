@@ -149,6 +149,43 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
             return
 
 
+def _multiline_widget_fontsize(widget: fitz.Widget, value: str) -> float | None:
+    width, height = widget.rect.width, widget.rect.height
+    inset = 2 * max(0, widget.border_width or 0)
+    box = fitz.Rect(inset, inset, width - inset, height - inset)
+    if box.is_empty:
+        return None
+
+    fontname = (widget.text_font or "Helv").lower()
+    font = fitz.Font(fontname)
+    max_size = widget.text_fontsize if widget.text_fontsize > 0 else 12
+    min_size = min(max_size, 4)
+    # The textbox can split a long word that the widget appearance would clip.
+    word_width = max((font.text_length(word, fontsize=1) for word in value.split()), default=0)
+    if word_width:
+        max_size = min(max_size, box.width / word_width)
+    if max_size < min_size:
+        return None
+
+    with fitz.open() as scratch:
+        page = scratch.new_page(width=width, height=height)
+
+        def fits(size: float) -> bool:
+            return page.insert_textbox(box, value, fontname=fontname, fontsize=size) >= 0
+
+        if fits(max_size):
+            return max_size
+        if not fits(min_size):
+            return None
+        while max_size - min_size > 0.25:
+            size = (min_size + max_size) / 2
+            if fits(size):
+                min_size = size
+            else:
+                max_size = size
+        return min_size
+
+
 def _regenerate_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
     if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
         return False
@@ -161,7 +198,14 @@ def _regenerate_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bo
                 _, resource_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
                 base_font = fitz.Base14_fontdict.get(resource_font.lstrip("/").lower())
             widget.text_font = _WIDGET_FONT_FAMILIES[base_font.split("-", 1)[0]] if base_font else "Helv"
-        widget.text_fontsize = 0
+        value = widget.field_value or ""
+        size = (
+            _multiline_widget_fontsize(widget, value)
+            if value and widget.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE else 0
+        )
+        if size is None:
+            return False
+        widget.text_fontsize = size
         widget.update()
     except (ValueError, RuntimeError, fitz.mupdf.FzErrorBase):
         return False
