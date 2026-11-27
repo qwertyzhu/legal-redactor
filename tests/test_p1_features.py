@@ -15,7 +15,7 @@ import pytest
 
 from legal_redactor.cli import main
 from legal_redactor.formats import docx_io, pdf_io
-from legal_redactor.ledger_store import load_ledger, restore_text
+from legal_redactor.ledger_store import load_ledger, restore_text, write_ledger_payload
 from legal_redactor.pipeline import redact_file
 from legal_redactor.profiles_loader import list_profiles, load_profile
 
@@ -281,6 +281,23 @@ def test_ledger_encrypt_without_password_errors(tmp_path: Path):
     pytest.importorskip("cryptography")
     with pytest.raises(RuntimeError, match="LEGAL_REDACTOR_LEDGER_PASS"):
         redact_file(_src(tmp_path), mode="ai", output_path=tmp_path / "x.md", ledger_encrypt=True)
+
+
+@pytest.mark.parametrize("name", ["ledger.json", "a.ledger.json"])
+def test_ledger_plaintext_rewrite_removes_encrypted_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-pass")
+    path = tmp_path / name
+    encrypted = write_ledger_payload(path, {"entities": []}, encrypt=True)
+    assert encrypted.is_file()
+    monkeypatch.delenv("LEGAL_REDACTOR_LEDGER_PASS")
+
+    payload = {"entities": [{"original": "fictional entity"}]}
+    assert write_ledger_payload(path, payload) == path
+    assert not encrypted.exists()
+    assert load_ledger(path) == payload
 
 
 # 9. profiles ----------------------------------------------------------------

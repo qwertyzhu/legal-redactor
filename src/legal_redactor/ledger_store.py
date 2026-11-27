@@ -63,10 +63,11 @@ def write_ledger_payload(path: Path, payload: dict[str, Any], *, encrypt: bool =
     path.parent.mkdir(parents=True, exist_ok=True)
     _chmod_private(path.parent)
     raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    if path.name == LEDGER_FILENAME or not path.suffix:
+        enc_path = path.parent / ENCRYPTED_FILENAME
+    else:
+        enc_path = path.with_suffix(path.suffix + ".enc")
     if encrypt:
-        enc_path = path.with_suffix(path.suffix + ".enc") if path.suffix else path.parent / ENCRYPTED_FILENAME
-        if path.name == LEDGER_FILENAME:
-            enc_path = path.parent / ENCRYPTED_FILENAME
         _write_encrypted(enc_path, raw)
         _chmod_private(enc_path)
         # Do not leave plaintext beside encrypted copy
@@ -78,6 +79,7 @@ def write_ledger_payload(path: Path, payload: dict[str, Any], *, encrypt: bool =
         return enc_path
     path.write_bytes(raw)
     _chmod_private(path)
+    enc_path.unlink(missing_ok=True)
     return path
 
 
