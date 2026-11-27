@@ -130,7 +130,9 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
     for page in doc:
         for widget in list(page.widgets() or []):
             kind, flags = doc.xref_get_key(widget.xref, "F")
-            if kind == "int" and int(flags) & _HIDDEN_WIDGET_FLAGS:
+            if kind == "xref":
+                flags = doc.xref_object(int(flags.split()[0])).strip()
+            if flags.lstrip("+-").isdecimal() and int(flags) & _HIDDEN_WIDGET_FLAGS:
                 page.delete_widget(widget)
                 hidden += 1
             else:
