@@ -58,14 +58,17 @@ def _struct_text_fields(doc: fitz.Document) -> list[tuple[int, str, str]]:
         if xref in seen:
             continue
         seen.add(xref)
-        for key in _STRUCT_TEXT_KEYS:
-            kind, value = doc.xref_get_key(xref, key)
-            if kind == "string" and value.strip():
-                fields.append((xref, key, value))
-        kind, kids = doc.xref_get_key(xref, "K")
-        if kind in ("xref", "array"):
-            # Inline marked-content / object references point at pages and annotations, not children.
-            pending.extend(int(num) for num in _INDIRECT_REF.findall(re.sub(r"<<.*?>>", "", kids)))
+        kids = doc.xref_object(xref, compressed=True)
+        if not kids.startswith("["):
+            for key in _STRUCT_TEXT_KEYS:
+                kind, value = doc.xref_get_key(xref, key)
+                if kind == "string" and value.strip():
+                    fields.append((xref, key, value))
+            kind, kids = doc.xref_get_key(xref, "K")
+            if kind not in ("xref", "array"):
+                continue
+        # Inline marked-content / object references point at pages and annotations, not children.
+        pending.extend(int(num) for num in _INDIRECT_REF.findall(re.sub(r"<<.*?>>", "", kids)))
     return fields
 
 

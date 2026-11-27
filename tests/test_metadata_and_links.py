@@ -534,3 +534,22 @@ def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):
     src = tmp_path / "sparse.pdf"
     src.write_bytes(body + xref.encode() + trailer.encode())
     assert main(["verify", str(src), "--mode", "ai", "--strict"]) == 2
+
+
+def test_pdf_structure_tree_text_under_indirect_kids_array(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "indirect.pdf",
+        body="Contact phone 13900001111",
+        alt="Bank transfer receipt for caller 13900001111",
+        actual_text="Transfer receipt",
+    )
+    with fitz.open(str(src)) as doc:
+        root = int(doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")[1].split()[0])
+        kids = doc.get_new_xref()
+        doc.update_object(kids, doc.xref_get_key(root, "K")[1])
+        doc.xref_set_key(root, "K", f"{kids} 0 R")
+        doc.save(str(tmp_path / "indirect-kids.pdf"))
+    out = tmp_path / "indirect.out.pdf"
+    redact_file(tmp_path / "indirect-kids.pdf", mode="ai", output_path=out)
+    assert "Bank transfer receipt for caller [手机号]" in _structure_strings(out)
+    assert main(["verify", str(tmp_path / "indirect-kids.pdf"), "--mode", "ai", "--strict"]) == 2
