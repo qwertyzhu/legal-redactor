@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from itertools import groupby
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -479,9 +480,16 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
 
 
 def _paint_pdf_replacement(page: "fitz.Page", rects: list[_NameRect], alias: str) -> None:
-    lines = alias.splitlines()
+    lines = []
+    for line in alias.splitlines():
+        runs = []
+        for ascii_run, chars in groupby(line, key=str.isascii):
+            text = "".join(chars)
+            run_font = "helv" if ascii_run else "china-s"
+            runs.append((text, run_font, fitz.get_text_length(text, fontname=run_font, fontsize=1)))
+        lines.append(runs)
     fontname = _redaction_fontname(alias)
-    width = max((fitz.get_text_length(line, fontname=fontname, fontsize=1) for line in lines), default=0)
+    width = max((sum(run[2] for run in line) for line in lines), default=0)
     if not width:
         return
     font = fitz.Font(fontname=fontname)
@@ -506,7 +514,18 @@ def _paint_pdf_replacement(page: "fitz.Page", rects: list[_NameRect], alias: str
 
     font_size, origin, rotation = max(map(layout, rects), key=lambda placement: placement[0])
     if font_size > 0:
-        page.insert_text(origin, lines, fontsize=font_size, lineheight=lineheight, fontname=fontname, rotate=rotation)
+        shape = page.new_shape()
+        matrix = fitz.Matrix(-rotation)
+        advance = fitz.Point(font_size, 0) * matrix
+        line_step = fitz.Point(0, font_size * lineheight) * matrix
+        start = fitz.Point(origin)
+        for line in lines:
+            offset = 0.0
+            for text, run_font, run_width in line:
+                shape.insert_text(start + advance * offset, text, fontsize=font_size, fontname=run_font, rotate=rotation)
+                offset += run_width
+            start += line_step
+        shape.commit()
 
 
 def _restoration_obstacles(page: fitz.Page) -> list[fitz.Rect]:

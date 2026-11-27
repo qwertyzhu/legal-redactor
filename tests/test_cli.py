@@ -290,11 +290,24 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
         assert hidden_value not in text
         assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
         placeholder = next(
-            span for block in page.get_text("dict")["blocks"] for line in block["lines"]
-            for span in line["spans"] if "".join(span["text"].split()) == "[手机号]"
+            line["spans"] for block in page.get_text("rawdict")["blocks"] for line in block["lines"]
+            if "".join(c["c"] for span in line["spans"] for c in span["chars"] if not c["c"].isspace()) == "[手机号]"
         )
-        assert placeholder["size"] == pytest.approx(original_phone["size"], abs=0.01)
-        assert placeholder["origin"] == pytest.approx(original_phone["origin"], abs=0.01)
+        assert placeholder[0]["origin"] == pytest.approx(original_phone["origin"], abs=0.01)
+        for span in placeholder:
+            assert span["size"] == pytest.approx(original_phone["size"], abs=0.01)
+            assert span["origin"][1] == pytest.approx(original_phone["origin"][1], abs=0.01)
+
+        def ink_bounds(char: dict) -> tuple[int, int]:
+            pixels = page.get_pixmap(matrix=fitz.Matrix(6, 6), clip=fitz.Rect(char["bbox"]), colorspace=fitz.csGRAY)
+            samples = pixels.samples
+            ink = [pixels.x + x for x in range(pixels.width) if min(samples[x::pixels.stride]) < 128]
+            return ink[0], ink[-1]
+
+        opening, first, _, last, closing = [
+            ink_bounds(c) for span in placeholder for c in span["chars"] if not c["c"].isspace()
+        ]
+        assert (first[0] - opening[1]) / 6 == pytest.approx((closing[0] - last[1]) / 6, abs=1.5)
         phone_field = next(widget.rect for widget in source[0].widgets() if widget.field_name == "phone")
         assert [
             drawing["fill"] for drawing in page.get_drawings()
