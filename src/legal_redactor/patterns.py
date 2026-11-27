@@ -41,7 +41,9 @@ _LABELED_ACCOUNT = re.compile(
     r"\s*(?:[：:]|为|是)?\s*([0-9][0-9 \u3000-]{6,32}[0-9])"
 )
 # Landline, including a space inside the subscriber number: 010-1234 5678
-_LANDLINE = re.compile(r"(?<!\d)0\d{2,3}(?:[\s\u3000-]*\d){7,8}(?!\d)")
+_LANDLINE = re.compile(
+    r"(?<!\d)0\d{2,3}(?:[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000-]*\d){7,8}(?!\d)"
+)
 # 400 / 800 service numbers, with or without separators
 _HOTLINE = re.compile(r"(?<!\d)[48]00(?:[\s\u3000-]*\d){7}(?!\d)")
 # Email. Chinese labels like 邮箱 are word chars in Python re, so \b fails for
