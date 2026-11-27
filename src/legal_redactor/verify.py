@@ -76,6 +76,7 @@ def unreplaced_originals(
     *,
     join_lines: bool = False,
     pdf_path: Path | None = None,
+    pdf_hidden_text: str = "",
 ) -> list[str]:
     """Planned originals that survived into the output — a definite leak."""
     replacements = "\n".join(r for o, r in mapping if o != r)
@@ -95,7 +96,9 @@ def unreplaced_originals(
     joined = output_text.replace("\n", "")
     return [
         o for o in originals
-        if o in split_matches or (o not in checked_by_layout and _has_unprotected_occurrence(
+        if o in split_matches
+        or _has_unprotected_occurrence(pdf_hidden_text, o, kept_names)
+        or (o not in checked_by_layout and _has_unprotected_occurrence(
             output_text if o in short else joined, o, kept_names
         ))
     ]

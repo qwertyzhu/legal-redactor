@@ -431,6 +431,7 @@ def redact_file(
             output_text,
             mapping,
             pdf_path=output_path if input_path.suffix.lower() == ".pdf" else None,
+            pdf_hidden_text=hidden_output,
         ),
     )
     _add_image_pii(residual, image_pii)
@@ -771,16 +772,15 @@ def verify_file(
     else:
         text = text_io.extract_text(path)
     hidden = _extract_hidden(path)
-    if hidden:
-        text = f"{text}{FIELD_BOUNDARY}{hidden}" if text else hidden
+    verify_text = f"{text}{FIELD_BOUNDARY}{hidden}" if text and hidden else text or hidden
 
     report = scan_residual(
-        text, mode=mode, nl=True, keep_categories=keep_categories,
+        verify_text, mode=mode, nl=True, keep_categories=keep_categories,
         extra_categories=extra_categories, only_categories=only_categories, **scan_options,
     )
     if suffix == ".pdf" and entities_path is not None and not scan_pages:
         plan = build_plan(
-            text,
+            verify_text,
             mode=mode,
             entities_file=entities_path,
             allowlist=scan_options.get("allowlist"),
@@ -788,7 +788,9 @@ def verify_file(
             alias_style=alias_style,
         )
         short_names = [(o, r) for o, r in plan.mapping() if o == r or pdf_io.is_short_cjk_name(o)]
-        add_unreplaced(report, unreplaced_originals(text, short_names, pdf_path=path))
+        add_unreplaced(
+            report, unreplaced_originals(text, short_names, pdf_path=path, pdf_hidden_text=hidden)
+        )
     elif suffix == ".docx":
         _, image_pii = docx_io.scan_media(
             path,

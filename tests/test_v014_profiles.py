@@ -174,6 +174,33 @@ def test_judgment_online_pdf_does_not_protect_a_name_across_unrelated_blocks(tmp
     assert "华强" in text
 
 
+def test_judgment_online_pdf_verify_checks_hidden_overlapping_witness_name(tmp_path: Path):
+    src = tmp_path / "judgment.pdf"
+    with fitz.open() as doc:
+        page = doc.new_page()
+        page.insert_text((24, 40), "原告：张明华。", fontname="china-s")
+        doc.set_metadata({"title": "原告：张明华。证人：张明。"})
+        doc.save(src)
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    flags = ["--profile", "judgment-online", "--entities", str(entities)]
+    assert main(["verify", str(src), *flags, "--strict"]) == 2
+    out = tmp_path / "redacted.pdf"
+    assert main(["redact", str(src), *flags, "-o", str(out)]) == 0
+    with fitz.open(out) as doc:
+        assert doc.metadata["title"] == ""
+    assert main(["verify", str(out), *flags, "--strict"]) == 0
+
+
 def test_publish_still_renames_everyone(tmp_path: Path):
     src = _src(tmp_path, "原告：张测伟，住北京市朝阳区测试路88号。审判长 赵测审\n")
     res = redact_file(src, mode="ai", output_path=tmp_path / "p.md", profile="publish")
