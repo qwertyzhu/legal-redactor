@@ -302,7 +302,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "unify",
         help="为目录生成跨文件 entities.consistent.json 与一致性报告",
     )
-    pu.add_argument("input", type=Path, help="源文书目录，或 *.ledger.json 所在目录")
+    pu.add_argument("input", type=Path, help="源文书目录，或账本所在目录")
     pu.add_argument(
         "-o",
         "--output-dir",
@@ -325,7 +325,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pu.add_argument(
         "--from-ledgers",
         action="store_true",
-        help="把输入当作 *.ledger.json 目录，而不是源文书目录",
+        help="从 *.ledger.json 或 *.ledger.json.enc 重建（加密口令取 LEGAL_REDACTOR_LEDGER_PASS）",
     )
     pu.add_argument("--recursive", action="store_true", help="递归子目录（源文书模式）")
     pu.add_argument(
