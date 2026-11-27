@@ -102,9 +102,10 @@ def test_cli_redacts_encoded_text(tmp_path: Path, encoding: str, note: str) -> N
     assert out.read_bytes().decode("utf-8") == text.replace(MOBILE, "[手机号]")
 
 
-def test_cli_landline_does_not_span_txt_lines(tmp_path: Path) -> None:
+@pytest.mark.parametrize("invoice", ["042", "042-"])
+def test_cli_landline_does_not_span_txt_lines(tmp_path: Path, invoice: str) -> None:
     src = tmp_path / "schedule.txt"
-    text = "发票编号：042\n2025-03-14 开庭。\n"
+    text = f"发票编号：{invoice}\n2025-03-14 开庭。\n"
     src.write_text(text, encoding="utf-8")
     out = tmp_path / "redacted.txt"
 
@@ -409,11 +410,12 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
     assert residual["ok"] is True, residual
 
 
-def test_cli_landline_does_not_span_docx_table_rows(tmp_path: Path) -> None:
+@pytest.mark.parametrize("invoice", ["042", "042-"])
+def test_cli_landline_does_not_span_docx_table_rows(tmp_path: Path, invoice: str) -> None:
     src = tmp_path / "schedule.docx"
     doc = Document()
     table = doc.add_table(rows=2, cols=2)
-    rows = [("发票编号", "042"), ("2025-03-14", "开庭")]
+    rows = [("发票编号", invoice), ("2025-03-14", "开庭")]
     for row, values in zip(table.rows, rows):
         for cell, value in zip(row.cells, values):
             cell.text = value
