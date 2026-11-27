@@ -691,6 +691,10 @@ def redact_tree(
             rel = src.relative_to(input_dir)
             safe = "__".join(rel.with_suffix("").parts)
             name = f"{safe}.redacted-{mode}{src.suffix}"
+            index = 2
+            while name in used_names:
+                name = f"{safe}.{index}.redacted-{mode}{src.suffix}"
+                index += 1
         used_names.add(name)
         batch_paths.append((src, output_dir / name))
 
