@@ -113,16 +113,17 @@ def extract_metadata_and_links(path: Path) -> str:
 def extract_text_with_scan_pages(path: Path, *, flatten_form: bool = False) -> tuple[str, list[int]]:
     """Return text and 1-based pages with raster content but no extractable text."""
     parts: list[str] = []
+    widget_values: list[str] = []
     scan_pages: list[int] = []
     with fitz.open(str(path)) as doc:
         if flatten_form:
-            _flatten_pdf_form(doc)
+            _flatten_pdf_form(doc, widget_values=widget_values)
         for page in doc:
             text = page.get_text("text")
             parts.append(text)
             if not text.strip() and page.get_image_info():
                 scan_pages.append(page.number + 1)
-    return "\n".join(parts), scan_pages
+    return FIELD_BOUNDARY.join(["\n".join(parts), *widget_values]), scan_pages
 
 
 def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
@@ -148,42 +149,28 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
             return
 
 
-def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
+def _regenerate_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
     if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
         return False
 
-    value = " ".join((widget.field_value or "").split())
-
-    def matches_value() -> bool:
-        appearance = widget._annot.get_textpage().extractText()
-        lines = (" ".join(line.split()) for line in appearance.splitlines())
-        return re.fullmatch(r" ?".join(re.escape(line) for line in lines if line), value) is not None
-
     try:
-        if matches_value():
-            return True
         font = widget.text_font
         if font:
             base_font = fitz.Base14_fontdict.get(font.lower())
             if base_font is None:
                 _, resource_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
                 base_font = fitz.Base14_fontdict.get(resource_font.lstrip("/").lower())
-            if base_font is None:
-                return False
-            widget.text_font = _WIDGET_FONT_FAMILIES[base_font.split("-", 1)[0]]
+            widget.text_font = _WIDGET_FONT_FAMILIES[base_font.split("-", 1)[0]] if base_font else "Helv"
+        widget.text_fontsize = 0
         widget.update()
-        if matches_value():
-            return True
-        if widget.text_fontsize:
-            widget.text_fontsize = 0
-            widget.update()
-            return matches_value()
     except (ValueError, RuntimeError, fitz.mupdf.FzErrorBase):
         return False
-    return False
+    return True
 
 
-def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> dict[int, list[fitz.Rect]]:
+def _flatten_pdf_form(
+    doc: fitz.Document, warnings: list[str] | None = None, *, widget_values: list[str] | None = None,
+) -> dict[int, list[fitz.Rect]]:
     fields: dict[int, list[fitz.Rect]] = {}
     if not doc.is_form_pdf:
         return fields
@@ -192,7 +179,7 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
         appearance_value = doc.xref_object(int(appearance_value.split()[0])).strip()
     regenerate = appearance_value == "true"
     if regenerate:
-        # Inspect the stored appearance, not MuPDF's temporary synthesized view.
+        # Use the explicitly regenerated appearances when baking.
         doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "false")
     flattened = hidden = passwords = failed_appearances = 0
     for page in doc:
@@ -213,13 +200,17 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
                 if (
                     regenerate
                     and widget.field_type == fitz.PDF_WIDGET_TYPE_TEXT
-                    and not _ensure_current_widget_appearance(doc, widget)
+                    and not _regenerate_widget_appearance(doc, widget)
                 ):
                     page.delete_widget(widget)
                     failed_appearances += 1
                     continue
                 flattened += 1
                 fields.setdefault(page.number, []).append(widget.rect)
+                if widget_values is not None:
+                    value = widget.field_value
+                    if isinstance(value, str) and value:
+                        widget_values.append(value)
         if page.annot_xrefs():
             _copy_inherited_page_resources(doc, page.xref)
     doc.bake(annots=False)

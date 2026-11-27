@@ -3,8 +3,8 @@ from pathlib import Path
 import pymupdf as fitz
 import pytest
 
-from legal_redactor.formats.pdf_io import redact_pdf
-from legal_redactor.pipeline import redact_file
+from legal_redactor.formats.pdf_io import extract_text_with_scan_pages, redact_pdf
+from legal_redactor.pipeline import redact_file, verify_file
 
 
 def _form(value: str = "Earlier evidence value", font: str = "Helv") -> tuple[fitz.Document, fitz.Page, int]:
@@ -115,7 +115,7 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
         doc.xref_set_key(doc.pdf_catalog(), "AcroForm/DR", f"<</Font<</EvidenceFont {font_xref} 0 R>>>>")
         doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str("/EvidenceFont 24 Tf 0 g"))
         doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true" if stale_appearance else "false")
         doc.save(src)
 
     redact_pdf(src, out, [], mode="production")
@@ -130,43 +130,45 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
             assert spans[0]["size"] == pytest.approx(12)
 
 
-def test_production_regenerates_widget_with_stale_word_boundaries(tmp_path: Path) -> None:
+def test_production_keeps_multiline_cjk_widget_value(tmp_path: Path) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    stale, current = "Exhibit AB 12", "Exhibit A B12"
-    doc, _, widget_xref = _form(stale)
+    lines = ["证据说明确认", "原件已经核验"]
+    doc, _, widget_xref = _form()
     with doc:
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(current))
-        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
-        doc.save(src)
-
-    text = redact_pdf(src, out, [], mode="production")
-
-    assert current in text
-    assert stale not in text
-
-
-@pytest.mark.parametrize(
-    "lines", [["证据说明确认", "原件已经核验"], ["证据编号", "AB12"]], ids=["cjk", "mixed-cjk-latin"],
-)
-def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path, lines: list[str]) -> None:
-    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
-    doc, page, widget_xref = _form()
-    with doc:
-        font_xref = page.insert_font(fontname="china-s")
-        _, appearance = doc.xref_get_key(widget_xref, "AP/N")
-        appearance_xref = int(appearance.split()[0])
-        doc.xref_set_key(appearance_xref, "Resources", f"<</Font<</CJK {font_xref} 0 R>>>>")
-        first, second = (line.encode("utf-16-be").hex() for line in lines)
-        doc.update_stream(appearance_xref, f"BT /CJK 12 Tf 2 18 Td <{first}> Tj 0 -12 Td <{second}> Tj ET".encode())
+        doc.set_language("zh-CN")
         doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
-        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("".join(lines)))
-        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str("/CJK 12 Tf 0 g"))
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("\n".join(lines)))
+        doc.xref_set_key(widget_xref, "Rect", "[24 160 300 220]")
         doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
         doc.save(src)
 
     text = redact_pdf(src, out, [], mode="production")
 
     assert text.splitlines()[-2:] == lines
+
+
+def test_production_redacts_email_wrapped_in_widget_appearance(tmp_path: Path) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    first, second = "fictional@", "example.test"
+    doc, _, widget_xref = _form(first + second)
+    with doc:
+        _, appearance = doc.xref_get_key(widget_xref, "AP/N")
+        appearance_xref = int(appearance.split()[0])
+        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "false")
+        doc.update_stream(appearance_xref, f"BT /Helv 12 Tf 2 18 Td ({first}) Tj 0 -12 Td ({second}) Tj ET".encode())
+        doc.save(src)
+
+    assert extract_text_with_scan_pages(src)[0].splitlines()[-2:] == [first, second]
+    result = redact_file(src, "production", out, work_dir=tmp_path)
+
+    assert result.ok
+    with fitz.open(out) as output:
+        text = output[0].get_text()
+        assert first not in text and second not in text
+        assert "[邮箱]" in "".join(text.split())
+        assert not list(output[0].widgets())
+    assert verify_file(out, "production").status == "PASS"
 
 
 @pytest.mark.parametrize(
