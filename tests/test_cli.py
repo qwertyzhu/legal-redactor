@@ -23,6 +23,7 @@ from lxml import etree
 
 from legal_redactor import __version__
 from legal_redactor.formats import docx_io, pdf_io
+from legal_redactor.ledger_store import write_ledger_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "examples" / "fictional"
@@ -348,6 +349,77 @@ def test_cli_batch_reports_skipped_scan(
         assert "[SKIP] scan.pdf:" in proc.stderr
         assert proc.returncode == 1
         assert "无待补实体。到此停止" not in proc.stdout
+
+
+@pytest.mark.parametrize(
+    ("subdir", "encrypt_b"), [("", True), ("nested", True), ("", False)],
+    ids=["encrypted", "nested-encrypted", "mixed"],
+)
+def test_cli_unify_from_encrypted_ledgers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subdir: str, encrypt_b: bool
+) -> None:
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-unify-pass")
+    ledgers = tmp_path / "ledgers"
+    for stem, original, encrypt in (("a", "13900001111", True), ("b", "13900002222", encrypt_b)):
+        write_ledger_payload(
+            ledgers / subdir / f"{stem}.ledger.json",
+            {"entities": [{"original": original, "category": "phone"}]},
+            encrypt=encrypt,
+        )
+
+    output = tmp_path / "report"
+    proc = _run_cli("unify", str(ledgers), "--from-ledgers", "--mode", "ai", "-o", str(output))
+
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((output / "consistency.report.json").read_text(encoding="utf-8"))
+    assert (report["files_scanned"], report["entity_count"]) == (2, 2)
+    assert report["ok"]
+
+
+def test_cli_unify_from_encrypted_ledgers_requires_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-unify-pass")
+    ledgers = tmp_path / "ledgers"
+    write_ledger_payload(ledgers / "a.ledger.json", {"entities": []}, encrypt=True)
+    monkeypatch.delenv("LEGAL_REDACTOR_LEDGER_PASS")
+
+    output = tmp_path / "report"
+    proc = _run_cli("unify", str(ledgers), "--from-ledgers", "--mode", "ai", "-o", str(output))
+
+    assert proc.returncode == 1
+    assert "LEGAL_REDACTOR_LEDGER_PASS" in proc.stderr
+    assert not (output / "consistency.report.json").exists()
+
+
+@pytest.mark.parametrize("newest_encrypted", [False, True], ids=["plaintext", "encrypted"])
+def test_cli_unify_uses_newest_ledger_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newest_encrypted: bool
+) -> None:
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("LEGAL_REDACTOR_LEDGER_PASS", "fictional-unify-pass")
+    ledgers = tmp_path / "ledgers"
+    plain = ledgers / "a.ledger.json"
+    encrypted = write_ledger_payload(
+        plain, {"entities": [{"original": "13900001111"}]}, encrypt=True
+    )
+    write_ledger_payload(plain, {"entities": [{"original": "13900002222"}]})
+    older, newer = (plain, encrypted) if newest_encrypted else (encrypted, plain)
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_010, 1_700_000_010))
+    if not newest_encrypted:
+        monkeypatch.delenv("LEGAL_REDACTOR_LEDGER_PASS")
+
+    output = tmp_path / "report"
+    proc = _run_cli("unify", str(ledgers), "--from-ledgers", "--mode", "ai", "-o", str(output))
+
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((output / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["files_scanned"] == 1
+    assert [obs["files"] for obs in report["observations"]] == [[newer.name]]
+    assert plain.is_file() and encrypted.is_file()
 
 
 def test_shipped_cli_redacts_fictional_contract_ai_vs_production(tmp_path: Path) -> None:

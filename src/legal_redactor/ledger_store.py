@@ -221,6 +221,14 @@ def _unrestored_placeholder_warnings(text: str) -> list[str]:
     return [f"possible unrestored placeholder remains: {item}" for item in leftovers[:10]]
 
 
+def pdf_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as pdf:
+        for chunk in iter(lambda: pdf.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def restore_file(
     input_path: Path,
     ledger_path: Path,
@@ -240,8 +248,19 @@ def restore_file(
     if suffix == ".docx":
         text = docx_io.redact_docx(input_path, output_path, mapping, preserve_hyperlinks=True)
     elif suffix == ".pdf":
+        hidden = ledger.get("pdf_hidden_phones")
+        hidden_phones = None
+        if hidden is not None:
+            hidden_phones = pdf_io.PDFHiddenPhones(
+                structure=hidden["structure"],
+                metadata=hidden["metadata"],
+                literal_tokens=hidden.get("literal_tokens", []),
+            )
+            if hidden_phones.requires_digest and hidden.get("sha256") != pdf_digest(input_path):
+                raise ValueError("PDF 与账本中的隐藏电话号码记录不匹配，请使用原始脱敏稿和对应账本")
         text = pdf_io.redact_pdf(
             input_path, output_path, mapping, preserve_hyperlinks=True, fit_replacements=True,
+            restore_hidden_phones=hidden_phones, restoring=True,
         )
     else:
         text = text_io.redact_text(input_path, output_path, mapping)
