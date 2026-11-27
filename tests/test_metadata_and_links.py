@@ -571,6 +571,28 @@ def test_pdf_restore_rejects_legacy_ambiguous_hidden_phone(tmp_path: Path, capsy
     assert not restored.exists()
 
 
+def test_pdf_restore_rejects_ledger_from_document_without_hidden_phones(tmp_path: Path, capsys):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="Caller 13800002222", actual_text="Example token [PDF手机号1]",
+    )
+    other = _make_tagged_pdf(
+        tmp_path / "other.pdf", body="Contact phone 13700003333",
+        alt="Other receipt", actual_text="Transfer receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "src.ledger.json").ledger_path
+    other_ledger = redact_file(
+        other, mode="ai", output_path=tmp_path / "other.redacted.pdf", ledger=tmp_path / "other.ledger.json",
+    ).ledger_path
+    assert main(["restore", str(redacted), "--ledger", str(other_ledger), "-o", str(restored)]) == 1
+    assert "账本缺少 PDF 结构树电话号码的对应记录" in capsys.readouterr().err
+    assert not restored.exists()
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert "Caller 13800002222" in _structure_strings(restored)
+    assert "Example token [PDF手机号1]" in _structure_strings(restored)
+
+
 def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):
     objects = {
         1: "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>",

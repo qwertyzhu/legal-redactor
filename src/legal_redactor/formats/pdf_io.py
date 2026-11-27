@@ -44,6 +44,11 @@ class _NameRect:
 class PDFHiddenPhones:
     structure: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=dict)
+    literal_tokens: list[str] = field(default_factory=list)
+
+    @property
+    def requires_digest(self) -> bool:
+        return bool(self.structure or self.metadata or self.literal_tokens)
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -198,12 +203,23 @@ def _scrub_struct_text(
     Structural PII of the active `categories` is replaced too; restore passes none.
     """
     fields = _struct_text_fields(doc)
-    if restoring and restore_hidden_phones is None and any(
-        _HIDDEN_PHONE_TOKEN.search(value)
-        or any(DEFAULT_PLACEHOLDERS[category] in value for category in _PHONE_CATEGORIES)
-        for _, _, value in fields
-    ):
-        raise ValueError("账本缺少 PDF 结构树电话号码的对应记录，请使用正确账本或从原始 PDF 重新脱敏")
+    if restoring:
+        known_tokens = (
+            set(restore_hidden_phones.structure).union(restore_hidden_phones.literal_tokens)
+            if restore_hidden_phones is not None else set()
+        )
+        unknown_tokens = any(
+            token not in known_tokens
+            for _, _, value in fields
+            for token in _HIDDEN_PHONE_TOKEN.findall(value)
+        )
+        legacy_placeholder = restore_hidden_phones is None and any(
+            DEFAULT_PLACEHOLDERS[category] in value
+            for _, _, value in fields
+            for category in _PHONE_CATEGORIES
+        )
+        if unknown_tokens or legacy_placeholder:
+            raise ValueError("账本缺少 PDF 结构树电话号码的对应记录，请使用正确账本或从原始 PDF 重新脱敏")
     struct_mapping = mapping
     if restore_hidden_phones is not None:
         struct_mapping = [*restore_hidden_phones.structure.items(), *mapping]
@@ -218,10 +234,14 @@ def _scrub_struct_text(
     taken: set[str] = set()
     if capture_hidden_phones is not None:
         scrub_categories = scrub_categories - _PHONE_CATEGORIES
+        literal_tokens = {
+            token for _, _, _, mapped in mapped_fields for token in _HIDDEN_PHONE_TOKEN.findall(mapped)
+        }
+        capture_hidden_phones.literal_tokens = sorted(literal_tokens)
         if hidden_phone_categories:
-            for _, _, original, mapped in mapped_fields:
+            taken.update(literal_tokens)
+            for _, _, original, _ in mapped_fields:
                 taken.update(_HIDDEN_PHONE_TOKEN.findall(original))
-                taken.update(_HIDDEN_PHONE_TOKEN.findall(mapped))
     scrubbed = 0
     for xref, key, value, redacted in mapped_fields:
         if scrub_categories:

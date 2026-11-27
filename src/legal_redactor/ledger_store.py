@@ -251,8 +251,12 @@ def restore_file(
         hidden = ledger.get("pdf_hidden_phones")
         hidden_phones = None
         if hidden is not None:
-            hidden_phones = pdf_io.PDFHiddenPhones(structure=hidden["structure"], metadata=hidden["metadata"])
-            if (hidden_phones.structure or hidden_phones.metadata) and hidden.get("sha256") != pdf_digest(input_path):
+            hidden_phones = pdf_io.PDFHiddenPhones(
+                structure=hidden["structure"],
+                metadata=hidden["metadata"],
+                literal_tokens=hidden.get("literal_tokens", []),
+            )
+            if hidden_phones.requires_digest and hidden.get("sha256") != pdf_digest(input_path):
                 raise ValueError("PDF 与账本中的隐藏电话号码记录不匹配，请使用原始脱敏稿和对应账本")
         text = pdf_io.redact_pdf(
             input_path, output_path, mapping, preserve_hyperlinks=True, fit_replacements=True,

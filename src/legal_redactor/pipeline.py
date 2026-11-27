@@ -496,7 +496,7 @@ def redact_file(
     ledger_payload["profile"] = prof.name if prof else None
     if pdf_hidden_phones is not None:
         hidden_phones = asdict(pdf_hidden_phones)
-        if pdf_hidden_phones.structure or pdf_hidden_phones.metadata:
+        if pdf_hidden_phones.requires_digest:
             hidden_phones["sha256"] = pdf_digest(output_path)
         ledger_payload["pdf_hidden_phones"] = hidden_phones
     ledger_path = write_ledger_payload(ledger_target, ledger_payload, encrypt=ledger_encrypt)
