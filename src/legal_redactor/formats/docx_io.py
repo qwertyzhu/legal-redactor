@@ -550,7 +550,7 @@ def redact_docx(
                 input_path,
                 ocr_images=ocr_images,
                 categories=image_categories if image_categories is not None else categories_for_mode("ai"),
-                extra_terms=[original for original, _ in mapping],
+                extra_terms=[original for original, replacement in mapping if original != replacement],
             )
             warn.extend(media_warnings)
             if image_pii is not None:

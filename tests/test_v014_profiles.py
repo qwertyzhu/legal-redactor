@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pymupdf as fitz
+import pytest
+from docx import Document
+
 from legal_redactor.cli import main
 from legal_redactor.patterns import detect_structural
 from legal_redactor.pipeline import redact_file
@@ -91,6 +95,55 @@ def test_judgment_online_keeps_parties_and_truncates_address(tmp_path: Path):
     assert "周测童" not in out and "周测宁" not in out
     assert "周某1" in out and "周某2" in out
     assert main(["verify", str(res.output_path), "--profile", "judgment-online", "--strict"]) == 0
+
+
+@pytest.mark.parametrize("suffix", ["txt", "docx", "pdf"])
+def test_judgment_online_keeps_party_name_overlapping_article8(tmp_path: Path, suffix: str):
+    src = tmp_path / f"judgment.{suffix}"
+    entities = tmp_path / "entities.json"
+    entities.write_text(
+        json.dumps(
+            [
+                {"original": "张明华", "category": "person", "role": "party"},
+                {"original": "张明", "category": "person", "role": "article8"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    if suffix == "pdf":
+        with fitz.open() as doc:
+            page = doc.new_page()
+            page.insert_text((24, 40), "原告：张明\n华。", fontname="china-s")
+            page.insert_text((24, 85), "证人：张明。", fontname="china-s")
+            doc.save(src)
+        verify = ["--profile", "judgment-online", "--entities", str(entities), "--strict"]
+        assert main(["verify", str(src), *verify]) == 2
+    elif suffix == "docx":
+        doc = Document()
+        p = doc.add_paragraph("原告：张明")
+        p.add_run("华").bold = True
+        p.add_run("。证人：张明。")
+        doc.save(src)
+    else:
+        _src(tmp_path, "原告：张明华。\n证人：张明。\n", src.name)
+
+    out = tmp_path / f"redacted.{suffix}"
+    code = main(["redact", str(src), "--profile", "judgment-online", "-o", str(out)])
+    if suffix == "pdf":
+        with fitz.open(out) as doc:
+            text = "".join(doc[0].get_text().split())
+        assert "原告：张明华。" in text
+        assert "张某" in text
+        assert text.count("张明") == 1
+        assert main(["verify", str(out), *verify]) == 0
+    elif suffix == "docx":
+        p = Document(out).paragraphs[0]
+        assert p.text == "原告：张明华。证人：张某。"
+        assert p.runs[1].text == "华" and p.runs[1].bold
+    else:
+        assert out.read_text(encoding="utf-8") == "原告：张明华。\n证人：张某。\n"
+    assert code == 0
 
 
 def test_publish_still_renames_everyone(tmp_path: Path):

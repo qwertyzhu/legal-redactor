@@ -78,21 +78,42 @@ def unreplaced_originals(
     pdf_path: Path | None = None,
 ) -> list[str]:
     """Planned originals that survived into the output — a definite leak."""
-    replacements = "\n".join(r for _, r in mapping)
-    originals = [o for o, _ in mapping if o and o not in replacements]
+    replacements = "\n".join(r for o, r in mapping if o != r)
+    originals = [o for o, r in mapping if o and o != r and o not in replacements]
+    kept_names = [o for o, r in mapping if o and o == r]
     if pdf_path is None:
         hay = output_text.replace("\n", "") if join_lines else output_text
-        return [o for o in originals if o in hay]
+        return [o for o in originals if _has_unprotected_occurrence(hay, o, kept_names)]
 
     from .formats.pdf_io import is_short_cjk_name, matched_short_names
 
     short = {o for o in originals if is_short_cjk_name(o)}
-    split_matches = matched_short_names(pdf_path, short) if short else set()
+    split_matches = matched_short_names(pdf_path, short, kept_names) if short else set()
+    # For overlapping short names only layout can distinguish a standalone
+    # original from the first line of a kept name that wraps.
+    checked_by_layout = {o for o in short if any(o in name for name in kept_names)}
     joined = output_text.replace("\n", "")
     return [
         o for o in originals
-        if o in (output_text if o in short else joined) or o in split_matches
+        if o in split_matches or (o not in checked_by_layout and _has_unprotected_occurrence(
+            output_text if o in short else joined, o, kept_names
+        ))
     ]
+
+
+def _has_unprotected_occurrence(text: str, original: str, kept_names: list[str]) -> bool:
+    covers = [
+        (name, offset)
+        for name in kept_names
+        for offset in range(len(name) - len(original) + 1)
+        if name.startswith(original, offset)
+    ]
+    pos = text.find(original)
+    while pos >= 0:
+        if not any(pos >= offset and text.startswith(name, pos - offset) for name, offset in covers):
+            return True
+        pos = text.find(original, pos + 1)
+    return False
 
 
 def add_unreplaced(report: ResidualReport, leftovers: list[str]) -> ResidualReport:

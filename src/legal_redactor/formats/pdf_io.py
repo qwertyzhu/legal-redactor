@@ -273,13 +273,33 @@ def _wrapped_rects(
     return out
 
 
-def matched_short_names(path: Path, originals: set[str]) -> set[str]:
+def _kept_name_rects(page: "fitz.Page", index: _CharIndex, name: str) -> list["fitz.Rect"]:
+    return page.search_for(name) + [
+        slot.rect for match in _wrapped_rects(index, name, allow_single_line=True) for slot in match
+    ]
+
+
+def matched_short_names(path: Path, originals: set[str], kept_names: list[str]) -> set[str]:
     pending = set(originals)
     matches: set[str] = set()
     with fitz.open(str(path)) as doc:
         for page in doc:
             index = _page_char_index(page)
-            found = {name for name in pending if _wrapped_rects(index, name)}
+            protected = [rect for name in kept_names for rect in _kept_name_rects(page, index, name)]
+            found = {
+                name for name in pending
+                if any(
+                    not all(any(slot.rect in rect for rect in protected) for slot in match)
+                    for match in _wrapped_rects(index, name)
+                )
+                or (
+                    any(name in kept for kept in kept_names)
+                    and any(
+                        not any(rect in kept_rect for kept_rect in protected)
+                        for rect in page.search_for(name)
+                    )
+                )
+            }
             matches.update(found)
             pending.difference_update(found)
             if not pending:
@@ -429,12 +449,13 @@ def redact_pdf(
 
         for page in doc:
             claimed_rects: list[fitz.Rect] = []
+            kept_rects: list[fitz.Rect] = []
             split_aliases: list[tuple[list[_NameRect], str]] = []
             fitted_text: list[tuple[fitz.Rect, str, str]] = []
             index: _CharIndex | None = None
 
             def add_redaction(rect: fitz.Rect, original: str, text: str) -> bool:
-                if _overlaps_claimed(rect, claimed_rects):
+                if _overlaps_claimed(rect, kept_rects) or _overlaps_claimed(rect, claimed_rects):
                     return False
                 claimed_rects.append(rect)
                 if fit_replacements and text:
@@ -453,12 +474,15 @@ def redact_pdf(
             for original, replacement in ordered_mapping:
                 if not original:
                     continue
+                if index is None:
+                    index = _page_char_index(page)
+                if original == replacement:
+                    kept_rects.extend(_kept_name_rects(page, index, original))
+                    continue
                 rects = page.search_for(original)
                 for rect in rects:
                     add_redaction(rect, original, replacement)
                 # search_for misses names split by spaces or line breaks.
-                if index is None:
-                    index = _page_char_index(page)
                 paint_after = not fit_replacements and is_short_cjk_name(original)
                 for match in _wrapped_rects(index, original, allow_single_line=not rects):
                     applied: list[_NameRect] = []
@@ -538,7 +562,7 @@ def _redact_embedded_images(
     from ..patterns import categories_for_mode
 
     cats = categories if categories is not None else categories_for_mode("ai")
-    terms = [o for o, _ in mapping]
+    terms = [o for o, r in mapping if o != r]
     total = 0
     for page in pages_with_images:
         page_hits = 0

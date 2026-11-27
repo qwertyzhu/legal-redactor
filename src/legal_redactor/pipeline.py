@@ -787,7 +787,7 @@ def verify_file(
             preserve=list(scan_options.get("known") or ()),
             alias_style=alias_style,
         )
-        short_names = [(o, r) for o, r in plan.mapping() if pdf_io.is_short_cjk_name(o)]
+        short_names = [(o, r) for o, r in plan.mapping() if o == r or pdf_io.is_short_cjk_name(o)]
         add_unreplaced(report, unreplaced_originals(text, short_names, pdf_path=path))
     elif suffix == ".docx":
         _, image_pii = docx_io.scan_media(
