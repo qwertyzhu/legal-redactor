@@ -9,7 +9,8 @@ import pymupdf as fitz
 import pytest
 
 from legal_redactor.cli import main
-from legal_redactor.formats import docx_io
+from legal_redactor.formats import docx_io, pdf_io
+from legal_redactor.ledger_store import write_ledger_payload
 from legal_redactor.pipeline import redact_file, verify_tree
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +100,9 @@ def _make_pdf_with_hidden_pii(
     return path
 
 
-def _make_tagged_pdf(path: Path, *, body: str, alt: str, actual_text: str) -> Path:
+def _make_tagged_pdf(
+    path: Path, *, body: str, alt: str, actual_text: str, subject: str = "",
+) -> Path:
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((72, 72), body, fontsize=11)
@@ -117,6 +120,8 @@ def _make_tagged_pdf(path: Path, *, body: str, alt: str, actual_text: str) -> Pa
     )
     doc.xref_set_key(doc.pdf_catalog(), "StructTreeRoot", f"{root} 0 R")
     doc.xref_set_key(doc.pdf_catalog(), "MarkInfo", "<< /Marked true >>")
+    if subject:
+        doc.set_metadata({"subject": subject})
     doc.save(str(path))
     doc.close()
     return path
@@ -477,6 +482,67 @@ def test_pdf_structure_tree_text_scrubbed_all_modes(tmp_path: Path, profile: str
     assert "Bank transfer receipt for caller [手机号]" in strings
 
 
+def test_pdf_hidden_phone_does_not_leave_partially_scrubbed_email(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Transfer receipt",
+        alt="Phone 13800002222; Email a13800002222@x.com", actual_text="Receipt",
+    )
+    out = tmp_path / "redacted.pdf"
+    assert redact_file(src, mode="ai", output_path=out).residual.ok
+    assert "Phone [PDF手机号1]; Email [邮箱]" in _structure_strings(out)
+
+
+def test_pdf_hidden_landlines_with_shared_prefix_round_trip(tmp_path: Path):
+    alt = "Phone 010-1234567; Phone 010-1234567 8"
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Transfer receipt", alt=alt, actual_text="Receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "ledger.json").ledger_path
+    assert "Phone [PDF电话1]; Phone [PDF电话2]" in _structure_strings(redacted)
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert alt in _structure_strings(restored)
+
+
+def test_pdf_hidden_phone_and_wechat_id_with_same_digits(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="微信 13800002222 电话 13800002222", actual_text="Receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "ledger.json").ledger_path
+    assert "微信 [社交账号] 电话 [PDF手机号1]" in _structure_strings(redacted)
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert "微信 [社交账号] 电话 13800002222" in _structure_strings(restored)
+
+
+def test_pdf_hidden_mobile_masks_its_international_copy(tmp_path: Path):
+    alt = "Phone 13800002222; International +8613800002222"
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt=alt, actual_text="Receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "ledger.json").ledger_path
+    assert "Phone [PDF手机号1]; International +86[PDF手机号1]" in _structure_strings(redacted)
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert alt in _structure_strings(restored)
+
+
+def test_pdf_structure_tree_masks_unlabeled_copy_of_share_code(tmp_path: Path):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Transfer receipt",
+        alt="链接 https://pan.baidu.com/s/xxx 提取码 ab12 订单 ab123456、XYZab12 ... ab12",
+        actual_text="Receipt",
+    )
+    redacted = tmp_path / "redacted.pdf"
+    assert redact_file(src, mode="ai", output_path=redacted).residual.ok
+    assert (
+        "链接 https://pan.baidu.com/s/xxx 提取码 [提取码] 订单 ab123456、XYZab12 ... [提取码]"
+        in _structure_strings(redacted)
+    )
+
+
 def test_verify_catches_pdf_structure_tree_pii(tmp_path: Path):
     src = _make_tagged_pdf(
         tmp_path / "alt_only.pdf",
@@ -511,6 +577,71 @@ def test_restore_file_restores_pdf_structure_tree_text(tmp_path: Path):
     restored = tmp_path / "restored.pdf"
     restore_file(red, res.ledger_path, restored)
     assert alt in _structure_strings(restored)
+
+
+def test_pdf_round_trip_restores_distinct_hidden_phones(tmp_path: Path):
+    body, alt, actual, subject = (
+        "Contact phone 13900001111", "Caller 13800002222",
+        "Caller 13700003333", "Subject phone 13600004444",
+    )
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body=body, alt=alt, actual_text=actual, subject=subject,
+    )
+    redacted, restored, ledger = (tmp_path / name for name in ("redacted.pdf", "restored.pdf", "ledger.json"))
+    assert main(["redact", str(src), "--mode", "ai", "-o", str(redacted), "--ledger", str(ledger)]) == 0
+    assert main(["verify", str(redacted), "--mode", "ai", "--strict"]) == 0
+    with fitz.open(redacted) as doc:
+        assert "[手机号]" in doc[0].get_text()
+        assert doc.metadata["subject"] == ""
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    with fitz.open(restored) as doc:
+        assert body.split()[-1] in doc[0].get_text()
+        assert {key: value for _, key, value in pdf_io._struct_text_fields(doc)} == {
+            "Alt": alt, "T": alt, "ActualText": actual, "E": actual,
+        }
+        assert doc.metadata["subject"] == subject
+
+    redacted.write_bytes(redacted.read_bytes() + b"\n")
+    mismatch = tmp_path / "mismatch.pdf"
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(mismatch)]) == 1
+    assert not mismatch.exists()
+
+
+def test_pdf_restore_rejects_legacy_ambiguous_hidden_phone(tmp_path: Path, capsys):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="Caller 13800002222", actual_text="Transfer receipt",
+    )
+    redacted, restored, ledger = (tmp_path / name for name in ("redacted.pdf", "restored.pdf", "ledger.json"))
+    pdf_io.redact_pdf(src, redacted, [("13900001111", "[手机号]")], image_categories={"mobile"})
+    write_ledger_payload(ledger, {"entities": [
+        {"original": "13900001111", "replacement": "[手机号]", "category": "mobile"},
+    ]})
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 1
+    assert "账本缺少 PDF 结构树电话号码的对应记录" in capsys.readouterr().err
+    assert not restored.exists()
+
+
+def test_pdf_restore_rejects_ledger_from_document_without_hidden_phones(tmp_path: Path, capsys):
+    src = _make_tagged_pdf(
+        tmp_path / "src.pdf", body="Contact phone 13900001111",
+        alt="Caller 13800002222", actual_text="Example token [PDF手机号1]",
+    )
+    other = _make_tagged_pdf(
+        tmp_path / "other.pdf", body="Contact phone 13700003333",
+        alt="Other receipt", actual_text="Transfer receipt",
+    )
+    redacted, restored = (tmp_path / name for name in ("redacted.pdf", "restored.pdf"))
+    ledger = redact_file(src, mode="ai", output_path=redacted, ledger=tmp_path / "src.ledger.json").ledger_path
+    other_ledger = redact_file(
+        other, mode="ai", output_path=tmp_path / "other.redacted.pdf", ledger=tmp_path / "other.ledger.json",
+    ).ledger_path
+    assert main(["restore", str(redacted), "--ledger", str(other_ledger), "-o", str(restored)]) == 1
+    assert "账本缺少 PDF 结构树电话号码的对应记录" in capsys.readouterr().err
+    assert not restored.exists()
+    assert main(["restore", str(redacted), "--ledger", str(ledger), "-o", str(restored)]) == 0
+    assert "Caller 13800002222" in _structure_strings(restored)
+    assert "Example token [PDF手机号1]" in _structure_strings(restored)
 
 
 def test_verify_reads_pdf_structure_tree_with_sparse_xref(tmp_path: Path):

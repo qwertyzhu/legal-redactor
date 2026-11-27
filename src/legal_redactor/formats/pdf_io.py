@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from itertools import count
 from pathlib import Path
 from urllib.parse import unquote
 
 import pymupdf as fitz
 
 from ..entities import apply_mapping_to_text
-from . import FIELD_BOUNDARY, scrub_external_url, scrub_structural_text
+from ..patterns import DEFAULT_PLACEHOLDERS, PatternHit, detect_structural
+from . import FIELD_BOUNDARY, _replacement_for_hit, scrub_external_url, scrub_structural_text
 
 _CLEAR_PDF_META_KEYS = frozenset({"author", "creator", "producer", "title", "subject", "keywords"})
 _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryption", "trapped"})
 _STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
+_PHONE_CATEGORIES = frozenset({"mobile", "landline"})
+_HIDDEN_PHONE_TOKEN = re.compile(r"\[PDF(?:手机号|电话)[0-9]+\]")
+_CN_MOBILE_AFTER_COUNTRY_CODE = re.compile(r"(?<=\+86)1[3-9][0-9]{9}(?!\d)")
 _INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
 _SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
@@ -34,6 +39,17 @@ class _NameRect:
     baseline: float
     font_size: float
     direction: tuple[float, float]
+
+
+@dataclass
+class PDFHiddenPhones:
+    structure: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
+    literal_tokens: list[str] = field(default_factory=list)
+
+    @property
+    def requires_digest(self) -> bool:
+        return bool(self.structure or self.metadata or self.literal_tokens)
 
 
 def is_short_cjk_name(text: str) -> bool:
@@ -165,21 +181,118 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
 
 
+def _next_hidden_phone_token(category: str, taken: set[str], counter: count) -> str:
+    label = DEFAULT_PLACEHOLDERS[category][1:-1]
+    token = f"[PDF{label}{next(counter)}]"
+    while token in taken:
+        token = f"[PDF{label}{next(counter)}]"
+    return token
+
+
+def _structural_hits_with_copies(text: str, categories: set[str]) -> list[PatternHit]:
+    hits = detect_structural(text)
+    copies: list[PatternHit] = []
+    if "mobile" in categories:
+        mobiles = {hit.text for hit in hits if hit.category == "mobile" and hit.auto_replace}
+        if mobiles:
+            copies.extend(
+                PatternHit("mobile", match[0], match.start(), match.end())
+                for match in _CN_MOBILE_AFTER_COUNTRY_CODE.finditer(text)
+                if match[0] in mobiles
+            )
+    if "share_code" in categories:
+        codes = {hit.text for hit in hits if hit.category == "share_code" and hit.auto_replace}
+        if codes:
+            alternatives = "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
+            pattern = rf"(?<![A-Za-z0-9])(?:{alternatives})(?![A-Za-z0-9])"
+            copies.extend(
+                PatternHit("share_code", match[0], match.start(), match.end())
+                for match in re.finditer(pattern, text)
+            )
+    for copy in copies:
+        if not any(hit.start < copy.end and hit.end > copy.start for hit in hits):
+            hits.append(copy)
+    if copies:
+        hits.sort(key=lambda hit: hit.start)
+    return hits
+
+
 def _scrub_struct_text(
     doc: "fitz.Document",
     mapping: list[tuple[str, str]],
     warnings: list[str] | None,
     categories: set[str] | None,
+    *,
+    capture_hidden_phones: PDFHiddenPhones | None,
+    restore_hidden_phones: PDFHiddenPhones | None,
+    restoring: bool,
 ) -> None:
     """Apply `mapping` to tagged-PDF structure text (/Alt, /ActualText, /E, /T).
 
     Structural PII of the active `categories` is replaced too; restore passes none.
     """
+    fields = _struct_text_fields(doc)
+    if restoring:
+        known_tokens = (
+            set(restore_hidden_phones.structure).union(restore_hidden_phones.literal_tokens)
+            if restore_hidden_phones is not None else set()
+        )
+        unknown_tokens = any(
+            token not in known_tokens
+            for _, _, value in fields
+            for token in _HIDDEN_PHONE_TOKEN.findall(value)
+        )
+        legacy_placeholder = restore_hidden_phones is None and any(
+            DEFAULT_PLACEHOLDERS[category] in value
+            for _, _, value in fields
+            for category in _PHONE_CATEGORIES
+        )
+        if unknown_tokens or legacy_placeholder:
+            raise ValueError("账本缺少 PDF 结构树电话号码的对应记录，请使用正确账本或从原始 PDF 重新脱敏")
+    struct_mapping = mapping
+    if restore_hidden_phones is not None:
+        struct_mapping = [*restore_hidden_phones.structure.items(), *mapping]
+    mapped_fields = [
+        (xref, key, value, apply_mapping_to_text(value, struct_mapping))
+        for xref, key, value in fields
+    ]
+    scrub_categories = categories or set()
+    hidden_phone_categories = scrub_categories & _PHONE_CATEGORIES
+    captured: dict[str, str] = {}
+    token_counter = count(1)
+    taken: set[str] = set()
+    if capture_hidden_phones is not None:
+        literal_tokens = {
+            token for _, _, _, mapped in mapped_fields for token in _HIDDEN_PHONE_TOKEN.findall(mapped)
+        }
+        capture_hidden_phones.literal_tokens = sorted(literal_tokens)
+        if hidden_phone_categories:
+            taken.update(literal_tokens)
+            for _, _, original, _ in mapped_fields:
+                taken.update(_HIDDEN_PHONE_TOKEN.findall(original))
     scrubbed = 0
-    for xref, key, value in _struct_text_fields(doc):
-        redacted = apply_mapping_to_text(value, mapping)
-        if categories:
-            redacted = scrub_structural_text(redacted, categories=categories)
+    for xref, key, value, redacted in mapped_fields:
+        if capture_hidden_phones is not None and hidden_phone_categories:
+            parts: list[str] = []
+            last = 0
+            for hit in _structural_hits_with_copies(redacted, scrub_categories):
+                if hit.category not in scrub_categories or hit.category == "url" or not hit.auto_replace:
+                    continue
+                if hit.category in hidden_phone_categories:
+                    if hit.text not in captured:
+                        token = _next_hidden_phone_token(hit.category, taken, token_counter)
+                        captured[hit.text] = token
+                        capture_hidden_phones.structure[token] = hit.text
+                    replacement = captured[hit.text]
+                else:
+                    replacement = _replacement_for_hit(hit.category, hit.text)
+                parts.extend((redacted[last:hit.start], replacement))
+                last = hit.end
+            if parts:
+                parts.append(redacted[last:])
+                redacted = "".join(parts)
+        elif scrub_categories:
+            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1
@@ -513,6 +626,9 @@ def redact_pdf(
     image_categories: set[str] | None = None,
     mode: str = "ai",
     fit_replacements: bool = False,
+    capture_hidden_phones: PDFHiddenPhones | None = None,
+    restore_hidden_phones: PDFHiddenPhones | None = None,
+    restoring: bool = False,
 ) -> str:
     warn = warnings if warnings is not None else []
     ordered_mapping = sorted(
@@ -606,8 +722,14 @@ def redact_pdf(
         _redact_embedded_images(doc, mapping, warn, ocr_images, image_categories)
 
         meta = dict(doc.metadata or {})
+        hidden_phone_categories = (image_categories or set()) & _PHONE_CATEGORIES
         for key in list(meta.keys()):
             if key in _CLEAR_PDF_META_KEYS:
+                if capture_hidden_phones is not None and hidden_phone_categories and any(
+                    hit.category in hidden_phone_categories and hit.auto_replace
+                    for hit in detect_structural(meta[key] or "")
+                ):
+                    capture_hidden_phones.metadata[key] = meta[key]
                 meta[key] = ""
                 continue
             if key in _SKIP_PDF_META_KEYS:
@@ -617,8 +739,15 @@ def redact_pdf(
                 meta[key] = scrub_structural_text(apply_mapping_to_text(val, mapping))
         for key in _CLEAR_PDF_META_KEYS:
             meta[key] = ""
+        if restore_hidden_phones is not None:
+            meta.update(restore_hidden_phones.metadata)
         doc.set_metadata(meta)
-        _scrub_struct_text(doc, mapping, warnings, image_categories)
+        _scrub_struct_text(
+            doc, mapping, warnings, image_categories,
+            capture_hidden_phones=capture_hidden_phones,
+            restore_hidden_phones=restore_hidden_phones,
+            restoring=restoring,
+        )
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
