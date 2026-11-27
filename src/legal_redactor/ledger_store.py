@@ -211,13 +211,14 @@ def restore_text(text: str, ledger: dict[str, Any]) -> tuple[str, list[str]]:
         sentinels.append((token, original))
     for token, original in sentinels:
         out = out.replace(token, original)
-    # surface leftover placeholders that look like ours
+    return out, warns + _unrestored_placeholder_warnings(out)
+
+
+def _unrestored_placeholder_warnings(text: str) -> list[str]:
     leftovers = sorted(
-        set(re.findall(r"某[甲乙丙丁戊己庚辛壬癸]\d*|某单位[A-Z]\d*|（20XX）[^号\n]{2,14}号|\[(?:身份证号|手机号|邮箱|账号|统一社会信用代码|车牌号|护照号|通行证号|公证书号|IP地址|MAC地址|网址|参数|提取码|出生日期|社交账号|不动产权证号|电话|已脱敏)\d*\]", out))
+        set(re.findall(r"某[甲乙丙丁戊己庚辛壬癸]\d*|某单位[A-Z]\d*|（20XX）[^号\n]{2,14}号|\[(?:身份证号|手机号|邮箱|账号|统一社会信用代码|车牌号|护照号|通行证号|公证书号|IP地址|MAC地址|网址|参数|提取码|出生日期|社交账号|不动产权证号|电话|已脱敏)\d*\]", text))
     )
-    for item in leftovers[:10]:
-        warns.append(f"possible unrestored placeholder remains: {item}")
-    return out, warns
+    return [f"possible unrestored placeholder remains: {item}" for item in leftovers[:10]]
 
 
 def restore_file(
@@ -244,10 +245,7 @@ def restore_file(
         )
     else:
         text = text_io.redact_text(input_path, output_path, mapping)
-    # Extra text-level pass for anything mapping missed in structured formats
-    restored, more = restore_text(text, ledger)
-    if restored != text and suffix in {".txt", ".md", ".markdown", ".csv", ".json", ""}:
-        with open(output_path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(restored)
-        text = restored
+        more = _unrestored_placeholder_warnings(text) if mapping else ["ledger has no reversible entities"]
+        return text, warns + more
+    _, more = restore_text(text, ledger)
     return text, list(dict.fromkeys(warns + more))

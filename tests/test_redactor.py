@@ -546,6 +546,53 @@ def test_batch_redact_writes_consistency_bundle(tmp_path: Path):
     assert (out / "consistency.report.md").is_file()
 
 
+def test_recursive_batch_preserves_outputs_when_flattened_names_collide(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    documents = {
+        "a/b.txt": "证据：原始文档 A\n",
+        "a/b/c.txt": "证据：原始文档 B\n",
+        "a__b/c.txt": "证据：原始文档 C\n",
+        "a__b__c.txt": "证据：原始文档 D\n",
+    }
+    for relative_path, text in documents.items():
+        path = src / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    batch = redact_tree(src, mode="ai", output_dir=out, recursive=True)
+
+    assert batch.ok
+    assert len(batch.results) == len(documents)
+    assert len({result.output_path for result in batch.results}) == len(documents)
+    assert {
+        result.input_path.relative_to(src).as_posix(): result.output_path.read_text(encoding="utf-8")
+        for result in batch.results
+    } == documents
+
+
+def test_recursive_batch_preserves_outputs_when_basenames_differ_only_by_case(tmp_path: Path):
+    from legal_redactor.pipeline import redact_tree
+
+    src = tmp_path / "in"
+    documents = {"x/Report.txt": "证据：原始文档 A\n", "y/report.txt": "证据：原始文档 B\n"}
+    for relative_path, text in documents.items():
+        path = src / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    batch = redact_tree(src, mode="ai", output_dir=tmp_path / "out", recursive=True)
+
+    assert batch.ok
+    assert len({result.output_path.name.casefold() for result in batch.results}) == len(documents)
+    assert {
+        result.input_path.relative_to(src).as_posix(): result.output_path.read_text(encoding="utf-8")
+        for result in batch.results
+    } == documents
+
+
 def test_batch_redact_writes_consistency_bundle_with_encrypted_ledgers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

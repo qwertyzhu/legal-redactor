@@ -117,7 +117,7 @@ def _stable_alias(category: str, index: int) -> str:
 
 def _court_person_alias(name: str) -> str:
     for compound in _COMPOUND_SURNAMES:
-        if name.startswith(compound):
+        if len(name) > len(compound) and name.startswith(compound):
             return f"{compound}某"
     if name:
         return f"{name[0]}某"
@@ -127,7 +127,7 @@ def _court_person_alias(name: str) -> str:
 def _district_address(addr: str) -> str:
     """Truncate to 县/区 level (法释〔2016〕19号 style), e.g. 北京市朝阳区."""
     head = addr[:24]
-    match = re.search(r"^(.{2,20}?(?<!自治)(?:区|县|旗))", head)
+    match = re.search(r"^(.{2,20}?(?<!自治)(?:(?<![小园社校景厂院])(?<!部队营)(?<![军驻]营)区|[县旗]))", head)
     if match:
         return match.group(1)
     # 州 alone is part of a name (苏州, 郑州); only 自治州 is a prefecture unit.
