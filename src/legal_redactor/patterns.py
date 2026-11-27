@@ -40,8 +40,17 @@ _LABELED_ACCOUNT = re.compile(
     r"(?:账号|帐号|账户|卡号|银行账号|收款账户|开户账号|对公账户)"
     r"\s*(?:[：:]|为|是)?\s*([0-9][0-9 \u3000-]{6,32}[0-9])"
 )
-# Landline, including a space inside the subscriber number: 010-1234 5678
-_LANDLINE = re.compile(r"(?<!\d)0\d{2,3}(?:[\s\u3000-]*\d){7,8}(?!\d)")
+# Landline: a trailing hyphen can signal a wrap, but a date starts a separate record.
+_LANDLINE_SPACE = r" \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000"
+_LANDLINE_WRAP = (
+    rf"-[{_LANDLINE_SPACE}]*\r?\n[{_LANDLINE_SPACE}]*"
+    r"(?!\d{4}-(?:0?[1-9]|1[0-2])-(?:0?[1-9]|[12]\d|3[01])(?!\d))"
+)
+_LANDLINE = re.compile(
+    rf"(?<!\d)0\d{{2,3}}"
+    rf"(?:[{_LANDLINE_SPACE}-]*(?:{_LANDLINE_WRAP})?\d){{7,8}}"
+    r"(?!\d)"
+)
 # 400 / 800 service numbers, with or without separators
 _HOTLINE = re.compile(r"(?<!\d)[48]00(?:[\s\u3000-]*\d){7}(?!\d)")
 # Email. Chinese labels like 邮箱 are word chars in Python re, so \b fails for

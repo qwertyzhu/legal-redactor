@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pymupdf as fitz
 import pytest
+from docx import Document
 from lxml import etree
 
 from legal_redactor import __version__
@@ -99,6 +100,75 @@ def test_cli_redacts_encoded_text(tmp_path: Path, encoding: str, note: str) -> N
 
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert out.read_bytes().decode("utf-8") == text.replace(MOBILE, "[手机号]")
+
+
+@pytest.mark.parametrize(
+    ("original", "redacted"),
+    [("甲方签字：郝测一", "甲方签字：某甲"), ("作品名称：清月传", "作品名称：某作品")],
+    ids=["signatory", "work-title"],
+)
+def test_cli_redacts_cr_separated_text(tmp_path: Path, original: str, redacted: str) -> None:
+    src = tmp_path / "input.txt"
+    src.write_bytes(f"说明\r{original}\r附注无关\r".encode("utf-8"))
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--profile", "ai", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_bytes().decode("utf-8") == f"说明\r{redacted}\r附注无关\r"
+
+
+@pytest.mark.parametrize("invoice", ["042", "042-"])
+def test_cli_landline_does_not_span_txt_lines(tmp_path: Path, invoice: str) -> None:
+    src = tmp_path / "schedule.txt"
+    text = f"发票编号：{invoice}\n2025-03-14 开庭。\n"
+    src.write_text(text, encoding="utf-8")
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_text(encoding="utf-8") == text
+    residual = json.loads(out.with_suffix(".residual.json").read_text(encoding="utf-8"))
+    assert residual["status"] == "PASS"
+    assert residual["hits"] == []
+
+
+@pytest.mark.parametrize("number", ["010-\n12345678", "010-1234- \t\r\n\t5678"])
+def test_cli_redacts_landline_wrapped_after_hyphen(tmp_path: Path, number: str) -> None:
+    src = tmp_path / "phone.txt"
+    src.write_bytes(f"电话：{number}\r\n备注：保留。\r\n".encode("utf-8"))
+    out = tmp_path / "redacted.txt"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert out.read_bytes().decode("utf-8") == "电话：[电话]\r\n备注：保留。\r\n"
+    verified = _run_cli("verify", str(out), "--profile", "production", "--json", cwd=tmp_path)
+    assert verified.returncode == 0, verified.stderr + verified.stdout
+    report = json.loads(verified.stdout)
+    assert report["status"] == "PASS"
+    assert report["hits"] == []
+
+
+@pytest.mark.parametrize("suffix", [".txt", ".docx"])
+def test_cli_verify_fails_on_unredacted_wrapped_landline(tmp_path: Path, suffix: str) -> None:
+    src = tmp_path / f"phone{suffix}"
+    number = "010-\n12345678"
+    if suffix == ".txt":
+        src.write_bytes("电话：010-\r\n12345678".encode("utf-8"))
+    else:
+        doc = Document()
+        doc.add_paragraph("电话：010-")
+        doc.add_paragraph("12345678")
+        doc.save(src)
+
+    verified = _run_cli("verify", str(src), "--profile", "production", "--json", cwd=tmp_path)
+
+    assert verified.returncode == 2, verified.stderr + verified.stdout
+    report = json.loads(verified.stdout)
+    assert report["status"] == "FAIL"
+    assert [(hit["category"], hit["text"]) for hit in report["hits"]] == [("landline", number)]
 
 
 def test_cli_rejects_undecodable_text(tmp_path: Path) -> None:
@@ -354,6 +424,43 @@ def test_shipped_cli_docx_keeps_suffix_and_ai_content(tmp_path: Path) -> None:
         (tmp_path / "work" / f"{out.stem}.residual.json").read_text(encoding="utf-8")
     )
     assert residual["ok"] is True, residual
+
+
+@pytest.mark.parametrize("invoice", ["042", "042-"])
+def test_cli_landline_does_not_span_docx_table_rows(tmp_path: Path, invoice: str) -> None:
+    src = tmp_path / "schedule.docx"
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    rows = [("发票编号", invoice), ("2025-03-14", "开庭")]
+    for row, values in zip(table.rows, rows):
+        for cell, value in zip(row.cells, values):
+            cell.text = value
+    doc.save(src)
+    out = tmp_path / "redacted.docx"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert [tuple(cell.text for cell in row.cells) for row in Document(out).tables[0].rows] == rows
+    residual = json.loads(out.with_suffix(".residual.json").read_text(encoding="utf-8"))
+    assert residual["status"] == "PASS"
+    assert residual["hits"] == []
+
+
+def test_cli_redacts_landline_wrapped_within_docx_paragraph(tmp_path: Path) -> None:
+    src = tmp_path / "phone.docx"
+    doc = Document()
+    doc.add_paragraph("电话：010-\n12345678")
+    doc.save(src)
+    out = tmp_path / "redacted.docx"
+
+    proc = _run_cli("redact", str(src), "--profile", "production", "-o", str(out), cwd=tmp_path)
+
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert Document(out).paragraphs[0].text == "电话：[电话]\n"
+    residual = json.loads(out.with_suffix(".residual.json").read_text(encoding="utf-8"))
+    assert residual["status"] == "PASS"
+    assert residual["hits"] == []
 
 
 @pytest.mark.parametrize(
