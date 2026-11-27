@@ -24,6 +24,7 @@ _ORG_COUNTER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _INDEXED_ALIAS_CATEGORIES = STRUCTURAL_CATEGORIES | {
     "person", "organization", "address", "work_title", "account"
 }
+_ABBR_NOTE_PREFIX = "以下简称:"
 
 
 def _stable_alias(category: str, index: int, original: str = "") -> str:
@@ -46,6 +47,12 @@ def _stable_alias(category: str, index: int, original: str = "") -> str:
     if category == "case_number":
         return structural_placeholder("case_number", original or "（20XX）民初1号", index)
     return structural_placeholder(category, original, index)
+
+
+def _abbreviation_of(notes: str) -> str | None:
+    if notes.startswith(_ABBR_NOTE_PREFIX):
+        return notes[len(_ABBR_NOTE_PREFIX):].strip() or None
+    return None
 
 
 @dataclass
@@ -227,7 +234,6 @@ def collect_observations_from_file(
         redact_third_party=prof.redact_third_party if prof else True,
     )
     for ent in plan.entities:
-        abbr_of = ent.notes.split(":", 1)[1] if ent.notes.startswith("以下简称:") else None
         keep_fixed_repl = (
             (
                 ent.category not in _INDEXED_ALIAS_CATEGORIES
@@ -245,7 +251,7 @@ def collect_observations_from_file(
             source=ent.source,
             file_label=label,
             replacement=ent.replacement if keep_fixed_repl else None,
-            abbr_of=abbr_of,
+            abbr_of=_abbreviation_of(ent.notes),
         )
     return bucket
 
@@ -272,6 +278,7 @@ def collect_observations_from_ledgers(ledger_paths: Iterable[Path]) -> dict[str,
                 source=str(raw.get("source") or "ledger"),
                 file_label=label,
                 replacement=str(raw.get("replacement") or "").strip() or None,
+                abbr_of=_abbreviation_of(str(raw.get("notes") or "")),
             )
     return bucket
 
@@ -315,6 +322,19 @@ def merge_observation_maps(maps: Iterable[dict[str, Observation]]) -> dict[str, 
 
 def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAliasCollision]:
     conflicts: list[Conflict | PersonAliasCollision] = []
+    links: dict[str, str] = {}
+
+    def identity(original: str) -> str:
+        while original in links:
+            original = links[original]
+        return original
+
+    for obs in bucket.values():
+        if obs.abbr_of:
+            original, full = identity(obs.original), identity(obs.abbr_of)
+            if original != full:
+                links[original] = full
+
     person_aliases = {
         r for obs in bucket.values() if obs.category == "person" for r in obs.replacements_seen if r
     }
@@ -328,7 +348,7 @@ def find_conflicts(bucket: dict[str, Observation]) -> list[Conflict | PersonAlia
         for alias in replacements & person_aliases:
             by_alias.setdefault(alias, []).append(obs)
     for alias, observations in sorted(by_alias.items()):
-        if len(observations) > 1:
+        if len({identity(obs.original) for obs in observations}) > 1:
             conflicts.append(
                 PersonAliasCollision(
                     replacement=alias,
@@ -403,7 +423,11 @@ def build_unified_entities(
             "role": role if role != "structural" else "structural",
             "replacement": replacement,
             "source": "unified",
-            "notes": f"stable across {len(obs.files)} file(s); from {obs.source}",
+            "notes": (
+                f"{_ABBR_NOTE_PREFIX}{obs.abbr_of}"
+                if obs.abbr_of
+                else f"stable across {len(obs.files)} file(s); from {obs.source}"
+            ),
             "files": list(obs.files),
         }
         entities.append(row)

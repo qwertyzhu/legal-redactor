@@ -649,6 +649,31 @@ def test_batch_unify_person_alias_collision(tmp_path: Path, defendant_alias, exp
     ] == conflicts
 
 
+def test_unify_allows_linked_person_names_to_share_alias(tmp_path: Path):
+    from legal_redactor.cli import main
+
+    src = tmp_path / "in"
+    src.mkdir()
+    (src / "a.txt").write_text("原告：顾仿甲。\n", encoding="utf-8")
+    (src / "b.txt").write_text("原告：顾仿乙。\n", encoding="utf-8")
+    full = {"original": "顾仿甲", "category": "person", "role": "party", "replacement": "某甲"}
+    linked = dict(full, original="顾仿乙", notes="以下简称:顾仿甲")
+    entities_path = src / "entities.json"
+    entities_path.write_text(json.dumps({"entities": [full, linked]}), encoding="utf-8")
+
+    report_dir = tmp_path / "unify"
+    assert main(["unify", str(src), "--entities", str(entities_path), "-o", str(report_dir)]) == 0
+    report = json.loads((report_dir / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["ok"] and report["conflicts"] == []
+
+    out = tmp_path / "out"
+    assert main(["redact", str(src), "--mode", "ai", "--unify", "-o", str(out)]) == 0
+    assert (out / "a.redacted-ai.txt").read_text(encoding="utf-8") == "原告：某甲。\n"
+    assert (out / "b.redacted-ai.txt").read_text(encoding="utf-8") == "原告：某甲。\n"
+    report = json.loads((src / ".redactor" / "consistency.report.json").read_text(encoding="utf-8"))
+    assert report["ok"] and report["conflicts"] == []
+
+
 def test_verify_and_scan_tree(tmp_path: Path):
     from legal_redactor.pipeline import redact_tree, scan_tree, verify_tree
 
