@@ -68,9 +68,10 @@ def test_production_redacts_current_widget_value_when_appearance_is_stale(tmp_pa
         doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
         doc.save(src)
     with fitz.open(src) as original:
-        page = original[0]
-        assert next(page.widgets()).field_value == value
-        assert "Earlier evidence value" in page.get_text()
+        assert original.xref_get_key(widget_xref, "V") == ("string", value)
+        kind, appearance = original.xref_get_key(widget_xref, "AP/N")
+        assert kind == "xref"
+        assert b"Earlier evidence value" in original.xref_stream(int(appearance.split()[0]))
 
     result = redact_file(src, "production", out, work_dir=tmp_path)
 
