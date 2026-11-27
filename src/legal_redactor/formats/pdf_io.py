@@ -122,6 +122,29 @@ def extract_text_with_scan_pages(path: Path, *, flatten_form: bool = False) -> t
     return "\n".join(parts), scan_pages
 
 
+def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
+    if doc.xref_get_key(page_xref, "Resources")[0] != "null":
+        return
+    xref, seen = page_xref, {page_xref}
+    while True:
+        kind, parent = doc.xref_get_key(xref, "Parent")
+        if kind != "xref":
+            return
+        xref = int(parent.split()[0])
+        if xref in seen:
+            return
+        seen.add(xref)
+        kind, resources = doc.xref_get_key(xref, "Resources")
+        if kind in ("dict", "xref"):
+            if kind == "xref":
+                resources = doc.xref_object(int(resources.split()[0]))
+            doc.xref_set_key(page_xref, "Resources", resources)
+            kind, xobjects = doc.xref_get_key(page_xref, "Resources/XObject")
+            if kind == "xref":
+                doc.xref_set_key(page_xref, "Resources/XObject", doc.xref_object(int(xobjects.split()[0])))
+            return
+
+
 def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> dict[int, list[fitz.Rect]]:
     fields: dict[int, list[fitz.Rect]] = {}
     if not doc.is_form_pdf:
@@ -138,6 +161,8 @@ def _flatten_pdf_form(doc: fitz.Document, warnings: list[str] | None = None) -> 
             else:
                 flattened += 1
                 fields.setdefault(page.number, []).append(widget.rect)
+        if page.annot_xrefs():
+            _copy_inherited_page_resources(doc, page.xref)
     doc.bake(annots=False)
     if warnings is not None:
         if flattened:
