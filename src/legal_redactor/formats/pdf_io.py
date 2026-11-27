@@ -149,10 +149,10 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
 def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
     if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
         return False
-    value = (widget.field_value or "").split()
+    value = "".join((widget.field_value or "").split())
 
     def matches_value() -> bool:
-        return widget._annot.get_textpage().extractText().split() == value
+        return "".join(widget._annot.get_textpage().extractText().split()) == value
 
     try:
         if matches_value():

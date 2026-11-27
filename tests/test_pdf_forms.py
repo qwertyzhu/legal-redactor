@@ -130,6 +130,28 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
             assert spans[0]["size"] == pytest.approx(12)
 
 
+def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    lines = ["证据说明确认", "原件已经核验"]
+    doc, page, widget_xref = _form()
+    with doc:
+        font_xref = page.insert_font(fontname="china-s")
+        _, appearance = doc.xref_get_key(widget_xref, "AP/N")
+        appearance_xref = int(appearance.split()[0])
+        doc.xref_set_key(appearance_xref, "Resources", f"<</Font<</CJK {font_xref} 0 R>>>>")
+        first, second = (line.encode("utf-16-be").hex() for line in lines)
+        doc.update_stream(appearance_xref, f"BT /CJK 12 Tf 2 18 Td <{first}> Tj 0 -12 Td <{second}> Tj ET".encode())
+        doc.xref_set_key(widget_xref, "Ff", str(fitz.PDF_TX_FIELD_IS_MULTILINE))
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str("".join(lines)))
+        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str("/CJK 12 Tf 0 g"))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    text = redact_pdf(src, out, [], mode="production")
+
+    assert text.splitlines()[-2:] == lines
+
+
 @pytest.mark.parametrize(("key", "value"), [("T", "null"), ("Rect", "[24 220 24 220]")])
 def test_production_drops_malformed_widgets_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
