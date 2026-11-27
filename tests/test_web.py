@@ -95,7 +95,7 @@ def test_get_root(web_server):
         assert "未脱敏原文" in hint[1]
 
 
-@pytest.mark.parametrize("script_name", ["pdf_scan_web.cjs", "restore_web.cjs"])
+@pytest.mark.parametrize("script_name", ["pdf_scan_web.cjs", "restore_web.cjs", "static_publish_web.cjs"])
 def test_static_browser_scripts(script_name):
     node = shutil.which("node")
     if not node:

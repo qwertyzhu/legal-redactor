@@ -142,6 +142,18 @@ _ADDRESS = re.compile(
     rf"[一-鿿0-9A-Za-z（）()·\- ]{{0,30}}"
     rf")"
 )
+_ADDRESS_BEFORE_CLAUSE = re.compile(
+    r"[0-9] *(?:号(?:院|楼)?|单元|[幢栋座层室弄巷])"
+    r"(?= *(?:作为|用作|用于|属于|(?:为|系|是)(?:约定|指定|双方|当事人|原告|被告|本案|本合同|送达|通讯|通信|联系)))"
+)
+_ADDRESS_REFERENCE = re.compile(r"^(?:(?:为|是|系) *)?(?:同上|(?:上述|前述|以上)(?:住址|地址))")
+_ADDRESS_REFERENCE_UNIT = re.compile(r" *第?[0-9零〇一二两三四五六七八九十百千]+ *(?:号|楼|单元|[栋幢座层室])")
+_ADDRESS_COMPONENT = re.compile(
+    r"[一-鿿](?:省(?!略)|市(?!场)|区(?!域|分|别)|[县旗镇乡村]|自治州|盟)"
+    r"|[0-9零〇一二两三四五六七八九十百千] *(?:号|室|层|幢|栋|弄|巷|单元)"
+    r"|(?:大道|大街|(?<!道)路|街(?:道)?|巷|弄)(?= *(?:$|[0-9]|[东西南北]侧))"
+)
+_RESIDENCE_COMPONENT = re.compile(r"宿舍|小区$|住宅|公寓|家属[院楼]|[0-9] *(?:号[院楼]|单元|[栋幢座室])")
 
 _ORG_BLOCKLIST = frozenset(
     {
@@ -597,20 +609,37 @@ def detect_suspects(
             )
         )
 
-    for m in _ADDRESS.finditer(text):
-        val = m.group(1).strip().rstrip("，,。；;、")
+    address_pos = 0
+    scanned_until = 0
+    while m := _ADDRESS.search(text, address_pos):
+        captured = m.group(1)
+        start = m.end(1) - len(captured.lstrip())
+        val = captured.strip()
+        address_pos = m.end()
+        rescanned = m.start() < scanned_until
+        scanned_until = max(scanned_until, address_pos)
+        boundary = _ADDRESS_BEFORE_CLAUSE.search(val)
+        if boundary:
+            val = val[:boundary.end()]
+            address_pos = start + boundary.end()
+        if rescanned:
+            reference = _ADDRESS_REFERENCE.match(val)
+            component = _ADDRESS_REFERENCE_UNIT.match(val, reference.end()) if reference else _ADDRESS_COMPONENT.search(val)
+            if not component:
+                address_pos = start + (reference.end() if reference else 0)
+                continue
         if len(val) < 6 or val in skip:
             continue
         # Skip pure court venue phrases
-        if "法院" in val and len(val) < 12:
+        if len(val) < 12 and "法院" in val and not _RESIDENCE_COMPONENT.search(val):
             continue
         candidates.append(
             Suspect(
                 text=val,
                 category="address",
                 reason="address_label",
-                start=m.start(1),
-                end=m.start(1) + len(val),
+                start=start,
+                end=start + len(val),
                 role_hint="party",
             )
         )
@@ -637,6 +666,7 @@ def detect_suspects(
         is_party_field = s.reason in CONTRACT_PARTY_REASONS
         if (
             not is_party_field
+            and s.category != "address"
             and any(s.text in t for t in seen)
             and not (
                 s.reason in EXPLICIT_PERSON_REASONS
