@@ -26,7 +26,9 @@ _PDF_SEARCH_FLAGS = (
 _HIDDEN_WIDGET_FLAGS = (
     fitz.PDF_ANNOT_IS_INVISIBLE | fitz.PDF_ANNOT_IS_HIDDEN | fitz.PDF_ANNOT_IS_NO_VIEW
 )
-_WIDGET_FONTS = {"/Courier": "Cour", "/Helvetica": "Helv", "/Times-Roman": "TiRo", "/ZapfDingbats": "ZaDb"}
+_WIDGET_FONT_FAMILIES = {
+    "Courier": "Cour", "Helvetica": "Helv", "Times": "TiRo", "Symbol": "Helv", "ZapfDingbats": "ZaDb",
+}
 _TextStyle = tuple[float, float, tuple[float, float]]
 _CharIndex = tuple[str, list[fitz.Rect], list[int], list[tuple[float, float, int]], list[_TextStyle]]
 _TEXT_ROTATIONS = {(0.0, -1.0): 90, (-1.0, 0.0): 180, (0.0, 1.0): 270}
@@ -158,11 +160,14 @@ def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -
         if matches_value():
             return True
         font = widget.text_font
-        if font and font.lower() not in ("cour", "helv", "tiro", "zadb"):
-            _, base_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
-            if base_font not in _WIDGET_FONTS:
+        if font:
+            base_font = fitz.Base14_fontdict.get(font.lower())
+            if base_font is None:
+                _, resource_font = doc.xref_get_key(doc.pdf_catalog(), f"AcroForm/DR/Font/{font}/BaseFont")
+                base_font = fitz.Base14_fontdict.get(resource_font.lstrip("/").lower())
+            if base_font is None:
                 return False
-            widget.text_font = _WIDGET_FONTS[base_font]
+            widget.text_font = _WIDGET_FONT_FAMILIES[base_font.split("-", 1)[0]]
         widget.update()
         if matches_value():
             return True

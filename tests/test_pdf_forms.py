@@ -152,6 +152,27 @@ def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path) -> None:
     assert text.splitlines()[-2:] == lines
 
 
+@pytest.mark.parametrize(
+    ("alias", "fontname"), [("HeBo", "hebo"), ("EvidenceBold", "hebo"), ("TiRo", "tiro"), ("Cour", "cour")],
+)
+def test_production_regenerates_stale_widget_with_standard_font(tmp_path: Path, alias: str, fontname: str) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    value = "Current evidence value"
+    doc, page, widget_xref = _form()
+    with doc:
+        font_xref = page.insert_font(fontname=fontname)
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/DR", f"<</Font<< /{alias} {font_xref} 0 R>>>>")
+        doc.xref_set_key(widget_xref, "DA", fitz.get_pdf_str(f"/{alias} 12 Tf 0 g"))
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(value))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    text = redact_pdf(src, out, [], mode="production")
+
+    assert value in text
+    assert "Earlier evidence value" not in text
+
+
 @pytest.mark.parametrize(("key", "value"), [("T", "null"), ("Rect", "[24 220 24 220]")])
 def test_production_drops_malformed_widgets_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
