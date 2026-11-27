@@ -241,6 +241,7 @@ def _wrapped_rects(
     original: str,
     *,
     allow_single_line: bool = False,
+    require_local: bool = False,
 ) -> list[list[_NameRect]]:
     """Rects for occurrences of `original` split by whitespace or line breaks.
 
@@ -255,7 +256,9 @@ def _wrapped_rects(
     start = text.find(target)
     while start != -1:
         span_rows = rows[start : start + len(target)]
-        if not short_name or _short_name_is_local(rects, rows, line_info, start, start + len(target)):
+        if not (short_name or require_local) or _short_name_is_local(
+            rects, rows, line_info, start, start + len(target)
+        ):
             unique_rows = sorted(set(span_rows))
             if len(unique_rows) > 1 or allow_single_line or short_name:
                 match: list[_NameRect] = []
@@ -275,7 +278,9 @@ def _wrapped_rects(
 
 def _kept_name_rects(page: "fitz.Page", index: _CharIndex, name: str) -> list["fitz.Rect"]:
     return page.search_for(name) + [
-        slot.rect for match in _wrapped_rects(index, name, allow_single_line=True) for slot in match
+        slot.rect
+        for match in _wrapped_rects(index, name, allow_single_line=True, require_local=True)
+        for slot in match
     ]
 
 
