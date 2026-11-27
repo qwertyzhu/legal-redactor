@@ -612,7 +612,8 @@ def redact_pdf(
     kept_names = [o for o, r in mapping if o and o == r]
     doc = fitz.open(str(input_path))
     try:
-        form_fields = _flatten_pdf_form(doc, warn) if mode.lower().strip() == "production" else {}
+        production = mode.lower().strip() == "production"
+        form_fields = _flatten_pdf_form(doc, warn) if production else {}
         if not _has_text_layer(doc):
             raise ValueError(
                 "PDF has no extractable text layer (likely a scan). "
@@ -724,6 +725,8 @@ def redact_pdf(
         doc.set_metadata(meta)
         _scrub_struct_text(doc, mapping, warnings, image_categories)
         _clear_pdf_extras(doc, warnings, preserve_bookmarks=preserve_bookmarks)
+        if production:
+            doc.xref_set_key(doc.pdf_catalog(), "AcroForm", "null")
         strip_urls = bool(image_categories and "url" in image_categories)
         drop_http = (not preserve_hyperlinks) and (
             mode.lower().strip() != "production" or strip_urls

@@ -126,6 +126,32 @@ def test_production_redacts_email_wrapped_in_widget_appearance(tmp_path: Path) -
     assert verify_file(out, "production").status == "PASS"
 
 
+def test_production_removes_hidden_widget_parent_value(tmp_path: Path) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    phone = "13900001111"
+    doc, _, widget_xref = _form()
+    with doc:
+        parent_xref = doc.get_new_xref()
+        doc.update_object(parent_xref, f"<</FT/Tx /T (Parent field) /V ({phone}) /Kids [{widget_xref} 0 R]>>")
+        doc.xref_set_key(widget_xref, "Parent", f"{parent_xref} 0 R")
+        doc.xref_set_key(widget_xref, "V", "null")
+        doc.xref_set_key(widget_xref, "F", str(fitz.PDF_ANNOT_IS_HIDDEN))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/Fields", f"[{parent_xref} 0 R]")
+        doc.save(src)
+
+    warnings: list[str] = []
+    text = redact_pdf(src, out, [], mode="production", warnings=warnings)
+
+    assert "pdf: 1 hidden form field(s) removed" in warnings
+    assert phone not in text
+    assert verify_file(out, "production").status == "PASS"
+    with fitz.open(out) as output:
+        objects = {xref: output.xref_object(xref) for xref in range(1, output.xref_length())}
+        assert not {xref: obj for xref, obj in objects.items() if phone in obj}
+        assert output.xref_get_key(output.pdf_catalog(), "AcroForm")[0] == "null"
+    assert phone.encode() not in out.read_bytes()
+
+
 @pytest.mark.parametrize(("key", "value"), [("Rect", "[24 220 24 220]"), ("AP", "null")])
 def test_production_drops_unusable_widget_without_aborting_export(tmp_path: Path, key: str, value: str) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
