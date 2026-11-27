@@ -535,10 +535,15 @@ _PARTY_CONTRACT = f"乙方：{_NATURAL_PARTIES[0]}\n乙方签字: {_NATURAL_PART
 
 
 @pytest.mark.parametrize("part", ["customXml/item2.xml", "customXml/partyData.xml"])
-def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Path, part: str) -> None:
+@pytest.mark.parametrize(
+    "predicate", ["@p:id='{id_no}'", "@p:phone={phone}"], ids=["quoted-id", "bare-phone"]
+)
+def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(
+    tmp_path: Path, part: str, predicate: str
+) -> None:
     phone, id_no = "13700003333", "11010519900101123X"
     ns = {"p": "urn:example:party", "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    xpath = f"/p:party[@p:id='{id_no}']/p:id"
+    xpath = f"/p:party[{predicate.format(id_no=id_no, phone=phone)}]/p:id"
     sample = tmp_path / "sample.docx"
     docx_io.create_sample_docx(sample, f"电话：{phone}，身份证号：{id_no}。")
     sdt = (
@@ -555,7 +560,7 @@ def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Pat
             archive.writestr(item, data)
         archive.writestr(
             part,
-            f'<p:party xmlns:p="{ns["p"]}" p:id="{id_no}">'
+            f'<p:party xmlns:p="{ns["p"]}" p:id="{id_no}" p:phone="{phone}">'
             f"<p:contact>电话<p:sep/>{phone}</p:contact><p:id>{id_no}</p:id></p:party>",
         )
 
@@ -587,9 +592,10 @@ def test_shipped_cli_docx_redacts_content_control_bound_custom_xml(tmp_path: Pat
     assert restore.returncode == 0, restore.stderr + restore.stdout
     with zipfile.ZipFile(restored) as archive:
         data = archive.read(part).decode("utf-8")
-        document_xml = archive.read("word/document.xml").decode("utf-8")
+        document = etree.fromstring(archive.read("word/document.xml"))
     assert phone in data and id_no in data
-    assert xpath in document_xml
+    binding = document.find(".//w:dataBinding", ns).get(f"{{{ns['w']}}}xpath")
+    assert etree.fromstring(data.encode("utf-8")).getroottree().xpath(binding, namespaces=ns)
 
     leaked = tmp_path / "leaked.docx"
     with zipfile.ZipFile(out) as redacted_zip, zipfile.ZipFile(src) as source, zipfile.ZipFile(

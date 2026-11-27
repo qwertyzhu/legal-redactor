@@ -268,6 +268,32 @@ def _redact_paragraph(p: etree._Element, mapping: list[tuple[str, str]]) -> tupl
     return updated, False
 
 
+_XPATH_LITERAL_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+
+
+def _quote_mapped_tokens(segment: str, mapping: list[tuple[str, str]]) -> str:
+    parts: list[str] = []
+    last = 0
+    for start, end, replacement in find_mapping_spans(segment, mapping):
+        quote = '"' if "'" in replacement else "'"
+        parts.append(f"{segment[last:start]}{quote}{replacement}{quote}")
+        last = end
+    parts.append(segment[last:])
+    return "".join(parts)
+
+
+def _redact_xpath(xpath: str, mapping: list[tuple[str, str]]) -> str:
+    """Redact values in a binding XPath, quoting bare (numeric) ones so it still parses."""
+    parts: list[str] = []
+    last = 0
+    for literal in _XPATH_LITERAL_RE.finditer(xpath):
+        parts.append(_quote_mapped_tokens(xpath[last : literal.start()], mapping))
+        parts.append(apply_mapping_to_text(literal.group(), mapping))
+        last = literal.end()
+    parts.append(_quote_mapped_tokens(xpath[last:], mapping))
+    return "".join(parts)
+
+
 def _process_xml_bytes(
     name: str,
     data: bytes,
@@ -294,7 +320,7 @@ def _process_xml_bytes(
                 # Keep XPath predicates in step with the redacted custom XML values they select
                 for attr in list(el.attrib):
                     if _local(attr) == "xpath":
-                        el.attrib[attr] = apply_mapping_to_text(el.attrib[attr], mapping)
+                        el.attrib[attr] = _redact_xpath(el.attrib[attr], mapping)
 
     texts: list[str] = []
     chart_fields: list[str] = []
