@@ -592,7 +592,12 @@ def _overlaps_claimed(rect: "fitz.Rect", claimed: list["fitz.Rect"]) -> bool:
 
 
 def _replacement_font_resource(page: "fitz.Page", fontname: str) -> tuple[str, "fitz.Font | None"]:
-    used_names = {font[4] for font in page.get_fonts()}
+    fonts = page.get_fonts(full=True)
+    if fontname == "china-s":
+        existing = next((font for font in fonts if font[4] == fontname), None)
+        if existing is not None and existing[2:] == ("Type0", "Heiti", "china-s", "UniGB-UTF16-H", 0):
+            return fontname, None
+    used_names = {font[4] for font in fonts}
     for name in (("helv", "Helvetica") if fontname == "helv" else (fontname,)):
         if name not in used_names:
             return name, None

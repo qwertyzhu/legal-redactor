@@ -245,7 +245,8 @@ def test_cli_redacts_and_verifies_text_pdf_with_blank_page(tmp_path: Path) -> No
     assert "status: PASS" in verify.stdout
 
 
-def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path) -> None:
+@pytest.mark.parametrize("uses_cjk_font", [False, True])
+def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path, uses_cjk_font: bool) -> None:
     src = tmp_path / "form.pdf"
     description = "Payment receipt for bank transfer"
     status = "Original verified"
@@ -254,6 +255,8 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
     with fitz.open() as pdf:
         page = pdf.new_page()
         page.insert_text((36, 50), "Fictional evidence submission form", fontname="tiro")
+        if uses_cjk_font:
+            page.insert_text((36, 65), "证据", fontname="china-s")
         for index, (name, value) in enumerate(
             [("description", description), ("status", status), ("phone", MOBILE), ("hidden", hidden_value)]
         ):
@@ -284,6 +287,7 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
     assert redact.returncode == 0, redact.stderr + redact.stdout
     assert verify.returncode == 0, verify.stderr + verify.stdout
     assert "status: PASS" in verify.stdout
+    assert out.stat().st_size < src.stat().st_size + 16 * 1024
     with fitz.open(src) as source, fitz.open(out) as pdf:
         original_phone = next(
             span for block in source[0].get_text("dict")["blocks"] for line in block["lines"]
@@ -299,6 +303,8 @@ def test_cli_production_preserves_pdf_form_evidence_as_page_text(tmp_path: Path)
         assert description in text
         assert status in text
         assert hidden_value not in text
+        if uses_cjk_font:
+            assert "证据" in text
         assert pdf.xref_get_key(pdf.pdf_catalog(), "AcroForm")[0] == "null"
         placeholder = next(
             line["spans"] for block in page.get_text("rawdict")["blocks"] for line in block["lines"]
