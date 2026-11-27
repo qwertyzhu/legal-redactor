@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from itertools import count
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -174,6 +175,14 @@ def _clear_pdf_extras(doc: "fitz.Document", warnings: list[str] | None, *, prese
         warn.append(f"pdf: {len(names)} embedded attachment(s) removed")
 
 
+def _next_hidden_phone_token(category: str, taken: set[str], counter: count) -> str:
+    label = DEFAULT_PLACEHOLDERS[category][1:-1]
+    token = f"[PDF{label}{next(counter)}]"
+    while token in taken:
+        token = f"[PDF{label}{next(counter)}]"
+    return token
+
+
 def _scrub_struct_text(
     doc: "fitz.Document",
     mapping: list[tuple[str, str]],
@@ -202,18 +211,17 @@ def _scrub_struct_text(
         (xref, key, value, apply_mapping_to_text(value, struct_mapping))
         for xref, key, value in fields
     ]
-    hidden_phone_categories = (categories or set()) & _PHONE_CATEGORIES
+    scrub_categories = categories or set()
+    hidden_phone_categories = scrub_categories & _PHONE_CATEGORIES
     captured: dict[str, str] = {}
-    token_index = 0
-    fallback = (categories or set())
+    token_counter = count(1)
+    taken: set[str] = set()
     if capture_hidden_phones is not None:
-        fallback = fallback - _PHONE_CATEGORIES
-    taken = {
-        token
-        for _, _, original, mapped in mapped_fields
-        for text in (original, mapped)
-        for token in _HIDDEN_PHONE_TOKEN.findall(text)
-    } if capture_hidden_phones is not None and hidden_phone_categories else set()
+        scrub_categories = scrub_categories - _PHONE_CATEGORIES
+        if hidden_phone_categories:
+            for _, _, original, mapped in mapped_fields:
+                taken.update(_HIDDEN_PHONE_TOKEN.findall(original))
+                taken.update(_HIDDEN_PHONE_TOKEN.findall(mapped))
     scrubbed = 0
     for xref, key, value, redacted in mapped_fields:
         if capture_hidden_phones is not None and hidden_phone_categories:
@@ -222,17 +230,13 @@ def _scrub_struct_text(
                 if hit.category not in hidden_phone_categories or not hit.auto_replace:
                     continue
                 if hit.text not in captured:
-                    while True:
-                        token_index += 1
-                        token = f"[PDF{DEFAULT_PLACEHOLDERS[hit.category][1:-1]}{token_index}]"
-                        if token not in taken:
-                            break
+                    token = _next_hidden_phone_token(hit.category, taken, token_counter)
                     captured[hit.text] = token
                     capture_hidden_phones.structure[token] = hit.text
                 phones.append((hit.text, captured[hit.text]))
             redacted = apply_mapping_to_text(redacted, phones)
-        if fallback:
-            redacted = scrub_structural_text(redacted, categories=fallback)
+        if scrub_categories:
+            redacted = scrub_structural_text(redacted, categories=scrub_categories)
         if redacted != value:
             doc.xref_set_key(xref, key, fitz.get_pdf_str(redacted))
             scrubbed += 1
