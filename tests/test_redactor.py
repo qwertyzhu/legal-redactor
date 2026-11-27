@@ -614,6 +614,7 @@ def test_batch_unify_first_uses_stable_aliases(tmp_path: Path):
     ("defendant_alias", "expected_alias", "conflicts"),
     [
         pytest.param(None, "某乙", [], id="automatic-skips-reserved"),
+        pytest.param("", "某乙", [], id="blank-seed-skips-reserved"),
         pytest.param(
             "某甲",
             "某甲",

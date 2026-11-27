@@ -229,7 +229,10 @@ def collect_observations_from_file(
     for ent in plan.entities:
         abbr_of = ent.notes.split(":", 1)[1] if ent.notes.startswith("以下简称:") else None
         keep_fixed_repl = (
-            ent.source not in {"structural", "auto-confident"}
+            (
+                ent.category not in _INDEXED_ALIAS_CATEGORIES
+                and ent.source not in {"structural", "auto-confident"}
+            )
             or ent.category == "amount"
             or (ent.category == "address" and address_granularity == "district")
             or (ent.category == "person" and (alias_style == "court" or ent.role == "article8"))
