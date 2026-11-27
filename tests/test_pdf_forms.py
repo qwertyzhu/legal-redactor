@@ -130,6 +130,21 @@ def test_production_preserves_widget_font_and_fits_value(tmp_path: Path, stale_a
             assert spans[0]["size"] == pytest.approx(12)
 
 
+def test_production_regenerates_widget_with_stale_word_boundaries(tmp_path: Path) -> None:
+    src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
+    stale, current = "Exhibit AB 12", "Exhibit A B12"
+    doc, _, widget_xref = _form(stale)
+    with doc:
+        doc.xref_set_key(widget_xref, "V", fitz.get_pdf_str(current))
+        doc.xref_set_key(doc.pdf_catalog(), "AcroForm/NeedAppearances", "true")
+        doc.save(src)
+
+    text = redact_pdf(src, out, [], mode="production")
+
+    assert current in text
+    assert stale not in text
+
+
 def test_production_keeps_wrapped_cjk_widget_appearance(tmp_path: Path) -> None:
     src, out = tmp_path / "input.pdf", tmp_path / "redacted.pdf"
     lines = ["证据说明确认", "原件已经核验"]

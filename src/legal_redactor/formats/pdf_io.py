@@ -18,7 +18,9 @@ _SKIP_PDF_META_KEYS = frozenset({"format", "creationDate", "modDate", "encryptio
 _STRUCT_TEXT_KEYS = ("Alt", "ActualText", "E", "T")
 _INDIRECT_REF = re.compile(r"(\d+) \d+ R")
 
-_SHORT_CJK_NAME = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]{2,3}")
+_CJK_IDEOGRAPH = r"[\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U000323af]"
+_SHORT_CJK_NAME = re.compile(rf"{_CJK_IDEOGRAPH}{{2,3}}")
+_CJK_WRAP_SPACE = re.compile(rf"(?<={_CJK_IDEOGRAPH}) (?={_CJK_IDEOGRAPH})")
 _PDF_SEARCH_FLAGS = (
     fitz.TEXT_DEHYPHENATE | fitz.TEXT_PRESERVE_WHITESPACE
     | fitz.TEXT_PRESERVE_LIGATURES | fitz.TEXT_MEDIABOX_CLIP
@@ -151,10 +153,14 @@ def _copy_inherited_page_resources(doc: fitz.Document, page_xref: int) -> None:
 def _ensure_current_widget_appearance(doc: fitz.Document, widget: fitz.Widget) -> bool:
     if not widget.field_name or widget.rect.is_empty or widget.rect.is_infinite:
         return False
-    value = "".join((widget.field_value or "").split())
+
+    def normalize(text: str) -> str:
+        return _CJK_WRAP_SPACE.sub("", " ".join(text.split()))
+
+    value = normalize(widget.field_value or "")
 
     def matches_value() -> bool:
-        return "".join(widget._annot.get_textpage().extractText().split()) == value
+        return normalize(widget._annot.get_textpage().extractText()) == value
 
     try:
         if matches_value():
